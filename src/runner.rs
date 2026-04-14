@@ -79,7 +79,12 @@ where
         .filter(|value| *value > 0)
         .unwrap_or(1);
 
-    for event in walk_parallel(&plan.start_paths, plan.traversal, worker_count) {
+    for event in walk_parallel(
+        &plan.start_paths,
+        plan.follow_mode,
+        plan.traversal,
+        worker_count,
+    ) {
         match event {
             WalkEvent::Entry(entry) => {
                 if entry.depth >= plan.traversal.min_depth {

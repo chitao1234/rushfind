@@ -43,7 +43,7 @@ where
 
         emit(WalkEvent::Entry(entry.clone()))?;
 
-        if should_descend_ordered(&entry, follow_mode, options.max_depth) {
+        if should_descend_with_follow_mode(&entry, follow_mode, options.max_depth) {
             let read_dir = match fs::read_dir(&path) {
                 Ok(read_dir) => read_dir,
                 Err(error) => {
@@ -71,6 +71,7 @@ where
 
 pub fn walk_parallel(
     start_paths: &[PathBuf],
+    follow_mode: FollowMode,
     options: TraversalOptions,
     workers: usize,
 ) -> Receiver<WalkEvent> {
@@ -104,9 +105,7 @@ pub fn walk_parallel(
 
                         let _ = event_tx.send(WalkEvent::Entry(entry.clone()));
 
-                        if entry.physical_kind() == EntryKind::Directory
-                            && should_descend(depth, options.max_depth)
-                        {
+                        if should_descend_with_follow_mode(&entry, follow_mode, options.max_depth) {
                             match fs::read_dir(&path) {
                                 Ok(read_dir) => {
                                     for child in read_dir {
@@ -162,7 +161,7 @@ fn load_entry(
     ))
 }
 
-fn should_descend_ordered(
+fn should_descend_with_follow_mode(
     entry: &EntryContext,
     follow_mode: FollowMode,
     max_depth: Option<usize>,

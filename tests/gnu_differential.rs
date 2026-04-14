@@ -2,6 +2,7 @@ mod support;
 
 use assert_cmd::cargo::CommandCargoExt;
 use std::fs;
+use std::os::unix::fs as unix_fs;
 use std::process::Command;
 use support::{lines, path_arg};
 use tempfile::tempdir;
@@ -22,6 +23,8 @@ fn readme_documents_worker_selection_contract() {
 
     assert!(readme.contains("FINDOXIDE_WORKERS"));
     assert!(readme.contains("GNU `find` syntax"));
+    assert!(readme.contains("`-P`, `-H`, `-L`"));
+    assert!(readme.contains("`-xtype`"));
 }
 
 #[test]
@@ -95,6 +98,74 @@ fn parallel_mode_matches_gnu_find_as_a_set() {
         ")".into(),
         "-type".into(),
         "f".into(),
+    ];
+
+    let expected = Command::new("find").args(&args).output().unwrap();
+    let actual = Command::cargo_bin("findoxide")
+        .unwrap()
+        .env("FINDOXIDE_WORKERS", "4")
+        .args(&args)
+        .output()
+        .unwrap();
+
+    assert_eq!(actual.status.code(), expected.status.code());
+    assert_eq!(lines(&actual.stdout), lines(&expected.stdout));
+}
+
+#[test]
+fn ordered_follow_modes_match_gnu_find_exactly() {
+    let root = build_tree();
+    unix_fs::symlink(root.path().join("src"), root.path().join("src-link")).unwrap();
+
+    for args in [
+        vec![
+            "-P".into(),
+            path_arg(root.path()),
+            "-type".into(),
+            "l".into(),
+        ],
+        vec![
+            "-L".into(),
+            path_arg(root.path()),
+            "-xtype".into(),
+            "l".into(),
+        ],
+        vec![
+            "-H".into(),
+            path_arg(root.path().join("src-link").as_path()),
+            "-type".into(),
+            "d".into(),
+        ],
+    ] {
+        let expected = Command::new("find").args(&args).output().unwrap();
+        let actual = Command::cargo_bin("findoxide")
+            .unwrap()
+            .env("FINDOXIDE_WORKERS", "1")
+            .args(&args)
+            .output()
+            .unwrap();
+
+        assert_eq!(actual.status.code(), expected.status.code());
+        assert_eq!(actual.stdout, expected.stdout);
+        assert_eq!(actual.stderr, expected.stderr);
+    }
+}
+
+#[test]
+fn parallel_follow_modes_match_gnu_find_as_sets() {
+    let root = build_tree();
+    unix_fs::symlink(root.path().join("src"), root.path().join("src-link")).unwrap();
+
+    let args = vec![
+        "-L".into(),
+        path_arg(root.path()),
+        "(".into(),
+        "-name".into(),
+        "*.rs".into(),
+        "-o".into(),
+        "-xtype".into(),
+        "l".into(),
+        ")".into(),
     ];
 
     let expected = Command::new("find").args(&args).output().unwrap();
