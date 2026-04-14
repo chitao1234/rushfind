@@ -57,8 +57,8 @@ fn evaluate_predicate(
             *case_insensitive,
             true,
         ),
-        RuntimePredicate::Type(expected) => Ok(matches_type(*expected, entry.kind)),
-        RuntimePredicate::XType(expected) => Ok(matches_type(*expected, entry.kind)),
+        RuntimePredicate::Type(expected) => Ok(matches_type(*expected, entry.physical_kind())),
+        RuntimePredicate::XType(expected) => Ok(matches_type(*expected, entry.physical_kind())),
         RuntimePredicate::True => Ok(true),
         RuntimePredicate::False => Ok(false),
     }

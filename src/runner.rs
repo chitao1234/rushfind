@@ -37,22 +37,27 @@ where
     let mut sink = StdoutSink::new(stdout);
     let mut had_runtime_errors = false;
 
-    walk_ordered(&plan.start_paths, plan.traversal, |event| {
-        match event {
-            WalkEvent::Entry(entry) => {
-                if entry.depth >= plan.traversal.min_depth {
-                    let _ = evaluate(&plan.expr, &entry, &mut sink)?;
+    walk_ordered(
+        &plan.start_paths,
+        plan.follow_mode,
+        plan.traversal,
+        |event| {
+            match event {
+                WalkEvent::Entry(entry) => {
+                    if entry.depth >= plan.traversal.min_depth {
+                        let _ = evaluate(&plan.expr, &entry, &mut sink)?;
+                    }
+                }
+                WalkEvent::Error(error) => {
+                    had_runtime_errors = true;
+                    writeln!(stderr, "findoxide: {}", error).map_err(|io_error| {
+                        Diagnostic::new(format!("failed to write stderr: {io_error}"), 1)
+                    })?;
                 }
             }
-            WalkEvent::Error(error) => {
-                had_runtime_errors = true;
-                writeln!(stderr, "findoxide: {}", error).map_err(|io_error| {
-                    Diagnostic::new(format!("failed to write stderr: {io_error}"), 1)
-                })?;
-            }
-        }
-        Ok(())
-    })?;
+            Ok(())
+        },
+    )?;
 
     Ok(RunSummary { had_runtime_errors })
 }
