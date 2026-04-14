@@ -1,0 +1,37 @@
+use assert_cmd::cargo::CommandCargoExt;
+use std::fs;
+use std::process::Command;
+use tempfile::tempdir;
+
+#[test]
+fn ordered_single_worker_matches_gnu_find_for_supported_subset() {
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("src")).unwrap();
+    fs::write(root.path().join("src/lib.rs"), "pub fn lib() {}\n").unwrap();
+    fs::write(
+        root.path().join("src/main.c"),
+        "int main(void) { return 0; }\n",
+    )
+    .unwrap();
+    fs::write(root.path().join("README.md"), "# demo\n").unwrap();
+
+    let args = vec![
+        root.path().to_string_lossy().to_string(),
+        "-type".into(),
+        "f".into(),
+        "-name".into(),
+        "*.rs".into(),
+    ];
+
+    let expected = Command::new("find").args(&args).output().unwrap();
+    let actual = Command::cargo_bin("findoxide")
+        .unwrap()
+        .env("FINDOXIDE_WORKERS", "1")
+        .args(&args)
+        .output()
+        .unwrap();
+
+    assert_eq!(actual.status.code(), expected.status.code());
+    assert_eq!(actual.stdout, expected.stdout);
+    assert_eq!(actual.stderr, expected.stderr);
+}
