@@ -1,19 +1,33 @@
 use crate::args::{Arg, ArgCursor};
-use crate::ast::{Action, CommandAst, Expr, FileTypeFilter, Predicate};
+use crate::ast::{Action, CommandAst, Expr, FileTypeFilter, GlobalOption, Predicate};
 use crate::diagnostics::Diagnostic;
+use crate::follow::FollowMode;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
 pub fn parse_command(argv: &[OsString]) -> Result<CommandAst, Diagnostic> {
-    let split_index = argv
+    let mut global_options = Vec::new();
+    let mut index = 0;
+
+    while let Some(option) = argv
+        .get(index)
+        .map(|arg| parse_global_option(Arg::new(arg.as_os_str())))
+        .flatten()
+    {
+        global_options.push(option);
+        index += 1;
+    }
+
+    let path_count = argv[index..]
         .iter()
         .position(|arg| is_expression_start(Arg::new(arg.as_os_str())))
-        .unwrap_or(argv.len());
+        .unwrap_or(argv[index..].len());
+    let split_index = index + path_count;
 
-    let start_paths = if split_index == 0 {
+    let start_paths = if path_count == 0 {
         vec![PathBuf::from(".")]
     } else {
-        argv[..split_index].iter().map(PathBuf::from).collect()
+        argv[index..split_index].iter().map(PathBuf::from).collect()
     };
 
     let expr = if split_index == argv.len() {
@@ -25,7 +39,11 @@ pub fn parse_command(argv: &[OsString]) -> Result<CommandAst, Diagnostic> {
         expr
     };
 
-    Ok(CommandAst { start_paths, expr })
+    Ok(CommandAst {
+        start_paths,
+        global_options,
+        expr,
+    })
 }
 
 fn is_expression_start(arg: Arg<'_>) -> bool {
@@ -38,6 +56,18 @@ fn is_expression_start(arg: Arg<'_>) -> bool {
         || arg.matches("-or")
         || arg.matches("-not")
         || arg.starts_with_dash()
+}
+
+fn parse_global_option(arg: Arg<'_>) -> Option<GlobalOption> {
+    if arg.matches("-P") {
+        Some(GlobalOption::Follow(FollowMode::Physical))
+    } else if arg.matches("-H") {
+        Some(GlobalOption::Follow(FollowMode::CommandLineOnly))
+    } else if arg.matches("-L") {
+        Some(GlobalOption::Follow(FollowMode::Logical))
+    } else {
+        None
+    }
 }
 
 struct Parser<'a> {
@@ -171,6 +201,8 @@ impl<'a> Parser<'a> {
             })
         } else if token.matches("-type") {
             Expr::Predicate(Predicate::Type(self.take_type_filter()?))
+        } else if token.matches("-xtype") {
+            Expr::Predicate(Predicate::XType(self.take_type_filter_for("-xtype")?))
         } else if token.matches("-true") {
             Expr::Predicate(Predicate::True)
         } else if token.matches("-false") {
@@ -216,7 +248,11 @@ impl<'a> Parser<'a> {
     }
 
     fn take_type_filter(&mut self) -> Result<FileTypeFilter, Diagnostic> {
-        let value = self.take_os_string("-type")?;
+        self.take_type_filter_for("-type")
+    }
+
+    fn take_type_filter_for(&mut self, flag: &str) -> Result<FileTypeFilter, Diagnostic> {
+        let value = self.take_os_string(flag)?;
         match value.as_os_str().as_encoded_bytes() {
             b"f" => Ok(FileTypeFilter::File),
             b"d" => Ok(FileTypeFilter::Directory),
@@ -226,7 +262,7 @@ impl<'a> Parser<'a> {
             b"p" => Ok(FileTypeFilter::Fifo),
             b"s" => Ok(FileTypeFilter::Socket),
             _ => Err(Diagnostic::parse(format!(
-                "unsupported -type value `{}`",
+                "unsupported {flag} value `{}`",
                 value.to_string_lossy()
             ))),
         }

@@ -54,7 +54,9 @@ pub enum OutputAction {
 }
 
 pub fn plan_command(ast: CommandAst, workers: usize) -> Result<ExecutionPlan, Diagnostic> {
-    let CommandAst { start_paths, expr } = ast;
+    let CommandAst {
+        start_paths, expr, ..
+    } = ast;
     let mut traversal = TraversalOptions {
         min_depth: 0,
         max_depth: None,
@@ -135,6 +137,9 @@ fn lower_predicate(
             case_insensitive,
         })),
         Predicate::Type(kind) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Type(kind))),
+        Predicate::XType(_) => Err(Diagnostic::unsupported(
+            "unsupported in read-only v0: -xtype planning not implemented yet",
+        )),
         Predicate::True => Ok(RuntimeExpr::Predicate(RuntimePredicate::True)),
         Predicate::False => Ok(RuntimeExpr::Predicate(RuntimePredicate::False)),
     }

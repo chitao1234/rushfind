@@ -13,6 +13,7 @@ fn parses_implicit_and_chain() {
         ast,
         CommandAst {
             start_paths: vec![PathBuf::from(".")],
+            global_options: vec![],
             expr: Expr::And(vec![
                 Expr::Predicate(Predicate::MaxDepth(2)),
                 Expr::Predicate(Predicate::Name {
