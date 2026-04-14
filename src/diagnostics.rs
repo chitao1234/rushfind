@@ -13,6 +13,14 @@ impl Diagnostic {
             exit_code,
         }
     }
+
+    pub fn parse(message: impl Into<String>) -> Self {
+        Self::new(message, 1)
+    }
+
+    pub fn unsupported(message: impl Into<String>) -> Self {
+        Self::new(message, 1)
+    }
 }
 
 impl fmt::Display for Diagnostic {

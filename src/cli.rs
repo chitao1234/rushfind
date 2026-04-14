@@ -24,7 +24,7 @@ where
             }
         }
         Err(error) => {
-            eprintln!("findoxide: {}", error.message);
+            eprintln!("findoxide: {}", error);
             error.exit_code
         }
     }
