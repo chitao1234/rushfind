@@ -1,5 +1,9 @@
 pub mod ast;
 pub mod cli;
 pub mod diagnostics;
+pub mod entry;
+pub mod eval;
+pub mod output;
 pub mod parser;
+pub mod pattern;
 pub mod planner;
