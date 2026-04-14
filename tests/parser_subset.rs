@@ -1,11 +1,9 @@
+mod support;
+
 use findoxide::ast::{Action, CommandAst, Expr, FileTypeFilter, Predicate};
 use findoxide::parser::parse_command;
-use std::ffi::OsString;
 use std::path::PathBuf;
-
-fn argv(parts: &[&str]) -> Vec<OsString> {
-    parts.iter().map(OsString::from).collect()
-}
+use support::argv;
 
 #[test]
 fn parses_implicit_and_chain() {
@@ -30,16 +28,7 @@ fn parses_implicit_and_chain() {
 #[test]
 fn parses_parenthesized_or_expression() {
     let ast = parse_command(&argv(&[
-        ".",
-        "(",
-        "-name",
-        "*.rs",
-        "-o",
-        "-name",
-        "*.md",
-        ")",
-        "-type",
-        "f",
+        ".", "(", "-name", "*.rs", "-o", "-name", "*.md", ")", "-type", "f",
     ]))
     .unwrap();
 

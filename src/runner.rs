@@ -2,7 +2,7 @@ use crate::diagnostics::Diagnostic;
 use crate::eval::evaluate;
 use crate::output::StdoutSink;
 use crate::planner::{ExecutionMode, ExecutionPlan};
-use crate::walker::{walk_ordered, walk_parallel, WalkEvent};
+use crate::walker::{WalkEvent, walk_ordered, walk_parallel};
 use std::io::Write;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]

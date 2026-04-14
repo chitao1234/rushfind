@@ -1,16 +1,18 @@
 use crate::diagnostics::Diagnostic;
 use std::ffi::CString;
+use std::ffi::OsStr;
+
+#[cfg(unix)]
+use std::os::unix::ffi::OsStrExt;
 
 pub fn matches_pattern(
-    pattern: &str,
-    candidate: &str,
+    pattern: &OsStr,
+    candidate: &OsStr,
     case_insensitive: bool,
     pathname: bool,
 ) -> Result<bool, Diagnostic> {
-    let pattern = CString::new(pattern)
-        .map_err(|_| Diagnostic::new("pattern contains an interior NUL byte", 1))?;
-    let candidate = CString::new(candidate)
-        .map_err(|_| Diagnostic::new("candidate contains an interior NUL byte", 1))?;
+    let pattern = cstring_from_os(pattern, "pattern")?;
+    let candidate = cstring_from_os(candidate, "candidate")?;
 
     let mut flags = 0;
     if pathname {
@@ -24,4 +26,16 @@ pub fn matches_pattern(
 
     let result = unsafe { libc::fnmatch(pattern.as_ptr(), candidate.as_ptr(), flags) };
     Ok(result == 0)
+}
+
+#[cfg(unix)]
+fn cstring_from_os(value: &OsStr, label: &str) -> Result<CString, Diagnostic> {
+    CString::new(value.as_bytes())
+        .map_err(|_| Diagnostic::new(format!("{label} contains an interior NUL byte"), 1))
+}
+
+#[cfg(not(unix))]
+fn cstring_from_os(value: &OsStr, label: &str) -> Result<CString, Diagnostic> {
+    CString::new(value.to_string_lossy().into_owned())
+        .map_err(|_| Diagnostic::new(format!("{label} contains an interior NUL byte"), 1))
 }

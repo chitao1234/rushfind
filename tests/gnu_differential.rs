@@ -1,7 +1,9 @@
+mod support;
+
 use assert_cmd::cargo::CommandCargoExt;
-use std::collections::BTreeSet;
 use std::fs;
 use std::process::Command;
+use support::{lines, path_arg};
 use tempfile::tempdir;
 
 fn build_tree() -> tempfile::TempDir {
@@ -12,14 +14,6 @@ fn build_tree() -> tempfile::TempDir {
     fs::write(root.path().join("src/main.rs"), "fn main() {}\n").unwrap();
     fs::write(root.path().join("docs/spec.md"), "# spec\n").unwrap();
     root
-}
-
-fn lines(bytes: &[u8]) -> BTreeSet<String> {
-    String::from_utf8(bytes.to_vec())
-        .unwrap()
-        .lines()
-        .map(|line| line.to_string())
-        .collect()
 }
 
 #[test]
@@ -41,9 +35,11 @@ fn reports_unsupported_exec_during_planning() {
         .unwrap();
 
     assert_ne!(output.status.code(), Some(0));
-    assert!(String::from_utf8(output.stderr)
-        .unwrap()
-        .contains("unsupported in read-only v0"));
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("unsupported in read-only v0")
+    );
 }
 
 #[test]
@@ -55,16 +51,18 @@ fn reports_parse_errors_nonzero() {
         .unwrap();
 
     assert_ne!(output.status.code(), Some(0));
-    assert!(String::from_utf8(output.stderr)
-        .unwrap()
-        .contains("expected `)`"));
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("expected `)`")
+    );
 }
 
 #[test]
 fn ordered_mode_matches_gnu_find_exactly() {
     let root = build_tree();
     let args = vec![
-        root.path().to_string_lossy().to_string(),
+        path_arg(root.path()),
         "-type".into(),
         "f".into(),
         "-name".into(),
@@ -87,7 +85,7 @@ fn ordered_mode_matches_gnu_find_exactly() {
 fn parallel_mode_matches_gnu_find_as_a_set() {
     let root = build_tree();
     let args = vec![
-        root.path().to_string_lossy().to_string(),
+        path_arg(root.path()),
         "(".into(),
         "-name".into(),
         "*.rs".into(),

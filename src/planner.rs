@@ -1,5 +1,6 @@
 use crate::ast::{Action, CommandAst, Expr, FileTypeFilter, Predicate};
 use crate::diagnostics::Diagnostic;
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,11 +35,11 @@ pub enum RuntimeExpr {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimePredicate {
     Name {
-        pattern: String,
+        pattern: OsString,
         case_insensitive: bool,
     },
     Path {
-        pattern: String,
+        pattern: OsString,
         case_insensitive: bool,
     },
     Type(FileTypeFilter),
@@ -52,13 +53,14 @@ pub enum OutputAction {
     Print0,
 }
 
-pub fn plan_command(ast: &CommandAst, workers: usize) -> Result<ExecutionPlan, Diagnostic> {
+pub fn plan_command(ast: CommandAst, workers: usize) -> Result<ExecutionPlan, Diagnostic> {
+    let CommandAst { start_paths, expr } = ast;
     let mut traversal = TraversalOptions {
         min_depth: 0,
         max_depth: None,
     };
     let mut saw_output = false;
-    let lowered = lower_expr(&ast.expr, &mut traversal, &mut saw_output)?;
+    let lowered = lower_expr(expr, &mut traversal, &mut saw_output)?;
 
     let expr = if saw_output {
         lowered
@@ -73,7 +75,7 @@ pub fn plan_command(ast: &CommandAst, workers: usize) -> Result<ExecutionPlan, D
     };
 
     Ok(ExecutionPlan {
-        start_paths: ast.start_paths.clone(),
+        start_paths,
         traversal,
         expr,
         mode,
@@ -81,7 +83,7 @@ pub fn plan_command(ast: &CommandAst, workers: usize) -> Result<ExecutionPlan, D
 }
 
 fn lower_expr(
-    expr: &Expr,
+    expr: Expr,
     traversal: &mut TraversalOptions,
     saw_output: &mut bool,
 ) -> Result<RuntimeExpr, Diagnostic> {
@@ -94,11 +96,11 @@ fn lower_expr(
             Ok(RuntimeExpr::And(lowered))
         }
         Expr::Or(left, right) => Ok(RuntimeExpr::Or(
-            Box::new(lower_expr(left, traversal, saw_output)?),
-            Box::new(lower_expr(right, traversal, saw_output)?),
+            Box::new(lower_expr(*left, traversal, saw_output)?),
+            Box::new(lower_expr(*right, traversal, saw_output)?),
         )),
         Expr::Not(inner) => Ok(RuntimeExpr::Not(Box::new(lower_expr(
-            inner, traversal, saw_output,
+            *inner, traversal, saw_output,
         )?))),
         Expr::Predicate(predicate) => lower_predicate(predicate, traversal),
         Expr::Action(action) => lower_action(action, saw_output),
@@ -106,39 +108,39 @@ fn lower_expr(
 }
 
 fn lower_predicate(
-    predicate: &Predicate,
+    predicate: Predicate,
     traversal: &mut TraversalOptions,
 ) -> Result<RuntimeExpr, Diagnostic> {
     match predicate {
         Predicate::MaxDepth(value) => {
-            traversal.max_depth = Some(*value as usize);
+            traversal.max_depth = Some(value as usize);
             Ok(RuntimeExpr::Predicate(RuntimePredicate::True))
         }
         Predicate::MinDepth(value) => {
-            traversal.min_depth = *value as usize;
+            traversal.min_depth = value as usize;
             Ok(RuntimeExpr::Predicate(RuntimePredicate::True))
         }
         Predicate::Name {
             pattern,
             case_insensitive,
         } => Ok(RuntimeExpr::Predicate(RuntimePredicate::Name {
-            pattern: pattern.clone(),
-            case_insensitive: *case_insensitive,
+            pattern,
+            case_insensitive,
         })),
         Predicate::Path {
             pattern,
             case_insensitive,
         } => Ok(RuntimeExpr::Predicate(RuntimePredicate::Path {
-            pattern: pattern.clone(),
-            case_insensitive: *case_insensitive,
+            pattern,
+            case_insensitive,
         })),
-        Predicate::Type(kind) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Type(*kind))),
+        Predicate::Type(kind) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Type(kind))),
         Predicate::True => Ok(RuntimeExpr::Predicate(RuntimePredicate::True)),
         Predicate::False => Ok(RuntimeExpr::Predicate(RuntimePredicate::False)),
     }
 }
 
-fn lower_action(action: &Action, saw_output: &mut bool) -> Result<RuntimeExpr, Diagnostic> {
+fn lower_action(action: Action, saw_output: &mut bool) -> Result<RuntimeExpr, Diagnostic> {
     match action {
         Action::Print => {
             *saw_output = true;
@@ -148,13 +150,18 @@ fn lower_action(action: &Action, saw_output: &mut bool) -> Result<RuntimeExpr, D
             *saw_output = true;
             Ok(RuntimeExpr::Action(OutputAction::Print0))
         }
-        Action::Exec { .. } => Err(Diagnostic::new("unsupported in read-only v0: -exec", 1)),
-        Action::ExecDir { .. } => Err(Diagnostic::new(
-            "unsupported in read-only v0: -execdir",
-            1,
+        Action::Exec { .. } => Err(Diagnostic::unsupported(
+            "unsupported in read-only v0: -exec",
         )),
-        Action::Ok { .. } => Err(Diagnostic::new("unsupported in read-only v0: -ok", 1)),
-        Action::OkDir { .. } => Err(Diagnostic::new("unsupported in read-only v0: -okdir", 1)),
-        Action::Delete => Err(Diagnostic::new("unsupported in read-only v0: -delete", 1)),
+        Action::ExecDir { .. } => Err(Diagnostic::unsupported(
+            "unsupported in read-only v0: -execdir",
+        )),
+        Action::Ok { .. } => Err(Diagnostic::unsupported("unsupported in read-only v0: -ok")),
+        Action::OkDir { .. } => Err(Diagnostic::unsupported(
+            "unsupported in read-only v0: -okdir",
+        )),
+        Action::Delete => Err(Diagnostic::unsupported(
+            "unsupported in read-only v0: -delete",
+        )),
     }
 }

@@ -4,6 +4,7 @@ use crate::entry::{EntryContext, EntryKind};
 use crate::output::OutputSink;
 use crate::pattern::matches_pattern;
 use crate::planner::{RuntimeExpr, RuntimePredicate};
+use std::ffi::OsStr;
 
 pub fn evaluate(
     expr: &RuntimeExpr,
@@ -44,20 +45,18 @@ fn evaluate_predicate(
             pattern,
             case_insensitive,
         } => {
-            let basename = entry
-                .path
-                .file_name()
-                .and_then(|value| value.to_str())
-                .unwrap_or("");
-            matches_pattern(pattern, basename, *case_insensitive, false)
+            let basename = entry.path.file_name().unwrap_or_else(|| OsStr::new(""));
+            matches_pattern(pattern.as_os_str(), basename, *case_insensitive, false)
         }
         RuntimePredicate::Path {
             pattern,
             case_insensitive,
-        } => {
-            let candidate = entry.path.to_string_lossy();
-            matches_pattern(pattern, &candidate, *case_insensitive, true)
-        }
+        } => matches_pattern(
+            pattern.as_os_str(),
+            entry.path.as_os_str(),
+            *case_insensitive,
+            true,
+        ),
         RuntimePredicate::Type(expected) => Ok(matches_type(*expected, entry.kind)),
         RuntimePredicate::True => Ok(true),
         RuntimePredicate::False => Ok(false),

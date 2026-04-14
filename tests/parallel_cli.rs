@@ -1,16 +1,10 @@
+mod support;
+
 use assert_cmd::cargo::CommandCargoExt;
-use std::collections::BTreeSet;
 use std::fs;
 use std::process::Command;
+use support::{lines, path_arg};
 use tempfile::tempdir;
-
-fn lines(bytes: &[u8]) -> BTreeSet<String> {
-    String::from_utf8(bytes.to_vec())
-        .unwrap()
-        .lines()
-        .map(|line| line.to_string())
-        .collect()
-}
 
 #[test]
 fn parallel_mode_matches_gnu_find_as_an_unordered_set() {
@@ -23,7 +17,7 @@ fn parallel_mode_matches_gnu_find_as_an_unordered_set() {
     fs::write(root.path().join("README.md"), "# demo\n").unwrap();
 
     let args = vec![
-        root.path().to_string_lossy().to_string(),
+        path_arg(root.path()),
         "-type".into(),
         "f".into(),
         "(".into(),

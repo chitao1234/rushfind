@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,11 +21,11 @@ pub enum Predicate {
     MaxDepth(u32),
     MinDepth(u32),
     Name {
-        pattern: String,
+        pattern: OsString,
         case_insensitive: bool,
     },
     Path {
-        pattern: String,
+        pattern: OsString,
         case_insensitive: bool,
     },
     Type(FileTypeFilter),
@@ -36,20 +37,10 @@ pub enum Predicate {
 pub enum Action {
     Print,
     Print0,
-    Exec {
-        argv: Vec<String>,
-        batch: bool,
-    },
-    ExecDir {
-        argv: Vec<String>,
-        batch: bool,
-    },
-    Ok {
-        argv: Vec<String>,
-    },
-    OkDir {
-        argv: Vec<String>,
-    },
+    Exec { argv: Vec<OsString>, batch: bool },
+    ExecDir { argv: Vec<OsString>, batch: bool },
+    Ok { argv: Vec<OsString> },
+    OkDir { argv: Vec<OsString> },
     Delete,
 }
 

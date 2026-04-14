@@ -13,7 +13,7 @@ where
     let mut stderr = std::io::stderr();
 
     match parse_command(&args)
-        .and_then(|ast| plan_command(&ast, workers))
+        .and_then(|ast| plan_command(ast, workers))
         .and_then(|plan| run_plan(&plan, &mut stdout, &mut stderr))
     {
         Ok(summary) => {

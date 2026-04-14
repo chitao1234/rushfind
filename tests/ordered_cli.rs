@@ -1,6 +1,9 @@
+mod support;
+
 use assert_cmd::cargo::CommandCargoExt;
 use std::fs;
 use std::process::Command;
+use support::path_arg;
 use tempfile::tempdir;
 
 #[test]
@@ -16,7 +19,7 @@ fn ordered_single_worker_matches_gnu_find_for_supported_subset() {
     fs::write(root.path().join("README.md"), "# demo\n").unwrap();
 
     let args = vec![
-        root.path().to_string_lossy().to_string(),
+        path_arg(root.path()),
         "-type".into(),
         "f".into(),
         "-name".into(),
