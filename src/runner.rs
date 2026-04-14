@@ -45,7 +45,7 @@ where
             match event {
                 WalkEvent::Entry(entry) => {
                     if entry.depth >= plan.traversal.min_depth {
-                        let _ = evaluate(&plan.expr, &entry, &mut sink)?;
+                        let _ = evaluate(&plan.expr, &entry, plan.follow_mode, &mut sink)?;
                     }
                 }
                 WalkEvent::Error(error) => {
@@ -83,7 +83,7 @@ where
         match event {
             WalkEvent::Entry(entry) => {
                 if entry.depth >= plan.traversal.min_depth {
-                    let _ = evaluate(&plan.expr, &entry, &mut sink)?;
+                    let _ = evaluate(&plan.expr, &entry, plan.follow_mode, &mut sink)?;
                 }
             }
             WalkEvent::Error(error) => {

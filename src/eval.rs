@@ -1,6 +1,7 @@
 use crate::ast::FileTypeFilter;
 use crate::diagnostics::Diagnostic;
 use crate::entry::{EntryContext, EntryKind};
+use crate::follow::FollowMode;
 use crate::output::OutputSink;
 use crate::pattern::matches_pattern;
 use crate::planner::{RuntimeExpr, RuntimePredicate};
@@ -9,26 +10,27 @@ use std::ffi::OsStr;
 pub fn evaluate(
     expr: &RuntimeExpr,
     entry: &EntryContext,
+    follow_mode: FollowMode,
     sink: &mut dyn OutputSink,
 ) -> Result<bool, Diagnostic> {
     match expr {
         RuntimeExpr::And(items) => {
             for item in items {
-                if !evaluate(item, entry, sink)? {
+                if !evaluate(item, entry, follow_mode, sink)? {
                     return Ok(false);
                 }
             }
             Ok(true)
         }
         RuntimeExpr::Or(left, right) => {
-            if evaluate(left, entry, sink)? {
+            if evaluate(left, entry, follow_mode, sink)? {
                 Ok(true)
             } else {
-                evaluate(right, entry, sink)
+                evaluate(right, entry, follow_mode, sink)
             }
         }
-        RuntimeExpr::Not(inner) => Ok(!evaluate(inner, entry, sink)?),
-        RuntimeExpr::Predicate(predicate) => evaluate_predicate(predicate, entry),
+        RuntimeExpr::Not(inner) => Ok(!evaluate(inner, entry, follow_mode, sink)?),
+        RuntimeExpr::Predicate(predicate) => evaluate_predicate(predicate, entry, follow_mode),
         RuntimeExpr::Action(action) => {
             sink.emit(*action, &entry.path)?;
             Ok(true)
@@ -39,6 +41,7 @@ pub fn evaluate(
 fn evaluate_predicate(
     predicate: &RuntimePredicate,
     entry: &EntryContext,
+    follow_mode: FollowMode,
 ) -> Result<bool, Diagnostic> {
     match predicate {
         RuntimePredicate::Name {
@@ -57,8 +60,12 @@ fn evaluate_predicate(
             *case_insensitive,
             true,
         ),
-        RuntimePredicate::Type(expected) => Ok(matches_type(*expected, entry.physical_kind())),
-        RuntimePredicate::XType(expected) => Ok(matches_type(*expected, entry.physical_kind())),
+        RuntimePredicate::Type(expected) => {
+            Ok(matches_type(*expected, entry.active_kind(follow_mode)))
+        }
+        RuntimePredicate::XType(expected) => {
+            Ok(matches_type(*expected, entry.xtype_kind(follow_mode)))
+        }
         RuntimePredicate::True => Ok(true),
         RuntimePredicate::False => Ok(false),
     }

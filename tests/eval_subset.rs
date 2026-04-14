@@ -1,5 +1,6 @@
 use findoxide::entry::EntryContext;
 use findoxide::eval::evaluate;
+use findoxide::follow::FollowMode;
 use findoxide::output::RecordingSink;
 use findoxide::planner::{OutputAction, RuntimeExpr, RuntimePredicate};
 use std::fs;
@@ -22,7 +23,7 @@ fn matching_name_predicate_prints_the_entry_path() {
     ]);
     let mut sink = RecordingSink::default();
 
-    let matched = evaluate(&expr, &entry, &mut sink).unwrap();
+    let matched = evaluate(&expr, &entry, FollowMode::Physical, &mut sink).unwrap();
 
     assert!(matched);
     assert_eq!(sink.into_utf8(), format!("{}\n", path.display()));
@@ -40,7 +41,7 @@ fn iname_predicate_is_case_insensitive() {
     });
     let mut sink = RecordingSink::default();
 
-    assert!(evaluate(&expr, &entry, &mut sink).unwrap());
+    assert!(evaluate(&expr, &entry, FollowMode::Physical, &mut sink).unwrap());
 }
 
 #[test]
@@ -54,7 +55,7 @@ fn type_predicate_filters_by_entry_kind() {
     ));
     let mut sink = RecordingSink::default();
 
-    assert!(evaluate(&expr, &entry, &mut sink).unwrap());
+    assert!(evaluate(&expr, &entry, FollowMode::Physical, &mut sink).unwrap());
 }
 
 fn entry_for(path: &Path, depth: usize) -> EntryContext {
