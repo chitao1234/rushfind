@@ -2,7 +2,7 @@ use crate::diagnostics::Diagnostic;
 use crate::eval::evaluate;
 use crate::output::StdoutSink;
 use crate::planner::{ExecutionMode, ExecutionPlan};
-use crate::walker::{walk_ordered, WalkEvent};
+use crate::walker::{walk_ordered, walk_parallel, WalkEvent};
 use std::io::Write;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -21,13 +21,7 @@ where
 {
     match plan.mode {
         ExecutionMode::OrderedSingle => run_ordered(plan, stdout, stderr),
-        ExecutionMode::ParallelRelaxed => {
-            writeln!(stderr, "findoxide: parallel execution not implemented yet")
-                .map_err(|error| Diagnostic::new(format!("failed to write stderr: {error}"), 1))?;
-            Ok(RunSummary {
-                had_runtime_errors: true,
-            })
-        }
+        ExecutionMode::ParallelRelaxed => run_parallel(plan, stdout, stderr),
     }
 }
 
@@ -59,6 +53,42 @@ where
         }
         Ok(())
     })?;
+
+    Ok(RunSummary { had_runtime_errors })
+}
+
+fn run_parallel<W, E>(
+    plan: &ExecutionPlan,
+    stdout: &mut W,
+    stderr: &mut E,
+) -> Result<RunSummary, Diagnostic>
+where
+    W: Write,
+    E: Write,
+{
+    let mut sink = StdoutSink::new(stdout);
+    let mut had_runtime_errors = false;
+    let worker_count = std::env::var("FINDOXIDE_WORKERS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(1);
+
+    for event in walk_parallel(&plan.start_paths, plan.traversal, worker_count) {
+        match event {
+            WalkEvent::Entry(entry) => {
+                if entry.depth >= plan.traversal.min_depth {
+                    let _ = evaluate(&plan.expr, &entry, &mut sink)?;
+                }
+            }
+            WalkEvent::Error(error) => {
+                had_runtime_errors = true;
+                writeln!(stderr, "findoxide: {}", error).map_err(|io_error| {
+                    Diagnostic::new(format!("failed to write stderr: {io_error}"), 1)
+                })?;
+            }
+        }
+    }
 
     Ok(RunSummary { had_runtime_errors })
 }

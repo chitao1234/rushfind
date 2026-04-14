@@ -1,8 +1,13 @@
 use crate::diagnostics::Diagnostic;
 use crate::entry::{EntryContext, EntryKind};
 use crate::planner::TraversalOptions;
+use crossbeam_channel::{unbounded, Receiver};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WalkEvent {
@@ -74,6 +79,93 @@ where
     }
 
     Ok(())
+}
+
+pub fn walk_parallel(
+    start_paths: &[PathBuf],
+    options: TraversalOptions,
+    workers: usize,
+) -> Receiver<WalkEvent> {
+    let (work_tx, work_rx) = unbounded::<(PathBuf, usize)>();
+    let (event_tx, event_rx) = unbounded::<WalkEvent>();
+    let inflight = Arc::new(AtomicUsize::new(0));
+
+    for path in start_paths {
+        inflight.fetch_add(1, Ordering::SeqCst);
+        work_tx.send((path.clone(), 0)).unwrap();
+    }
+
+    for _ in 0..workers {
+        let work_rx = work_rx.clone();
+        let work_tx = work_tx.clone();
+        let event_tx = event_tx.clone();
+        let inflight = inflight.clone();
+
+        thread::spawn(move || {
+            loop {
+                match work_rx.recv_timeout(Duration::from_millis(25)) {
+                    Ok((path, depth)) => {
+                        let metadata = match fs::symlink_metadata(&path) {
+                            Ok(metadata) => metadata,
+                            Err(error) => {
+                                let _ = event_tx.send(WalkEvent::Error(Diagnostic::new(
+                                    format!("{}: {error}", path.display()),
+                                    1,
+                                )));
+                                inflight.fetch_sub(1, Ordering::SeqCst);
+                                continue;
+                            }
+                        };
+
+                        let kind = file_type_to_kind(&metadata.file_type());
+                        let _ = event_tx.send(WalkEvent::Entry(EntryContext::synthetic(
+                            path.clone(),
+                            kind,
+                            depth,
+                        )));
+
+                        if kind == EntryKind::Directory && should_descend(depth, options.max_depth)
+                        {
+                            match fs::read_dir(&path) {
+                                Ok(read_dir) => {
+                                    for child in read_dir {
+                                        match child {
+                                            Ok(child) => {
+                                                inflight.fetch_add(1, Ordering::SeqCst);
+                                                let _ = work_tx.send((child.path(), depth + 1));
+                                            }
+                                            Err(error) => {
+                                                let _ = event_tx.send(WalkEvent::Error(
+                                                    Diagnostic::new(
+                                                        format!("{}: {error}", path.display()),
+                                                        1,
+                                                    ),
+                                                ));
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(error) => {
+                                    let _ = event_tx.send(WalkEvent::Error(Diagnostic::new(
+                                        format!("{}: {error}", path.display()),
+                                        1,
+                                    )));
+                                }
+                            }
+                        }
+
+                        inflight.fetch_sub(1, Ordering::SeqCst);
+                    }
+                    Err(_) if inflight.load(Ordering::SeqCst) == 0 => break,
+                    Err(_) => continue,
+                }
+            }
+        });
+    }
+
+    drop(work_tx);
+    drop(event_tx);
+    event_rx
 }
 
 fn should_descend(depth: usize, max_depth: Option<usize>) -> bool {
