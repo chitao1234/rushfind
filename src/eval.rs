@@ -58,6 +58,7 @@ fn evaluate_predicate(
             true,
         ),
         RuntimePredicate::Type(expected) => Ok(matches_type(*expected, entry.kind)),
+        RuntimePredicate::XType(expected) => Ok(matches_type(*expected, entry.kind)),
         RuntimePredicate::True => Ok(true),
         RuntimePredicate::False => Ok(false),
     }

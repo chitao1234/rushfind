@@ -1,11 +1,13 @@
-use crate::ast::{Action, CommandAst, Expr, FileTypeFilter, Predicate};
+use crate::ast::{Action, CommandAst, Expr, FileTypeFilter, GlobalOption, Predicate};
 use crate::diagnostics::Diagnostic;
+use crate::follow::FollowMode;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionPlan {
     pub start_paths: Vec<PathBuf>,
+    pub follow_mode: FollowMode,
     pub traversal: TraversalOptions,
     pub expr: RuntimeExpr,
     pub mode: ExecutionMode,
@@ -43,6 +45,7 @@ pub enum RuntimePredicate {
         case_insensitive: bool,
     },
     Type(FileTypeFilter),
+    XType(FileTypeFilter),
     True,
     False,
 }
@@ -54,6 +57,7 @@ pub enum OutputAction {
 }
 
 pub fn plan_command(ast: CommandAst, workers: usize) -> Result<ExecutionPlan, Diagnostic> {
+    let follow_mode = resolve_follow_mode(&ast.global_options);
     let CommandAst {
         start_paths, expr, ..
     } = ast;
@@ -78,10 +82,19 @@ pub fn plan_command(ast: CommandAst, workers: usize) -> Result<ExecutionPlan, Di
 
     Ok(ExecutionPlan {
         start_paths,
+        follow_mode,
         traversal,
         expr,
         mode,
     })
+}
+
+fn resolve_follow_mode(global_options: &[GlobalOption]) -> FollowMode {
+    global_options
+        .iter()
+        .fold(FollowMode::Physical, |_, option| match option {
+            GlobalOption::Follow(next) => *next,
+        })
 }
 
 fn lower_expr(
@@ -137,9 +150,7 @@ fn lower_predicate(
             case_insensitive,
         })),
         Predicate::Type(kind) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Type(kind))),
-        Predicate::XType(_) => Err(Diagnostic::unsupported(
-            "unsupported in read-only v0: -xtype planning not implemented yet",
-        )),
+        Predicate::XType(kind) => Ok(RuntimeExpr::Predicate(RuntimePredicate::XType(kind))),
         Predicate::True => Ok(RuntimeExpr::Predicate(RuntimePredicate::True)),
         Predicate::False => Ok(RuntimeExpr::Predicate(RuntimePredicate::False)),
     }
