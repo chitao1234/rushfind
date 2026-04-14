@@ -1,0 +1,13 @@
+[package]
+name = "findoxide"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+crossbeam-channel = "0.5"
+libc = "0.2"
+
+[dev-dependencies]
+assert_cmd = "2.0"
+predicates = "3.1"
+tempfile = "3.13"
