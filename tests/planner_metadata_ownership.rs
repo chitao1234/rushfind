@@ -99,7 +99,7 @@ fn predicate_items(expr: &RuntimeExpr) -> Vec<&RuntimePredicate> {
             items
         }
         RuntimeExpr::Not(inner) => predicate_items(inner),
-        RuntimeExpr::Action(_) | RuntimeExpr::TraversalBoundary => Vec::new(),
+        RuntimeExpr::Action(_) | RuntimeExpr::Barrier => Vec::new(),
     }
 }
 

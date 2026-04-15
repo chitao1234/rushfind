@@ -4,6 +4,9 @@ use findoxide::follow::FollowMode;
 use findoxide::output::RecordingSink;
 use findoxide::planner::{RuntimeExpr, RuntimePredicate};
 use findoxide::size::parse_size_argument;
+use findoxide::time::{
+    RelativeTimeMatcher, RelativeTimeUnit, TimeComparison, Timestamp, TimestampKind,
+};
 use std::ffi::OsStr;
 use std::fs;
 use std::os::unix::fs as unix_fs;
@@ -49,6 +52,57 @@ fn size_reads_the_active_follow_mode_view() {
     ));
 }
 
+#[test]
+fn relative_time_matcher_uses_signed_age_buckets() {
+    let now = Timestamp::new(10_000, 0);
+    let thirty_seconds_future = Timestamp::new(10_030, 0);
+    let ninety_seconds_future = Timestamp::new(10_090, 0);
+
+    let exact_zero = RelativeTimeMatcher::new(
+        TimestampKind::Modification,
+        RelativeTimeUnit::Minutes,
+        TimeComparison::Exactly(0),
+        now,
+    );
+    let less_than_one = RelativeTimeMatcher::new(
+        TimestampKind::Modification,
+        RelativeTimeUnit::Minutes,
+        TimeComparison::LessThan(1),
+        now,
+    );
+
+    assert!(exact_zero.matches_timestamp(thirty_seconds_future));
+    assert!(!exact_zero.matches_timestamp(ninety_seconds_future));
+    assert!(less_than_one.matches_timestamp(thirty_seconds_future));
+}
+
+#[test]
+fn relative_time_evaluation_reads_the_active_follow_mode_timestamp() {
+    let root = tempdir().unwrap();
+    let target = root.path().join("target.bin");
+    let link = root.path().join("target-link");
+    fs::write(&target, b"hello\n").unwrap();
+    unix_fs::symlink("target.bin", &link).unwrap();
+
+    set_file_times(
+        &target,
+        Timestamp::new(1_699_999_700, 0),
+        Timestamp::new(1_699_999_700, 0),
+    );
+
+    let expr = RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(RelativeTimeMatcher::new(
+        TimestampKind::Modification,
+        RelativeTimeUnit::Minutes,
+        TimeComparison::GreaterThan(1),
+        Timestamp::new(1_700_000_000, 0),
+    )));
+    let entry = EntryContext::new(link, 0, true);
+    let mut sink = RecordingSink::default();
+
+    assert!(!evaluate(&expr, &entry, FollowMode::Physical, &mut sink).unwrap());
+    assert!(evaluate(&expr, &entry, FollowMode::Logical, &mut sink).unwrap());
+}
+
 fn evaluate_size(path: &Path, raw: &str, follow_mode: FollowMode) -> bool {
     let entry = EntryContext::new(PathBuf::from(path), 0, true);
     let expr = RuntimeExpr::Predicate(RuntimePredicate::Size(
@@ -57,4 +111,24 @@ fn evaluate_size(path: &Path, raw: &str, follow_mode: FollowMode) -> bool {
     let mut sink = RecordingSink::default();
 
     evaluate(&expr, &entry, follow_mode, &mut sink).unwrap()
+}
+
+fn set_file_times(path: &Path, atime: Timestamp, mtime: Timestamp) {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let path = CString::new(path.as_os_str().as_bytes()).unwrap();
+    let times = [
+        libc::timespec {
+            tv_sec: atime.seconds as libc::time_t,
+            tv_nsec: atime.nanos.into(),
+        },
+        libc::timespec {
+            tv_sec: mtime.seconds as libc::time_t,
+            tv_nsec: mtime.nanos.into(),
+        },
+    ];
+
+    let rc = unsafe { libc::utimensat(libc::AT_FDCWD, path.as_ptr(), times.as_ptr(), 0) };
+    assert_eq!(rc, 0);
 }

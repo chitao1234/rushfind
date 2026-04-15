@@ -7,9 +7,14 @@ use crate::numeric::{NumericComparison, parse_numeric_argument};
 use crate::optimizer::optimize_read_only_and_chains;
 use crate::perm::{PermMatcher, parse_perm_argument};
 use crate::size::{SizeMatcher, parse_size_argument};
+use crate::time::{
+    RelativeTimeMatcher, RelativeTimeUnit, Timestamp, TimestampKind, local_day_start,
+    parse_relative_time_argument,
+};
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionPlan {
@@ -39,7 +44,7 @@ pub enum RuntimeExpr {
     Not(Box<RuntimeExpr>),
     Predicate(RuntimePredicate),
     Action(OutputAction),
-    TraversalBoundary,
+    Barrier,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,6 +72,7 @@ pub enum RuntimePredicate {
     NoGroup,
     Perm(PermMatcher),
     Size(SizeMatcher),
+    RelativeTime(RelativeTimeMatcher),
     Type(FileTypeFilter),
     XType(FileTypeFilter),
     True,
@@ -80,6 +86,18 @@ pub enum OutputAction {
 }
 
 pub fn plan_command(ast: CommandAst, workers: usize) -> Result<ExecutionPlan, Diagnostic> {
+    plan_command_with_now(
+        ast,
+        workers,
+        Timestamp::from_system_time(SystemTime::now())?,
+    )
+}
+
+pub fn plan_command_with_now(
+    ast: CommandAst,
+    workers: usize,
+    now: Timestamp,
+) -> Result<ExecutionPlan, Diagnostic> {
     let follow_mode = resolve_follow_mode(&ast.global_options);
     let CommandAst {
         start_paths, expr, ..
@@ -88,8 +106,18 @@ pub fn plan_command(ast: CommandAst, workers: usize) -> Result<ExecutionPlan, Di
         min_depth: 0,
         max_depth: None,
     };
+    let mut temporal = TemporalPlanningState {
+        now,
+        daystart_active: false,
+    };
     let mut saw_output = false;
-    let lowered = lower_expr(expr, &mut traversal, &mut saw_output, follow_mode)?;
+    let lowered = lower_expr(
+        expr,
+        &mut traversal,
+        &mut temporal,
+        &mut saw_output,
+        follow_mode,
+    )?;
     let lowered = optimize_read_only_and_chains(lowered);
 
     let expr = if saw_output {
@@ -124,6 +152,7 @@ fn resolve_follow_mode(global_options: &[GlobalOption]) -> FollowMode {
 fn lower_expr(
     expr: Expr,
     traversal: &mut TraversalOptions,
+    temporal: &mut TemporalPlanningState,
     saw_output: &mut bool,
     follow_mode: FollowMode,
 ) -> Result<RuntimeExpr, Diagnostic> {
@@ -131,21 +160,40 @@ fn lower_expr(
         Expr::And(items) => {
             let mut lowered = Vec::with_capacity(items.len());
             for item in items {
-                lowered.push(lower_expr(item, traversal, saw_output, follow_mode)?);
+                lowered.push(lower_expr(
+                    item,
+                    traversal,
+                    temporal,
+                    saw_output,
+                    follow_mode,
+                )?);
             }
             Ok(RuntimeExpr::And(lowered))
         }
         Expr::Or(left, right) => Ok(RuntimeExpr::Or(
-            Box::new(lower_expr(*left, traversal, saw_output, follow_mode)?),
-            Box::new(lower_expr(*right, traversal, saw_output, follow_mode)?),
+            Box::new(lower_expr(
+                *left,
+                traversal,
+                temporal,
+                saw_output,
+                follow_mode,
+            )?),
+            Box::new(lower_expr(
+                *right,
+                traversal,
+                temporal,
+                saw_output,
+                follow_mode,
+            )?),
         )),
         Expr::Not(inner) => Ok(RuntimeExpr::Not(Box::new(lower_expr(
             *inner,
             traversal,
+            temporal,
             saw_output,
             follow_mode,
         )?))),
-        Expr::Predicate(predicate) => lower_predicate(predicate, traversal, follow_mode),
+        Expr::Predicate(predicate) => lower_predicate(predicate, traversal, temporal, follow_mode),
         Expr::Action(action) => lower_action(action, saw_output),
     }
 }
@@ -153,16 +201,17 @@ fn lower_expr(
 fn lower_predicate(
     predicate: Predicate,
     traversal: &mut TraversalOptions,
+    temporal: &mut TemporalPlanningState,
     follow_mode: FollowMode,
 ) -> Result<RuntimeExpr, Diagnostic> {
     match predicate {
         Predicate::MaxDepth(value) => {
             traversal.max_depth = Some(value as usize);
-            Ok(RuntimeExpr::TraversalBoundary)
+            Ok(RuntimeExpr::Barrier)
         }
         Predicate::MinDepth(value) => {
             traversal.min_depth = value as usize;
-            Ok(RuntimeExpr::TraversalBoundary)
+            Ok(RuntimeExpr::Barrier)
         }
         Predicate::Name {
             pattern,
@@ -214,17 +263,68 @@ fn lower_predicate(
         Predicate::Size(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Size(
             parse_size_argument(raw.as_os_str())?,
         ))),
-        Predicate::ATime(_) => Err(stage8_planner_unimplemented("-atime")),
-        Predicate::CTime(_) => Err(stage8_planner_unimplemented("-ctime")),
-        Predicate::MTime(_) => Err(stage8_planner_unimplemented("-mtime")),
-        Predicate::AMin(_) => Err(stage8_planner_unimplemented("-amin")),
-        Predicate::CMin(_) => Err(stage8_planner_unimplemented("-cmin")),
-        Predicate::MMin(_) => Err(stage8_planner_unimplemented("-mmin")),
+        Predicate::ATime(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(
+            parse_relative_time_argument(
+                "-atime",
+                raw.as_os_str(),
+                TimestampKind::Access,
+                RelativeTimeUnit::Days,
+                temporal.relative_baseline()?,
+            )?,
+        ))),
+        Predicate::CTime(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(
+            parse_relative_time_argument(
+                "-ctime",
+                raw.as_os_str(),
+                TimestampKind::Change,
+                RelativeTimeUnit::Days,
+                temporal.relative_baseline()?,
+            )?,
+        ))),
+        Predicate::MTime(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(
+            parse_relative_time_argument(
+                "-mtime",
+                raw.as_os_str(),
+                TimestampKind::Modification,
+                RelativeTimeUnit::Days,
+                temporal.relative_baseline()?,
+            )?,
+        ))),
+        Predicate::AMin(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(
+            parse_relative_time_argument(
+                "-amin",
+                raw.as_os_str(),
+                TimestampKind::Access,
+                RelativeTimeUnit::Minutes,
+                temporal.relative_baseline()?,
+            )?,
+        ))),
+        Predicate::CMin(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(
+            parse_relative_time_argument(
+                "-cmin",
+                raw.as_os_str(),
+                TimestampKind::Change,
+                RelativeTimeUnit::Minutes,
+                temporal.relative_baseline()?,
+            )?,
+        ))),
+        Predicate::MMin(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(
+            parse_relative_time_argument(
+                "-mmin",
+                raw.as_os_str(),
+                TimestampKind::Modification,
+                RelativeTimeUnit::Minutes,
+                temporal.relative_baseline()?,
+            )?,
+        ))),
         Predicate::Newer(_) => Err(stage8_planner_unimplemented("-newer")),
         Predicate::ANewer(_) => Err(stage8_planner_unimplemented("-anewer")),
         Predicate::CNewer(_) => Err(stage8_planner_unimplemented("-cnewer")),
         Predicate::NewerXY { .. } => Err(stage8_planner_unimplemented("-newerXY")),
-        Predicate::DayStart => Err(stage8_planner_unimplemented("-daystart")),
+        Predicate::DayStart => {
+            temporal.daystart_active = true;
+            Ok(RuntimeExpr::Barrier)
+        }
         Predicate::Type(kind) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Type(kind))),
         Predicate::XType(kind) => Ok(RuntimeExpr::Predicate(RuntimePredicate::XType(kind))),
         Predicate::True => Ok(RuntimeExpr::Predicate(RuntimePredicate::True)),
@@ -236,6 +336,22 @@ fn stage8_planner_unimplemented(flag: &str) -> Diagnostic {
     Diagnostic::unsupported(format!(
         "unsupported until stage 8 planner implementation: {flag}"
     ))
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TemporalPlanningState {
+    now: Timestamp,
+    daystart_active: bool,
+}
+
+impl TemporalPlanningState {
+    fn relative_baseline(&self) -> Result<Timestamp, Diagnostic> {
+        if self.daystart_active {
+            local_day_start(self.now)
+        } else {
+            Ok(self.now)
+        }
+    }
 }
 
 fn resolve_samefile_reference(

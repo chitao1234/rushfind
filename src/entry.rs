@@ -1,6 +1,7 @@
 use crate::diagnostics::Diagnostic;
 use crate::follow::FollowMode;
 use crate::identity::FileIdentity;
+use crate::time::Timestamp;
 use std::ffi::OsString;
 use std::fmt;
 use std::fs::{FileType, Metadata};
@@ -211,6 +212,30 @@ impl EntryContext {
 
     pub fn active_size(&self, follow_mode: FollowMode) -> Result<u64, Diagnostic> {
         Ok(self.active_metadata(follow_mode)?.len())
+    }
+
+    pub fn active_atime(&self, follow_mode: FollowMode) -> Result<Timestamp, Diagnostic> {
+        let metadata = self.active_metadata(follow_mode)?;
+        Ok(Timestamp::new(
+            metadata.atime(),
+            metadata.atime_nsec() as i32,
+        ))
+    }
+
+    pub fn active_ctime(&self, follow_mode: FollowMode) -> Result<Timestamp, Diagnostic> {
+        let metadata = self.active_metadata(follow_mode)?;
+        Ok(Timestamp::new(
+            metadata.ctime(),
+            metadata.ctime_nsec() as i32,
+        ))
+    }
+
+    pub fn active_mtime(&self, follow_mode: FollowMode) -> Result<Timestamp, Diagnostic> {
+        let metadata = self.active_metadata(follow_mode)?;
+        Ok(Timestamp::new(
+            metadata.mtime(),
+            metadata.mtime_nsec() as i32,
+        ))
     }
 
     pub fn active_link_count(&self, follow_mode: FollowMode) -> Result<u64, Diagnostic> {

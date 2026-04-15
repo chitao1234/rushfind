@@ -6,6 +6,7 @@ use crate::follow::FollowMode;
 use crate::output::OutputSink;
 use crate::pattern::matches_pattern;
 use crate::planner::{RuntimeExpr, RuntimePredicate};
+use crate::time::{Timestamp, TimestampKind};
 use std::ffi::OsStr;
 
 pub fn evaluate(
@@ -36,7 +37,7 @@ pub fn evaluate(
             sink.emit(*action, &entry.path)?;
             Ok(true)
         }
-        RuntimeExpr::TraversalBoundary => Ok(true),
+        RuntimeExpr::Barrier => Ok(true),
     }
 }
 
@@ -95,6 +96,9 @@ fn evaluate_predicate(
             Ok(matcher.matches(entry.active_mode_bits(follow_mode)?))
         }
         RuntimePredicate::Size(matcher) => Ok(matcher.matches(entry.active_size(follow_mode)?)),
+        RuntimePredicate::RelativeTime(matcher) => {
+            Ok(matcher.matches_timestamp(entry_timestamp(entry, follow_mode, matcher.kind)?))
+        }
         RuntimePredicate::Type(expected) => {
             Ok(matches_type(*expected, entry.active_kind(follow_mode)?))
         }
@@ -117,6 +121,18 @@ fn matches_type(expected: FileTypeFilter, actual: EntryKind) -> bool {
             | (FileTypeFilter::Fifo, EntryKind::Fifo)
             | (FileTypeFilter::Socket, EntryKind::Socket)
     )
+}
+
+fn entry_timestamp(
+    entry: &EntryContext,
+    follow_mode: FollowMode,
+    kind: TimestampKind,
+) -> Result<Timestamp, Diagnostic> {
+    match kind {
+        TimestampKind::Access => entry.active_atime(follow_mode),
+        TimestampKind::Change => entry.active_ctime(follow_mode),
+        TimestampKind::Modification => entry.active_mtime(follow_mode),
+    }
 }
 
 #[cfg(test)]
