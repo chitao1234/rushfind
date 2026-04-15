@@ -60,6 +60,15 @@ fn evaluate_predicate(
             *case_insensitive,
             true,
         ),
+        RuntimePredicate::Inum(_) => Err(Diagnostic::unsupported(
+            "unsupported in read-only v0: -inum",
+        )),
+        RuntimePredicate::Links(_) => Err(Diagnostic::unsupported(
+            "unsupported in read-only v0: -links",
+        )),
+        RuntimePredicate::SameFile(_) => Err(Diagnostic::unsupported(
+            "unsupported in read-only v0: -samefile",
+        )),
         RuntimePredicate::Type(expected) => {
             Ok(matches_type(*expected, entry.active_kind(follow_mode)))
         }

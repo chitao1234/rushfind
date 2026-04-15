@@ -1,8 +1,11 @@
 use crate::ast::{Action, CommandAst, Expr, FileTypeFilter, GlobalOption, Predicate};
 use crate::diagnostics::Diagnostic;
 use crate::follow::FollowMode;
+use crate::identity::FileIdentity;
+use crate::numeric::{NumericComparison, parse_numeric_argument};
+use std::fs;
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionPlan {
@@ -44,6 +47,9 @@ pub enum RuntimePredicate {
         pattern: OsString,
         case_insensitive: bool,
     },
+    Inum(NumericComparison),
+    Links(NumericComparison),
+    SameFile(FileIdentity),
     Type(FileTypeFilter),
     XType(FileTypeFilter),
     True,
@@ -66,7 +72,7 @@ pub fn plan_command(ast: CommandAst, workers: usize) -> Result<ExecutionPlan, Di
         max_depth: None,
     };
     let mut saw_output = false;
-    let lowered = lower_expr(expr, &mut traversal, &mut saw_output)?;
+    let lowered = lower_expr(expr, &mut traversal, &mut saw_output, follow_mode)?;
 
     let expr = if saw_output {
         lowered
@@ -101,23 +107,25 @@ fn lower_expr(
     expr: Expr,
     traversal: &mut TraversalOptions,
     saw_output: &mut bool,
+    follow_mode: FollowMode,
 ) -> Result<RuntimeExpr, Diagnostic> {
     match expr {
         Expr::And(items) => {
             let mut lowered = Vec::with_capacity(items.len());
             for item in items {
-                lowered.push(lower_expr(item, traversal, saw_output)?);
+                lowered.push(lower_expr(item, traversal, saw_output, follow_mode)?);
             }
             Ok(RuntimeExpr::And(lowered))
         }
         Expr::Or(left, right) => Ok(RuntimeExpr::Or(
-            Box::new(lower_expr(*left, traversal, saw_output)?),
-            Box::new(lower_expr(*right, traversal, saw_output)?),
+            Box::new(lower_expr(*left, traversal, saw_output, follow_mode)?),
+            Box::new(lower_expr(*right, traversal, saw_output, follow_mode)?),
         )),
         Expr::Not(inner) => Ok(RuntimeExpr::Not(Box::new(lower_expr(
             *inner, traversal, saw_output,
+            follow_mode,
         )?))),
-        Expr::Predicate(predicate) => lower_predicate(predicate, traversal),
+        Expr::Predicate(predicate) => lower_predicate(predicate, traversal, follow_mode),
         Expr::Action(action) => lower_action(action, saw_output),
     }
 }
@@ -125,6 +133,7 @@ fn lower_expr(
 fn lower_predicate(
     predicate: Predicate,
     traversal: &mut TraversalOptions,
+    follow_mode: FollowMode,
 ) -> Result<RuntimeExpr, Diagnostic> {
     match predicate {
         Predicate::MaxDepth(value) => {
@@ -149,20 +158,35 @@ fn lower_predicate(
             pattern,
             case_insensitive,
         })),
-        Predicate::Inum(_) => Err(Diagnostic::unsupported(
-            "unsupported in read-only v0: -inum",
-        )),
-        Predicate::Links(_) => Err(Diagnostic::unsupported(
-            "unsupported in read-only v0: -links",
-        )),
-        Predicate::SameFile(_) => Err(Diagnostic::unsupported(
-            "unsupported in read-only v0: -samefile",
-        )),
+        Predicate::Inum(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Inum(
+            parse_numeric_argument("-inum", raw.as_os_str())?,
+        ))),
+        Predicate::Links(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Links(
+            parse_numeric_argument("-links", raw.as_os_str())?,
+        ))),
+        Predicate::SameFile(path) => Ok(RuntimeExpr::Predicate(RuntimePredicate::SameFile(
+            resolve_samefile_reference(&path, follow_mode)?,
+        ))),
         Predicate::Type(kind) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Type(kind))),
         Predicate::XType(kind) => Ok(RuntimeExpr::Predicate(RuntimePredicate::XType(kind))),
         Predicate::True => Ok(RuntimeExpr::Predicate(RuntimePredicate::True)),
         Predicate::False => Ok(RuntimeExpr::Predicate(RuntimePredicate::False)),
     }
+}
+
+fn resolve_samefile_reference(
+    path: &Path,
+    follow_mode: FollowMode,
+) -> Result<FileIdentity, Diagnostic> {
+    let metadata = match follow_mode {
+        FollowMode::Physical => fs::symlink_metadata(path),
+        FollowMode::CommandLineOnly | FollowMode::Logical => {
+            fs::metadata(path).or_else(|_| fs::symlink_metadata(path))
+        }
+    }
+    .map_err(|error| Diagnostic::new(format!("{}: {error}", path.display()), 1))?;
+
+    Ok(FileIdentity::from_metadata(&metadata))
 }
 
 fn lower_action(action: Action, saw_output: &mut bool) -> Result<RuntimeExpr, Diagnostic> {
