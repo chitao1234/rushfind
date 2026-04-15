@@ -119,6 +119,7 @@ dependencies = [
  "libc",
  "predicates",
  "tempfile",
+ "wait-timeout",
 ]
 
 [[package]]

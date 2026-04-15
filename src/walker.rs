@@ -1,6 +1,7 @@
 use crate::diagnostics::Diagnostic;
 use crate::entry::{EntryContext, EntryKind};
 use crate::follow::FollowMode;
+use crate::identity::FileIdentity;
 use crate::planner::TraversalOptions;
 use crossbeam_channel::{Receiver, unbounded};
 use std::fs;
@@ -16,6 +17,14 @@ pub enum WalkEvent {
     Error(Diagnostic),
 }
 
+#[derive(Debug, Clone)]
+struct PendingPath {
+    path: PathBuf,
+    depth: usize,
+    is_command_line_root: bool,
+    ancestry: Vec<FileIdentity>,
+}
+
 pub fn walk_ordered<F>(
     start_paths: &[PathBuf],
     follow_mode: FollowMode,
@@ -25,15 +34,20 @@ pub fn walk_ordered<F>(
 where
     F: FnMut(WalkEvent) -> Result<(), Diagnostic>,
 {
-    let mut stack: Vec<(PathBuf, usize, bool)> = start_paths
+    let mut stack: Vec<PendingPath> = start_paths
         .iter()
         .rev()
         .cloned()
-        .map(|path| (path, 0, true))
+        .map(|path| PendingPath {
+            path,
+            depth: 0,
+            is_command_line_root: true,
+            ancestry: Vec::new(),
+        })
         .collect();
 
-    while let Some((path, depth, is_command_line_root)) = stack.pop() {
-        let entry = match load_entry(&path, depth, is_command_line_root) {
+    while let Some(pending) = stack.pop() {
+        let entry = match load_entry(&pending.path, pending.depth, pending.is_command_line_root) {
             Ok(entry) => entry,
             Err(error) => {
                 emit(WalkEvent::Error(error))?;
@@ -43,26 +57,35 @@ where
 
         emit(WalkEvent::Entry(entry.clone()))?;
 
-        if should_descend_with_follow_mode(&entry, follow_mode, options.max_depth) {
-            let read_dir = match fs::read_dir(&path) {
-                Ok(read_dir) => read_dir,
+        let child_ancestry =
+            match child_ancestry_for(&pending, &entry, follow_mode, options.max_depth) {
+                Ok(Some(ancestry)) => ancestry,
+                Ok(None) => continue,
                 Err(error) => {
-                    emit(WalkEvent::Error(path_error(&path, error)))?;
+                    emit(WalkEvent::Error(error))?;
                     continue;
                 }
             };
 
-            let mut children = Vec::new();
-            for child in read_dir {
-                match child {
-                    Ok(child) => children.push(child.path()),
-                    Err(error) => emit(WalkEvent::Error(path_error(&path, error)))?,
-                }
+        let (children, diagnostics) = match read_children(&pending.path) {
+            Ok(result) => result,
+            Err(error) => {
+                emit(WalkEvent::Error(error))?;
+                continue;
             }
+        };
 
-            for child in children.into_iter().rev() {
-                stack.push((child, depth + 1, false));
-            }
+        for error in diagnostics {
+            emit(WalkEvent::Error(error))?;
+        }
+
+        for child in children.into_iter().rev() {
+            stack.push(PendingPath {
+                path: child,
+                depth: pending.depth + 1,
+                is_command_line_root: false,
+                ancestry: child_ancestry.clone(),
+            });
         }
     }
 
@@ -161,6 +184,44 @@ fn load_entry(
     ))
 }
 
+fn child_ancestry_for(
+    pending: &PendingPath,
+    entry: &EntryContext,
+    follow_mode: FollowMode,
+    max_depth: Option<usize>,
+) -> Result<Option<Vec<FileIdentity>>, Diagnostic> {
+    if !should_descend(pending.depth, max_depth) {
+        return Ok(None);
+    }
+
+    let Some(directory_identity) = entry.active_directory_identity(follow_mode) else {
+        return Ok(None);
+    };
+
+    if pending.ancestry.contains(&directory_identity) {
+        return Err(loop_error(&pending.path));
+    }
+
+    let mut next = pending.ancestry.clone();
+    next.push(directory_identity);
+    Ok(Some(next))
+}
+
+fn read_children(path: &Path) -> Result<(Vec<PathBuf>, Vec<Diagnostic>), Diagnostic> {
+    let read_dir = fs::read_dir(path).map_err(|error| path_error(path, error))?;
+    let mut children = Vec::new();
+    let mut diagnostics = Vec::new();
+
+    for child in read_dir {
+        match child {
+            Ok(child) => children.push(child.path()),
+            Err(error) => diagnostics.push(path_error(path, error)),
+        }
+    }
+
+    Ok((children, diagnostics))
+}
+
 fn should_descend_with_follow_mode(
     entry: &EntryContext,
     follow_mode: FollowMode,
@@ -178,4 +239,8 @@ fn should_descend(depth: usize, max_depth: Option<usize>) -> bool {
 
 fn path_error(path: &Path, error: std::io::Error) -> Diagnostic {
     Diagnostic::new(format!("{}: {error}", path.display()), 1)
+}
+
+fn loop_error(path: &Path) -> Diagnostic {
+    Diagnostic::new(format!("filesystem loop detected at {}", path.display()), 1)
 }
