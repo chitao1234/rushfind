@@ -2,7 +2,7 @@
 
 `findoxide` is a fresh Rust implementation of Unix `find` that targets GNU `find` syntax while adding a parallel traversal engine.
 
-## v0 and stage-6 scope
+## v0 and stage-7 scope
 
 - GNU-style argv parsing
 - Global follow-mode options: `-P`, `-H`, `-L`
@@ -14,6 +14,7 @@
 - Traversal controls: `-mindepth`, `-maxdepth`
 - Output actions: `-print`, `-print0`
 - Ordered single-worker mode and relaxed-order parallel mode
+- Internal performance substrate: lazy entry data access and cheap-first planning for pure read-only `-a` chains
 
 ## Worker selection
 

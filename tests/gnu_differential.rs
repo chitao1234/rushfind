@@ -57,11 +57,26 @@ fn build_perm_tree() -> tempfile::TempDir {
     fs::write(root.path().join("file-660"), "hello\n").unwrap();
     fs::write(root.path().join("file-000"), "hello\n").unwrap();
     fs::write(root.path().join("file-sticky"), "hello\n").unwrap();
-    fs::set_permissions(root.path().join("file-664"), fs::Permissions::from_mode(0o664)).unwrap();
-    fs::set_permissions(root.path().join("file-660"), fs::Permissions::from_mode(0o660)).unwrap();
-    fs::set_permissions(root.path().join("file-000"), fs::Permissions::from_mode(0o000)).unwrap();
-    fs::set_permissions(root.path().join("file-sticky"), fs::Permissions::from_mode(0o1000))
-        .unwrap();
+    fs::set_permissions(
+        root.path().join("file-664"),
+        fs::Permissions::from_mode(0o664),
+    )
+    .unwrap();
+    fs::set_permissions(
+        root.path().join("file-660"),
+        fs::Permissions::from_mode(0o660),
+    )
+    .unwrap();
+    fs::set_permissions(
+        root.path().join("file-000"),
+        fs::Permissions::from_mode(0o000),
+    )
+    .unwrap();
+    fs::set_permissions(
+        root.path().join("file-sticky"),
+        fs::Permissions::from_mode(0o1000),
+    )
+    .unwrap();
     root
 }
 
@@ -91,6 +106,8 @@ fn readme_documents_worker_selection_contract() {
     assert!(readme.contains("`-nouser`"));
     assert!(readme.contains("`-nogroup`"));
     assert!(readme.contains("`-perm`"));
+    assert!(readme.contains("lazy entry data access"));
+    assert!(readme.contains("cheap-first planning"));
     assert!(readme.contains("loop-safe"));
 }
 
@@ -105,9 +122,11 @@ fn reports_unsupported_exec_during_planning() {
         .unwrap();
 
     assert_ne!(output.status.code(), Some(0));
-    assert!(String::from_utf8(output.stderr)
-        .unwrap()
-        .contains("unsupported in read-only v0"));
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("unsupported in read-only v0")
+    );
 }
 
 #[test]
@@ -119,9 +138,11 @@ fn reports_parse_errors_nonzero() {
         .unwrap();
 
     assert_ne!(output.status.code(), Some(0));
-    assert!(String::from_utf8(output.stderr)
-        .unwrap()
-        .contains("expected `)`"));
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("expected `)`")
+    );
 }
 
 #[test]
