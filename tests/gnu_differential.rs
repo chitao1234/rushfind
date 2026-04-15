@@ -910,37 +910,57 @@ fn parallel_stage8_predicates_match_gnu_find_as_a_set() {
 #[test]
 fn ordered_stage9_read_only_tail_matches_gnu_find_exactly() {
     let root = build_read_only_tail_tree();
-    let mut args_sets = vec![
+    let args_sets = vec![
         vec![path_arg(root.path()), "-empty".into()],
-        vec![path_arg(root.path()), "-used".into(), "0".into()],
-        vec![path_arg(root.path()), "-used".into(), "1".into()],
-        vec![path_arg(root.path()), "-used".into(), "-1".into()],
         vec!["-L".into(), path_arg(root.path()), "-empty".into()],
-    ];
-    let gnu_supports_birth = gnu_supports_birth_time_predicates(root.path());
-
-    if gnu_supports_birth {
-        args_sets.push(vec![
+        // GNU differential `-used` checks stay on regular files only. A `find`
+        // traversal mutates directory atime, so shared-tree directory comparisons
+        // are order-sensitive. Directory `-empty`/`-used` interaction is covered
+        // by deterministic evaluator tests instead.
+        vec![
             path_arg(root.path()),
-            "-newerBt".into(),
-            "@1700000000.25".into(),
-        ]);
-    }
+            "-type".into(),
+            "f".into(),
+            "-used".into(),
+            "0".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-used".into(),
+            "1".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-used".into(),
+            "-1".into(),
+        ],
+    ];
 
     for args in args_sets {
         assert_matches_gnu_exact(&args);
     }
 
-    if gnu_supports_birth
-        && read_birth_time(&root.path().join("reference-file"), true)
-            .unwrap()
-            .is_some()
-    {
+    if gnu_supports_birth_time_predicates(root.path()) {
         assert_matches_gnu_exact(&[
             path_arg(root.path()),
-            "-newermB".into(),
-            path_arg(&root.path().join("reference-file")),
+            "-newerBt".into(),
+            "@1700000000.25".into(),
         ]);
+
+        if read_birth_time(&root.path().join("reference-file"), true)
+            .unwrap()
+            .is_some()
+        {
+            assert_matches_gnu_exact(&[
+                path_arg(root.path()),
+                "-newermB".into(),
+                path_arg(&root.path().join("reference-file")),
+            ]);
+        }
     }
 }
 
@@ -949,24 +969,29 @@ fn parallel_stage9_read_only_tail_matches_gnu_find_as_sets() {
     let root = build_read_only_tail_tree();
     let args = vec![
         path_arg(root.path()),
-        "-mindepth".into(),
-        "1".into(),
+        "(".into(),
         "(".into(),
         "-empty".into(),
-        "-o".into(),
-        "-used".into(),
-        "1".into(),
-        "-o".into(),
-        "-used".into(),
-        "-1".into(),
-        ")".into(),
         "-a".into(),
-        "(".into(),
         "-type".into(),
         "f".into(),
+        ")".into(),
         "-o".into(),
+        "(".into(),
+        "-used".into(),
+        "1".into(),
+        "-a".into(),
         "-type".into(),
-        "d".into(),
+        "f".into(),
+        ")".into(),
+        "-o".into(),
+        "(".into(),
+        "-used".into(),
+        "-1".into(),
+        "-a".into(),
+        "-type".into(),
+        "f".into(),
+        ")".into(),
         ")".into(),
     ];
 

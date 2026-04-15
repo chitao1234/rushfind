@@ -2,11 +2,14 @@ use findoxide::birth::read_birth_time;
 use findoxide::entry::EntryContext;
 use findoxide::eval::evaluate;
 use findoxide::follow::FollowMode;
+use findoxide::numeric::NumericComparison;
 use findoxide::output::RecordingSink;
 use findoxide::planner::{RuntimeExpr, RuntimePredicate};
-use findoxide::time::{NewerMatcher, Timestamp, TimestampKind};
+use findoxide::time::{NewerMatcher, Timestamp, TimestampKind, UsedMatcher};
 use std::fs;
-use std::os::unix::fs as unix_fs;
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::{self as unix_fs, MetadataExt};
+use std::path::Path;
 use tempfile::tempdir;
 
 #[test]
@@ -132,4 +135,57 @@ fn current_birth_time_respects_follow_mode_for_root_symlink() {
         evaluate(&expr, &entry, FollowMode::CommandLineOnly, &mut sink).unwrap(),
         logical_expected
     );
+}
+
+#[test]
+fn nonempty_directory_empty_probe_does_not_flip_used_when_atime_is_older_than_ctime() {
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("nonempty-dir")).unwrap();
+    fs::write(root.path().join("nonempty-dir/child"), "child\n").unwrap();
+    set_file_times(
+        root.path(),
+        Timestamp::new(1_700_000_000, 0),
+        Timestamp::new(1_700_000_000, 0),
+    );
+    let metadata = fs::metadata(root.path()).unwrap();
+    assert!(metadata.atime() < metadata.ctime());
+
+    let expr = RuntimeExpr::Or(
+        Box::new(RuntimeExpr::Or(
+            Box::new(RuntimeExpr::Predicate(RuntimePredicate::Empty)),
+            Box::new(RuntimeExpr::Predicate(RuntimePredicate::Used(
+                UsedMatcher {
+                    comparison: NumericComparison::Exactly(1),
+                },
+            ))),
+        )),
+        Box::new(RuntimeExpr::Predicate(RuntimePredicate::Used(
+            UsedMatcher {
+                comparison: NumericComparison::LessThan(1),
+            },
+        ))),
+    );
+    let entry = EntryContext::new(root.path().to_path_buf(), 0, true);
+    let mut sink = RecordingSink::default();
+
+    assert!(!evaluate(&expr, &entry, FollowMode::Physical, &mut sink).unwrap());
+}
+
+fn set_file_times(path: &Path, atime: Timestamp, mtime: Timestamp) {
+    use std::ffi::CString;
+
+    let path = CString::new(path.as_os_str().as_bytes()).unwrap();
+    let times = [
+        libc::timespec {
+            tv_sec: atime.seconds as libc::time_t,
+            tv_nsec: atime.nanos.into(),
+        },
+        libc::timespec {
+            tv_sec: mtime.seconds as libc::time_t,
+            tv_nsec: mtime.nanos.into(),
+        },
+    ];
+
+    let rc = unsafe { libc::utimensat(libc::AT_FDCWD, path.as_ptr(), times.as_ptr(), 0) };
+    assert_eq!(rc, 0);
 }
