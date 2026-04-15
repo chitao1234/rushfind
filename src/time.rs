@@ -2,12 +2,11 @@ use crate::birth::read_birth_time;
 use crate::diagnostics::Diagnostic;
 use crate::follow::FollowMode;
 use crate::literal_time::parse_literal_time;
-use crate::numeric::NumericComparison;
 use std::ffi::OsStr;
 use std::fs::{self, Metadata};
 use std::mem::MaybeUninit;
 use std::path::Path;
-use std::str;
+use std::str::{self, FromStr};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -56,14 +55,82 @@ impl RelativeTimeUnit {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TimeComparison {
-    Exactly(i64),
-    LessThan(i64),
-    GreaterThan(i64),
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TimeAmount {
+    digits: Box<[u8]>,
+    scale: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+impl TimeAmount {
+    fn integral_value(&self) -> Option<i64> {
+        if self.scale != 0 {
+            return None;
+        }
+
+        str::from_utf8(&self.digits).ok()?.parse::<i64>().ok()
+    }
+}
+
+impl FromStr for TimeAmount {
+    type Err = Diagnostic;
+
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        let (whole, frac) = match raw.split_once('.') {
+            Some((whole, frac)) => (whole, Some(frac)),
+            None => (raw, None),
+        };
+
+        if whole.is_empty() || !whole.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err(Diagnostic::parse("invalid time amount"));
+        }
+        if frac.is_some_and(|value| value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit())) {
+            return Err(Diagnostic::parse("invalid time amount"));
+        }
+
+        let mut digits = whole.as_bytes().to_vec();
+        let mut scale = frac.map(|value| value.len() as u32).unwrap_or(0);
+        if let Some(frac) = frac {
+            digits.extend_from_slice(frac.as_bytes());
+        }
+
+        while scale > 0 && digits.last() == Some(&b'0') {
+            digits.pop();
+            scale -= 1;
+        }
+
+        while digits.len() > 1 && digits.first() == Some(&b'0') {
+            digits.remove(0);
+        }
+
+        if digits.is_empty() {
+            digits.push(b'0');
+        }
+
+        Ok(Self {
+            digits: digits.into_boxed_slice(),
+            scale,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TimeComparison {
+    Exactly(TimeAmount),
+    LessThan(TimeAmount),
+    GreaterThan(TimeAmount),
+}
+
+impl TimeComparison {
+    fn integral_value(&self) -> Option<i64> {
+        match self {
+            Self::Exactly(amount) | Self::LessThan(amount) | Self::GreaterThan(amount) => {
+                amount.integral_value()
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RelativeTimeMatcher {
     pub kind: TimestampKind,
     pub unit: RelativeTimeUnit,
@@ -73,7 +140,7 @@ pub struct RelativeTimeMatcher {
 }
 
 impl RelativeTimeMatcher {
-    pub const fn new(
+    pub fn new(
         kind: TimestampKind,
         unit: RelativeTimeUnit,
         comparison: TimeComparison,
@@ -89,22 +156,20 @@ impl RelativeTimeMatcher {
         }
     }
 
-    pub fn matches_timestamp(self, actual: Timestamp) -> bool {
+    pub fn matches_timestamp(&self, actual: Timestamp) -> bool {
         self.matches_timestamp_checked(actual)
             .expect("relative time comparison should be computable")
     }
 
-    pub fn matches_timestamp_checked(self, actual: Timestamp) -> Result<bool, Diagnostic> {
+    pub fn matches_timestamp_checked(&self, actual: Timestamp) -> Result<bool, Diagnostic> {
+        let comparison = WindowComparison::try_from(&self.comparison)?;
         if self.daystart && matches!(self.unit, RelativeTimeUnit::Days) {
             let baseline_day = local_calendar_day(self.baseline)?;
             let actual_day = local_calendar_day(actual)?;
-            Ok(matches_calendar_day_window(
-                WindowComparison::from(self.comparison),
-                baseline_day - actual_day,
-            ))
+            Ok(matches_calendar_day_window(comparison, baseline_day - actual_day))
         } else {
             Ok(matches_timestamp_window(
-                WindowComparison::from(self.comparison),
+                comparison,
                 self.baseline,
                 actual,
                 self.unit.window(),
@@ -125,19 +190,23 @@ impl NewerMatcher {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UsedMatcher {
-    pub comparison: NumericComparison,
+    pub comparison: TimeComparison,
 }
 
 impl UsedMatcher {
-    pub fn matches(self, atime: Timestamp, ctime: Timestamp) -> bool {
+    pub fn matches(&self, atime: Timestamp, ctime: Timestamp) -> bool {
         if atime < ctime {
             return false;
         }
 
+        let Ok(comparison) = WindowComparison::try_from(&self.comparison) else {
+            return false;
+        };
+
         matches_timestamp_window(
-            WindowComparison::from(self.comparison),
+            comparison,
             atime,
             ctime,
             WholeSecondWindow::shifted_exact(RelativeTimeUnit::Days.seconds()),
@@ -189,39 +258,24 @@ enum WindowComparison {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WindowExpected {
     Finite(i64),
-    PositiveOverflow,
 }
 
-impl From<TimeComparison> for WindowComparison {
-    fn from(value: TimeComparison) -> Self {
-        match value {
-            TimeComparison::Exactly(expected) => Self::Exactly(WindowExpected::Finite(expected)),
-            TimeComparison::LessThan(expected) => Self::LessThan(WindowExpected::Finite(expected)),
-            TimeComparison::GreaterThan(expected) => {
-                Self::GreaterThan(WindowExpected::Finite(expected))
-            }
-        }
-    }
-}
+impl TryFrom<&TimeComparison> for WindowComparison {
+    type Error = Diagnostic;
 
-impl From<NumericComparison> for WindowComparison {
-    fn from(value: NumericComparison) -> Self {
-        match value {
-            NumericComparison::Exactly(expected) => Self::Exactly(WindowExpected::from(expected)),
-            NumericComparison::LessThan(expected) => Self::LessThan(WindowExpected::from(expected)),
-            NumericComparison::GreaterThan(expected) => {
-                Self::GreaterThan(WindowExpected::from(expected))
-            }
-        }
-    }
-}
+    fn try_from(value: &TimeComparison) -> Result<Self, Self::Error> {
+        let Some(expected) = value.integral_value() else {
+            return Err(Diagnostic::new(
+                "fractional time comparisons are not yet implemented",
+                1,
+            ));
+        };
 
-impl From<u64> for WindowExpected {
-    fn from(value: u64) -> Self {
-        match i64::try_from(value) {
-            Ok(value) => Self::Finite(value),
-            Err(_) => Self::PositiveOverflow,
-        }
+        Ok(match value {
+            TimeComparison::Exactly(_) => Self::Exactly(WindowExpected::Finite(expected)),
+            TimeComparison::LessThan(_) => Self::LessThan(WindowExpected::Finite(expected)),
+            TimeComparison::GreaterThan(_) => Self::GreaterThan(WindowExpected::Finite(expected)),
+        })
     }
 }
 
@@ -235,11 +289,8 @@ enum TimestampBoundary {
 fn matches_calendar_day_window(comparison: WindowComparison, elapsed_days: i64) -> bool {
     match comparison {
         WindowComparison::Exactly(WindowExpected::Finite(expected)) => elapsed_days == expected,
-        WindowComparison::Exactly(WindowExpected::PositiveOverflow) => false,
         WindowComparison::LessThan(WindowExpected::Finite(expected)) => elapsed_days < expected,
-        WindowComparison::LessThan(WindowExpected::PositiveOverflow) => true,
         WindowComparison::GreaterThan(WindowExpected::Finite(expected)) => elapsed_days > expected,
-        WindowComparison::GreaterThan(WindowExpected::PositiveOverflow) => false,
     }
 }
 
@@ -266,12 +317,10 @@ fn matches_timestamp_window(
 
             timestamp_le_boundary(actual, lower) && timestamp_gt_boundary(actual, upper)
         }
-        WindowComparison::Exactly(WindowExpected::PositiveOverflow) => false,
         WindowComparison::LessThan(WindowExpected::Finite(expected)) => {
             let boundary = shift_timestamp_boundary(baseline, window.unit_seconds, expected, 0);
             timestamp_gt_boundary(actual, boundary)
         }
-        WindowComparison::LessThan(WindowExpected::PositiveOverflow) => true,
         WindowComparison::GreaterThan(WindowExpected::Finite(expected)) => {
             let boundary = shift_timestamp_boundary(
                 baseline,
@@ -281,7 +330,6 @@ fn matches_timestamp_window(
             );
             timestamp_lt_boundary(actual, boundary)
         }
-        WindowComparison::GreaterThan(WindowExpected::PositiveOverflow) => false,
     }
 }
 
@@ -365,6 +413,10 @@ pub fn parse_relative_time_argument(
     ))
 }
 
+pub fn validate_time_argument(flag: &str, value: &OsStr) -> Result<(), Diagnostic> {
+    parse_time_comparison(flag, value).map(|_| ())
+}
+
 pub fn local_day_start(now: Timestamp) -> Result<Timestamp, Diagnostic> {
     let mut local = local_time(now.seconds)?;
     local.tm_hour = 0;
@@ -432,7 +484,7 @@ pub fn resolve_reference_matcher(
     })
 }
 
-fn parse_time_comparison(flag: &str, value: &OsStr) -> Result<TimeComparison, Diagnostic> {
+pub fn parse_time_comparison(flag: &str, value: &OsStr) -> Result<TimeComparison, Diagnostic> {
     let bytes = value.as_encoded_bytes();
     let (kind, digits) = match bytes {
         [b'+', rest @ ..] => (ComparisonKind::GreaterThan, rest),
@@ -440,13 +492,9 @@ fn parse_time_comparison(flag: &str, value: &OsStr) -> Result<TimeComparison, Di
         _ => (ComparisonKind::Exactly, bytes),
     };
 
-    if digits.is_empty() || !digits.iter().all(|byte| byte.is_ascii_digit()) {
-        return Err(invalid_numeric_argument(flag, value));
-    }
-
     let parsed = str::from_utf8(digits)
         .map_err(|_| invalid_numeric_argument(flag, value))?
-        .parse::<i64>()
+        .parse::<TimeAmount>()
         .map_err(|_| invalid_numeric_argument(flag, value))?;
 
     Ok(match kind {

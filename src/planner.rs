@@ -9,7 +9,8 @@ use crate::perm::{PermMatcher, parse_perm_argument};
 use crate::size::{SizeMatcher, parse_size_argument};
 use crate::time::{
     NewerMatcher, RelativeTimeMatcher, RelativeTimeUnit, Timestamp, TimestampKind, UsedMatcher,
-    local_day_start, parse_relative_time_argument, resolve_reference_matcher,
+    local_day_start, parse_relative_time_argument, parse_time_comparison,
+    resolve_reference_matcher,
 };
 use std::ffi::OsString;
 use std::fs;
@@ -269,7 +270,7 @@ fn lower_predicate(
         Predicate::Empty => Ok(RuntimeExpr::Predicate(RuntimePredicate::Empty)),
         Predicate::Used(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Used(
             UsedMatcher {
-                comparison: parse_numeric_argument("-used", raw.as_os_str())?,
+                comparison: parse_time_comparison("-used", raw.as_os_str())?,
             },
         ))),
         Predicate::ATime(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(

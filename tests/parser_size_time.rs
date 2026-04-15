@@ -80,3 +80,37 @@ fn reports_malformed_relative_time_arguments() {
         );
     }
 }
+
+#[test]
+fn accepts_fractional_time_arguments_but_rejects_fractional_generic_numeric_predicates() {
+    parse_command(&argv(&[
+        ".", "-mmin", "0.5", "-mtime", "+1.25", "-used", "-0.75",
+    ]))
+    .unwrap();
+
+    for (flag, value) in [("-links", "1.5"), ("-inum", "0.1"), ("-uid", "2.5")] {
+        let error = parse_command(&argv(&[".", flag, value])).unwrap_err();
+        assert!(
+            error
+                .message
+                .contains(&format!("invalid numeric argument for `{flag}`"))
+        );
+    }
+}
+
+#[test]
+fn reports_malformed_fractional_time_arguments() {
+    for (flag, value) in [
+        ("-mmin", ".5"),
+        ("-mtime", "1."),
+        ("-used", "+."),
+        ("-amin", "1..5"),
+    ] {
+        let error = parse_command(&argv(&[".", flag, value])).unwrap_err();
+        assert!(
+            error
+                .message
+                .contains(&format!("invalid numeric argument for `{flag}`"))
+        );
+    }
+}

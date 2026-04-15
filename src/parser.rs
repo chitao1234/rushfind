@@ -3,6 +3,7 @@ use crate::ast::{Action, CommandAst, Expr, FileTypeFilter, GlobalOption, Predica
 use crate::diagnostics::Diagnostic;
 use crate::follow::FollowMode;
 use crate::numeric::validate_numeric_argument;
+use crate::time::validate_time_argument;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
@@ -235,7 +236,7 @@ impl<'a> Parser<'a> {
             Expr::Predicate(Predicate::Empty)
         } else if token.matches("-used") {
             let raw = self.take_os_string("-used")?;
-            validate_numeric_argument("-used", raw.as_os_str())?;
+            validate_time_argument("-used", raw.as_os_str())?;
             Expr::Predicate(Predicate::Used(raw))
         } else if token.matches("-inum") {
             let raw = self.take_os_string("-inum")?;
@@ -251,27 +252,27 @@ impl<'a> Parser<'a> {
             )))
         } else if token.matches("-atime") {
             let raw = self.take_os_string("-atime")?;
-            validate_numeric_argument("-atime", raw.as_os_str())?;
+            validate_time_argument("-atime", raw.as_os_str())?;
             Expr::Predicate(Predicate::ATime(raw))
         } else if token.matches("-ctime") {
             let raw = self.take_os_string("-ctime")?;
-            validate_numeric_argument("-ctime", raw.as_os_str())?;
+            validate_time_argument("-ctime", raw.as_os_str())?;
             Expr::Predicate(Predicate::CTime(raw))
         } else if token.matches("-mtime") {
             let raw = self.take_os_string("-mtime")?;
-            validate_numeric_argument("-mtime", raw.as_os_str())?;
+            validate_time_argument("-mtime", raw.as_os_str())?;
             Expr::Predicate(Predicate::MTime(raw))
         } else if token.matches("-amin") {
             let raw = self.take_os_string("-amin")?;
-            validate_numeric_argument("-amin", raw.as_os_str())?;
+            validate_time_argument("-amin", raw.as_os_str())?;
             Expr::Predicate(Predicate::AMin(raw))
         } else if token.matches("-cmin") {
             let raw = self.take_os_string("-cmin")?;
-            validate_numeric_argument("-cmin", raw.as_os_str())?;
+            validate_time_argument("-cmin", raw.as_os_str())?;
             Expr::Predicate(Predicate::CMin(raw))
         } else if token.matches("-mmin") {
             let raw = self.take_os_string("-mmin")?;
-            validate_numeric_argument("-mmin", raw.as_os_str())?;
+            validate_time_argument("-mmin", raw.as_os_str())?;
             Expr::Predicate(Predicate::MMin(raw))
         } else if token.matches("-newer") {
             Expr::Predicate(Predicate::Newer(PathBuf::from(

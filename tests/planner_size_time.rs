@@ -7,7 +7,7 @@ use findoxide::planner::{RuntimeExpr, RuntimePredicate, plan_command, plan_comma
 use findoxide::size::{SizeMatcher, SizeUnit};
 use findoxide::time::{
     NewerMatcher, RelativeTimeMatcher, RelativeTimeUnit, TimeComparison, Timestamp, TimestampKind,
-    local_day_start,
+    UsedMatcher, local_day_start,
 };
 use std::fs;
 use std::os::unix::fs::MetadataExt;
@@ -96,20 +96,68 @@ fn lowers_relative_time_predicates_with_a_fixed_now_snapshot() {
         RuntimePredicate::RelativeTime(RelativeTimeMatcher {
             kind: TimestampKind::Modification,
             unit: RelativeTimeUnit::Minutes,
-            comparison: TimeComparison::GreaterThan(5),
+            comparison: TimeComparison::GreaterThan(amount),
             baseline,
             daystart,
-        }) if *baseline == now && !daystart
+        }) if *baseline == now && !daystart && amount == &"5".parse().unwrap()
     )));
     assert!(predicates.iter().any(|predicate| matches!(
         predicate,
         RuntimePredicate::RelativeTime(RelativeTimeMatcher {
             kind: TimestampKind::Access,
             unit: RelativeTimeUnit::Days,
-            comparison: TimeComparison::Exactly(1),
+            comparison: TimeComparison::Exactly(amount),
             baseline,
             daystart,
-        }) if *baseline == now && !daystart
+        }) if *baseline == now && !daystart && amount == &"1".parse().unwrap()
+    )));
+}
+
+#[test]
+fn lowers_fractional_relative_time_and_used_predicates() {
+    let now = Timestamp::new(1_700_000_000, 0);
+    let plan = plan_command_with_now(
+        parse_command(&argv(&[
+            ".", "-mmin", "0.5", "-mtime", "+1.25", "-used", "-0.75",
+        ]))
+        .unwrap(),
+        1,
+        now,
+    )
+    .unwrap();
+    let predicates = predicate_items(&plan.expr);
+
+    assert!(predicates.iter().any(|predicate| matches!(
+        predicate,
+        RuntimePredicate::RelativeTime(RelativeTimeMatcher {
+            kind: TimestampKind::Modification,
+            unit: RelativeTimeUnit::Minutes,
+            comparison: TimeComparison::Exactly(amount),
+            baseline,
+            daystart,
+        }) if *baseline == now
+            && !daystart
+            && amount == &"0.5".parse().unwrap()
+    )));
+
+    assert!(predicates.iter().any(|predicate| matches!(
+        predicate,
+        RuntimePredicate::RelativeTime(RelativeTimeMatcher {
+            kind: TimestampKind::Modification,
+            unit: RelativeTimeUnit::Days,
+            comparison: TimeComparison::GreaterThan(amount),
+            baseline,
+            daystart,
+        }) if *baseline == now
+            && !daystart
+            && amount == &"1.25".parse().unwrap()
+    )));
+
+    assert!(predicates.iter().any(|predicate| matches!(
+        predicate,
+        RuntimePredicate::Used(UsedMatcher {
+            comparison: TimeComparison::LessThan(amount),
+        }) if amount == &"0.75".parse().unwrap()
     )));
 }
 
