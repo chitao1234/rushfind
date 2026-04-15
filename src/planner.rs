@@ -209,11 +209,29 @@ fn lower_predicate(
         Predicate::Perm(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Perm(
             parse_perm_argument(raw.as_os_str())?,
         ))),
+        Predicate::Size(_) => Err(stage8_planner_unimplemented("-size")),
+        Predicate::ATime(_) => Err(stage8_planner_unimplemented("-atime")),
+        Predicate::CTime(_) => Err(stage8_planner_unimplemented("-ctime")),
+        Predicate::MTime(_) => Err(stage8_planner_unimplemented("-mtime")),
+        Predicate::AMin(_) => Err(stage8_planner_unimplemented("-amin")),
+        Predicate::CMin(_) => Err(stage8_planner_unimplemented("-cmin")),
+        Predicate::MMin(_) => Err(stage8_planner_unimplemented("-mmin")),
+        Predicate::Newer(_) => Err(stage8_planner_unimplemented("-newer")),
+        Predicate::ANewer(_) => Err(stage8_planner_unimplemented("-anewer")),
+        Predicate::CNewer(_) => Err(stage8_planner_unimplemented("-cnewer")),
+        Predicate::NewerXY { .. } => Err(stage8_planner_unimplemented("-newerXY")),
+        Predicate::DayStart => Err(stage8_planner_unimplemented("-daystart")),
         Predicate::Type(kind) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Type(kind))),
         Predicate::XType(kind) => Ok(RuntimeExpr::Predicate(RuntimePredicate::XType(kind))),
         Predicate::True => Ok(RuntimeExpr::Predicate(RuntimePredicate::True)),
         Predicate::False => Ok(RuntimeExpr::Predicate(RuntimePredicate::False)),
     }
+}
+
+fn stage8_planner_unimplemented(flag: &str) -> Diagnostic {
+    Diagnostic::unsupported(format!(
+        "unsupported until stage 8 planner implementation: {flag}"
+    ))
 }
 
 fn resolve_samefile_reference(

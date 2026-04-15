@@ -175,6 +175,7 @@ impl<'a> Parser<'a> {
         let token = self
             .bump()
             .ok_or_else(|| Diagnostic::parse("expected predicate or action"))?;
+        let token_display = token.display();
 
         let expr = if token.matches("-maxdepth") {
             Expr::Predicate(Predicate::MaxDepth(self.take_u32("-maxdepth")?))
@@ -228,6 +229,8 @@ impl<'a> Parser<'a> {
             Expr::Predicate(Predicate::NoGroup)
         } else if token.matches("-perm") {
             Expr::Predicate(Predicate::Perm(self.take_os_string("-perm")?))
+        } else if token.matches("-size") {
+            Expr::Predicate(Predicate::Size(self.take_os_string("-size")?))
         } else if token.matches("-inum") {
             let raw = self.take_os_string("-inum")?;
             validate_numeric_argument("-inum", raw.as_os_str())?;
@@ -240,6 +243,50 @@ impl<'a> Parser<'a> {
             Expr::Predicate(Predicate::SameFile(PathBuf::from(
                 self.take_os_string("-samefile")?,
             )))
+        } else if token.matches("-atime") {
+            let raw = self.take_os_string("-atime")?;
+            validate_numeric_argument("-atime", raw.as_os_str())?;
+            Expr::Predicate(Predicate::ATime(raw))
+        } else if token.matches("-ctime") {
+            let raw = self.take_os_string("-ctime")?;
+            validate_numeric_argument("-ctime", raw.as_os_str())?;
+            Expr::Predicate(Predicate::CTime(raw))
+        } else if token.matches("-mtime") {
+            let raw = self.take_os_string("-mtime")?;
+            validate_numeric_argument("-mtime", raw.as_os_str())?;
+            Expr::Predicate(Predicate::MTime(raw))
+        } else if token.matches("-amin") {
+            let raw = self.take_os_string("-amin")?;
+            validate_numeric_argument("-amin", raw.as_os_str())?;
+            Expr::Predicate(Predicate::AMin(raw))
+        } else if token.matches("-cmin") {
+            let raw = self.take_os_string("-cmin")?;
+            validate_numeric_argument("-cmin", raw.as_os_str())?;
+            Expr::Predicate(Predicate::CMin(raw))
+        } else if token.matches("-mmin") {
+            let raw = self.take_os_string("-mmin")?;
+            validate_numeric_argument("-mmin", raw.as_os_str())?;
+            Expr::Predicate(Predicate::MMin(raw))
+        } else if token.matches("-newer") {
+            Expr::Predicate(Predicate::Newer(PathBuf::from(
+                self.take_os_string("-newer")?,
+            )))
+        } else if token.matches("-anewer") {
+            Expr::Predicate(Predicate::ANewer(PathBuf::from(
+                self.take_os_string("-anewer")?,
+            )))
+        } else if token.matches("-cnewer") {
+            Expr::Predicate(Predicate::CNewer(PathBuf::from(
+                self.take_os_string("-cnewer")?,
+            )))
+        } else if let Some((current, reference)) = parse_newerxy_flag(token) {
+            Expr::Predicate(Predicate::NewerXY {
+                current,
+                reference,
+                reference_path: PathBuf::from(self.take_os_string(token_display.as_str())?),
+            })
+        } else if token.matches("-daystart") {
+            Expr::Predicate(Predicate::DayStart)
         } else if token.matches("-type") {
             Expr::Predicate(Predicate::Type(self.take_type_filter()?))
         } else if token.matches("-xtype") {
@@ -265,7 +312,7 @@ impl<'a> Parser<'a> {
         } else {
             return Err(Diagnostic::parse(format!(
                 "unsupported token in parser subset `{}`",
-                token.display()
+                token_display
             )));
         };
 
@@ -348,4 +395,14 @@ impl<'a> Parser<'a> {
             Some(token) if !token.matches(")") && !token.matches("-o") && !token.matches("-or")
         )
     }
+}
+
+fn parse_newerxy_flag(token: Arg<'_>) -> Option<(char, char)> {
+    let token = token.to_os_string();
+    let bytes = token.as_encoded_bytes();
+    if bytes.len() != 8 || &bytes[..6] != b"-newer" {
+        return None;
+    }
+
+    Some((char::from(bytes[6]), char::from(bytes[7])))
 }
