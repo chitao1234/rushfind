@@ -1,7 +1,7 @@
 use crate::follow::FollowMode;
 use crate::identity::FileIdentity;
 use std::fs::{FileType, Metadata};
-use std::os::unix::fs::FileTypeExt;
+use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +50,19 @@ impl EntryContext {
         FileIdentity::from_metadata(&self.physical_metadata)
     }
 
+    pub fn active_metadata(&self, follow_mode: FollowMode) -> &Metadata {
+        match follow_mode {
+            FollowMode::Physical => &self.physical_metadata,
+            FollowMode::CommandLineOnly if self.is_command_line_root => {
+                self.logical_metadata
+                    .as_ref()
+                    .unwrap_or(&self.physical_metadata)
+            }
+            FollowMode::CommandLineOnly => &self.physical_metadata,
+            FollowMode::Logical => self.logical_metadata.as_ref().unwrap_or(&self.physical_metadata),
+        }
+    }
+
     pub fn logical_kind(&self) -> EntryKind {
         self.logical_metadata
             .as_ref()
@@ -63,13 +76,20 @@ impl EntryContext {
             .map(FileIdentity::from_metadata)
     }
 
+    pub fn active_identity(&self, follow_mode: FollowMode) -> FileIdentity {
+        FileIdentity::from_metadata(self.active_metadata(follow_mode))
+    }
+
+    pub fn active_inode(&self, follow_mode: FollowMode) -> u64 {
+        self.active_metadata(follow_mode).ino()
+    }
+
+    pub fn active_link_count(&self, follow_mode: FollowMode) -> u64 {
+        self.active_metadata(follow_mode).nlink()
+    }
+
     pub fn active_kind(&self, follow_mode: FollowMode) -> EntryKind {
-        match follow_mode {
-            FollowMode::Physical => self.physical_kind(),
-            FollowMode::CommandLineOnly if self.is_command_line_root => self.logical_kind(),
-            FollowMode::CommandLineOnly => self.physical_kind(),
-            FollowMode::Logical => self.logical_kind(),
-        }
+        file_type_to_kind(self.active_metadata(follow_mode).file_type())
     }
 
     pub fn active_directory_identity(&self, follow_mode: FollowMode) -> Option<FileIdentity> {
@@ -77,12 +97,7 @@ impl EntryContext {
             return None;
         }
 
-        match follow_mode {
-            FollowMode::Physical => Some(self.physical_identity()),
-            FollowMode::CommandLineOnly if self.is_command_line_root => self.logical_identity(),
-            FollowMode::CommandLineOnly => Some(self.physical_identity()),
-            FollowMode::Logical => self.logical_identity(),
-        }
+        Some(self.active_identity(follow_mode))
     }
 
     pub fn xtype_kind(&self, follow_mode: FollowMode) -> EntryKind {
