@@ -149,6 +149,15 @@ fn lower_predicate(
             pattern,
             case_insensitive,
         })),
+        Predicate::Inum(_) => Err(Diagnostic::unsupported(
+            "unsupported in read-only v0: -inum",
+        )),
+        Predicate::Links(_) => Err(Diagnostic::unsupported(
+            "unsupported in read-only v0: -links",
+        )),
+        Predicate::SameFile(_) => Err(Diagnostic::unsupported(
+            "unsupported in read-only v0: -samefile",
+        )),
         Predicate::Type(kind) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Type(kind))),
         Predicate::XType(kind) => Ok(RuntimeExpr::Predicate(RuntimePredicate::XType(kind))),
         Predicate::True => Ok(RuntimeExpr::Predicate(RuntimePredicate::True)),

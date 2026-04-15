@@ -6,6 +6,7 @@ pub mod entry;
 pub mod eval;
 pub mod follow;
 pub mod identity;
+pub mod numeric;
 pub mod output;
 pub mod parser;
 pub mod pattern;

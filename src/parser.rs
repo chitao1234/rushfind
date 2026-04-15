@@ -2,6 +2,7 @@ use crate::args::{Arg, ArgCursor};
 use crate::ast::{Action, CommandAst, Expr, FileTypeFilter, GlobalOption, Predicate};
 use crate::diagnostics::Diagnostic;
 use crate::follow::FollowMode;
+use crate::numeric::validate_numeric_argument;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
@@ -199,6 +200,18 @@ impl<'a> Parser<'a> {
                 pattern: self.take_os_string("-ipath")?,
                 case_insensitive: true,
             })
+        } else if token.matches("-inum") {
+            let raw = self.take_os_string("-inum")?;
+            validate_numeric_argument("-inum", raw.as_os_str())?;
+            Expr::Predicate(Predicate::Inum(raw))
+        } else if token.matches("-links") {
+            let raw = self.take_os_string("-links")?;
+            validate_numeric_argument("-links", raw.as_os_str())?;
+            Expr::Predicate(Predicate::Links(raw))
+        } else if token.matches("-samefile") {
+            Expr::Predicate(Predicate::SameFile(PathBuf::from(
+                self.take_os_string("-samefile")?,
+            )))
         } else if token.matches("-type") {
             Expr::Predicate(Predicate::Type(self.take_type_filter()?))
         } else if token.matches("-xtype") {
