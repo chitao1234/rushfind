@@ -1,10 +1,11 @@
+use crate::account::{resolve_group_id, resolve_user_id};
 use crate::ast::{Action, CommandAst, Expr, FileTypeFilter, GlobalOption, Predicate};
 use crate::diagnostics::Diagnostic;
 use crate::follow::FollowMode;
 use crate::identity::FileIdentity;
-use crate::numeric::{NumericComparison, parse_numeric_argument};
-use std::fs;
+use crate::numeric::{parse_numeric_argument, NumericComparison};
 use std::ffi::OsString;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,6 +55,12 @@ pub enum RuntimePredicate {
         pattern: OsString,
         case_insensitive: bool,
     },
+    Uid(NumericComparison),
+    Gid(NumericComparison),
+    User(u32),
+    Group(u32),
+    NoUser,
+    NoGroup,
     Type(FileTypeFilter),
     XType(FileTypeFilter),
     True,
@@ -126,7 +133,9 @@ fn lower_expr(
             Box::new(lower_expr(*right, traversal, saw_output, follow_mode)?),
         )),
         Expr::Not(inner) => Ok(RuntimeExpr::Not(Box::new(lower_expr(
-            *inner, traversal, saw_output,
+            *inner,
+            traversal,
+            saw_output,
             follow_mode,
         )?))),
         Expr::Predicate(predicate) => lower_predicate(predicate, traversal, follow_mode),
@@ -178,14 +187,20 @@ fn lower_predicate(
             pattern,
             case_insensitive,
         })),
-        Predicate::Uid(_)
-        | Predicate::Gid(_)
-        | Predicate::User(_)
-        | Predicate::Group(_)
-        | Predicate::NoUser
-        | Predicate::NoGroup => Err(Diagnostic::unsupported(
-            "ownership/account predicates are not lowered yet",
-        )),
+        Predicate::Uid(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Uid(
+            parse_numeric_argument("-uid", raw.as_os_str())?,
+        ))),
+        Predicate::Gid(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Gid(
+            parse_numeric_argument("-gid", raw.as_os_str())?,
+        ))),
+        Predicate::User(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::User(
+            resolve_user_id(raw.as_os_str())?,
+        ))),
+        Predicate::Group(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Group(
+            resolve_group_id(raw.as_os_str())?,
+        ))),
+        Predicate::NoUser => Ok(RuntimeExpr::Predicate(RuntimePredicate::NoUser)),
+        Predicate::NoGroup => Ok(RuntimeExpr::Predicate(RuntimePredicate::NoGroup)),
         Predicate::Type(kind) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Type(kind))),
         Predicate::XType(kind) => Ok(RuntimeExpr::Predicate(RuntimePredicate::XType(kind))),
         Predicate::True => Ok(RuntimeExpr::Predicate(RuntimePredicate::True)),

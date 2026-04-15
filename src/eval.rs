@@ -77,6 +77,12 @@ fn evaluate_predicate(
             ),
             None => Ok(false),
         },
+        RuntimePredicate::Uid(_)
+        | RuntimePredicate::Gid(_)
+        | RuntimePredicate::User(_)
+        | RuntimePredicate::Group(_)
+        | RuntimePredicate::NoUser
+        | RuntimePredicate::NoGroup => Ok(false),
         RuntimePredicate::Type(expected) => {
             Ok(matches_type(*expected, entry.active_kind(follow_mode)))
         }

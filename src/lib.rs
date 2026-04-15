@@ -1,3 +1,4 @@
+pub mod account;
 pub mod args;
 pub mod ast;
 pub mod cli;
