@@ -36,6 +36,7 @@ pub fn evaluate(
             sink.emit(*action, &entry.path)?;
             Ok(true)
         }
+        RuntimeExpr::TraversalBoundary => Ok(true),
     }
 }
 

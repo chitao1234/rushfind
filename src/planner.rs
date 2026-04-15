@@ -4,6 +4,7 @@ use crate::diagnostics::Diagnostic;
 use crate::follow::FollowMode;
 use crate::identity::FileIdentity;
 use crate::numeric::{parse_numeric_argument, NumericComparison};
+use crate::optimizer::optimize_read_only_and_chains;
 use crate::perm::{parse_perm_argument, PermMatcher};
 use std::ffi::OsString;
 use std::fs;
@@ -37,6 +38,7 @@ pub enum RuntimeExpr {
     Not(Box<RuntimeExpr>),
     Predicate(RuntimePredicate),
     Action(OutputAction),
+    TraversalBoundary,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,6 +88,7 @@ pub fn plan_command(ast: CommandAst, workers: usize) -> Result<ExecutionPlan, Di
     };
     let mut saw_output = false;
     let lowered = lower_expr(expr, &mut traversal, &mut saw_output, follow_mode)?;
+    let lowered = optimize_read_only_and_chains(lowered);
 
     let expr = if saw_output {
         lowered
@@ -153,11 +156,11 @@ fn lower_predicate(
     match predicate {
         Predicate::MaxDepth(value) => {
             traversal.max_depth = Some(value as usize);
-            Ok(RuntimeExpr::Predicate(RuntimePredicate::True))
+            Ok(RuntimeExpr::TraversalBoundary)
         }
         Predicate::MinDepth(value) => {
             traversal.min_depth = value as usize;
-            Ok(RuntimeExpr::Predicate(RuntimePredicate::True))
+            Ok(RuntimeExpr::TraversalBoundary)
         }
         Predicate::Name {
             pattern,

@@ -8,6 +8,7 @@ pub mod eval;
 pub mod follow;
 pub mod identity;
 pub mod numeric;
+pub mod optimizer;
 pub mod output;
 pub mod parser;
 pub mod pattern;
