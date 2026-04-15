@@ -50,6 +50,10 @@ pub enum RuntimePredicate {
     Inum(NumericComparison),
     Links(NumericComparison),
     SameFile(FileIdentity),
+    LName {
+        pattern: OsString,
+        case_insensitive: bool,
+    },
     Type(FileTypeFilter),
     XType(FileTypeFilter),
     True,
@@ -167,6 +171,13 @@ fn lower_predicate(
         Predicate::SameFile(path) => Ok(RuntimeExpr::Predicate(RuntimePredicate::SameFile(
             resolve_samefile_reference(&path, follow_mode)?,
         ))),
+        Predicate::LName {
+            pattern,
+            case_insensitive,
+        } => Ok(RuntimeExpr::Predicate(RuntimePredicate::LName {
+            pattern,
+            case_insensitive,
+        })),
         Predicate::Type(kind) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Type(kind))),
         Predicate::XType(kind) => Ok(RuntimeExpr::Predicate(RuntimePredicate::XType(kind))),
         Predicate::True => Ok(RuntimeExpr::Predicate(RuntimePredicate::True)),

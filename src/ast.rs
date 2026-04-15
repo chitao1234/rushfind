@@ -38,6 +38,10 @@ pub enum Predicate {
     Inum(OsString),
     Links(OsString),
     SameFile(PathBuf),
+    LName {
+        pattern: OsString,
+        case_insensitive: bool,
+    },
     Type(FileTypeFilter),
     XType(FileTypeFilter),
     True,

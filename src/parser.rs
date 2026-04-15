@@ -200,6 +200,16 @@ impl<'a> Parser<'a> {
                 pattern: self.take_os_string("-ipath")?,
                 case_insensitive: true,
             })
+        } else if token.matches("-lname") {
+            Expr::Predicate(Predicate::LName {
+                pattern: self.take_os_string("-lname")?,
+                case_insensitive: false,
+            })
+        } else if token.matches("-ilname") {
+            Expr::Predicate(Predicate::LName {
+                pattern: self.take_os_string("-ilname")?,
+                case_insensitive: true,
+            })
         } else if token.matches("-inum") {
             let raw = self.take_os_string("-inum")?;
             validate_numeric_argument("-inum", raw.as_os_str())?;
