@@ -1,10 +1,9 @@
 mod support;
 
 use findoxide::birth::read_birth_time;
-use findoxide::numeric::NumericComparison;
 use findoxide::parser::parse_command;
 use findoxide::planner::{RuntimeExpr, RuntimePredicate, plan_command};
-use findoxide::time::{NewerMatcher, Timestamp, TimestampKind};
+use findoxide::time::{NewerMatcher, TimeComparison, Timestamp, TimestampKind};
 use std::fs;
 use support::argv;
 use tempfile::tempdir;
@@ -21,7 +20,7 @@ fn lowers_empty_and_used_predicates() {
     assert!(predicates.iter().any(|predicate| matches!(
         predicate,
         RuntimePredicate::Used(matcher)
-            if matcher.comparison == NumericComparison::GreaterThan(2)
+            if matcher.comparison == TimeComparison::GreaterThan("2".parse().unwrap())
     )));
     assert!(
         predicates

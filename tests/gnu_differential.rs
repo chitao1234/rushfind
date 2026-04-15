@@ -862,6 +862,32 @@ fn ordered_stage8_predicates_match_gnu_find_exactly() {
 }
 
 #[test]
+fn ordered_fractional_time_predicates_match_gnu_find_exactly() {
+    let root = build_size_time_tree();
+    let args_sets = vec![
+        vec![path_arg(root.path()), "-mmin".into(), "0.5".into()],
+        vec![path_arg(root.path()), "-mmin".into(), "+0.1".into()],
+        vec![path_arg(root.path()), "-mtime".into(), "1.5".into()],
+        vec![
+            path_arg(root.path()),
+            "-daystart".into(),
+            "-mtime".into(),
+            "0.5".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-daystart".into(),
+            "-mtime".into(),
+            "-1.5".into(),
+        ],
+    ];
+
+    for args in args_sets {
+        assert_matches_gnu_exact(&args);
+    }
+}
+
+#[test]
 fn parallel_stage8_predicates_match_gnu_find_as_a_set() {
     let root = build_size_time_tree();
     let args_sets = vec![
@@ -998,4 +1024,18 @@ fn parallel_stage9_read_only_tail_matches_gnu_find_as_sets() {
     ];
 
     assert_matches_gnu_as_sets(&args);
+}
+
+#[test]
+fn ordered_fractional_used_predicates_match_gnu_find_exactly() {
+    let root = build_read_only_tail_tree();
+    let args = vec![
+        path_arg(root.path()),
+        "-type".into(),
+        "f".into(),
+        "-used".into(),
+        "0.5".into(),
+    ];
+
+    assert_matches_gnu_exact(&args);
 }

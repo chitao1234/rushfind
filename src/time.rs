@@ -180,9 +180,22 @@ impl RelativeTimeMatcher {
                 self.baseline,
                 actual,
                 self.unit.seconds(),
-                self.unit.exact_shift_units(),
-                self.unit.greater_shift_units(),
+                self.comparison_shifts(),
             )
+        }
+    }
+
+    fn comparison_shifts(&self) -> TimeComparisonShifts {
+        if self.daystart && matches!(self.unit, RelativeTimeUnit::Days) {
+            // `-daystart` day predicates are centered on local-midnight buckets,
+            // not rolling 24-hour windows.
+            TimeComparisonShifts {
+                exact_shift_units: 1,
+                less_adjustment_units: -1,
+                greater_shift_units: 0,
+            }
+        } else {
+            self.unit.rolling_window_shifts()
         }
     }
 }
@@ -215,25 +228,36 @@ impl UsedMatcher {
             atime,
             ctime,
             RelativeTimeUnit::Days.seconds(),
-            1,
-            0,
+            TimeComparisonShifts {
+                exact_shift_units: 1,
+                less_adjustment_units: 0,
+                greater_shift_units: 0,
+            },
         )
         .expect("used time comparison should be computable")
     }
 }
 
-impl RelativeTimeUnit {
-    const fn exact_shift_units(self) -> i64 {
-        match self {
-            Self::Minutes => 1,
-            Self::Days => 0,
-        }
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TimeComparisonShifts {
+    exact_shift_units: i64,
+    less_adjustment_units: i64,
+    greater_shift_units: i64,
+}
 
-    const fn greater_shift_units(self) -> i64 {
+impl RelativeTimeUnit {
+    const fn rolling_window_shifts(self) -> TimeComparisonShifts {
         match self {
-            Self::Minutes => 0,
-            Self::Days => 1,
+            Self::Minutes => TimeComparisonShifts {
+                exact_shift_units: 1,
+                less_adjustment_units: 0,
+                greater_shift_units: 0,
+            },
+            Self::Days => TimeComparisonShifts {
+                exact_shift_units: 0,
+                less_adjustment_units: 0,
+                greater_shift_units: 1,
+            },
         }
     }
 }
@@ -274,8 +298,7 @@ fn matches_time_window(
     baseline: Timestamp,
     actual: Timestamp,
     unit_seconds: i64,
-    exact_shift_units: i64,
-    greater_shift_units: i64,
+    shifts: TimeComparisonShifts,
 ) -> Result<bool, Diagnostic> {
     match comparison {
         TimeComparison::Exactly(amount) => {
@@ -283,22 +306,27 @@ fn matches_time_window(
                 baseline,
                 amount,
                 unit_seconds,
-                -exact_shift_units,
+                -shifts.exact_shift_units,
                 RoundingMode::Ceil,
             );
             let upper = threshold_boundary(
                 baseline,
                 amount,
                 unit_seconds,
-                1 - exact_shift_units,
+                1 - shifts.exact_shift_units,
                 RoundingMode::Floor,
             );
 
             Ok(timestamp_le_boundary(actual, lower) && timestamp_gt_boundary(actual, upper))
         }
         TimeComparison::LessThan(amount) => {
-            let boundary =
-                threshold_boundary(baseline, amount, unit_seconds, 0, RoundingMode::Ceil);
+            let boundary = threshold_boundary(
+                baseline,
+                amount,
+                unit_seconds,
+                shifts.less_adjustment_units,
+                RoundingMode::Ceil,
+            );
             Ok(timestamp_gt_boundary(actual, boundary))
         }
         TimeComparison::GreaterThan(amount) => {
@@ -306,7 +334,7 @@ fn matches_time_window(
                 baseline,
                 amount,
                 unit_seconds,
-                greater_shift_units,
+                shifts.greater_shift_units,
                 RoundingMode::Floor,
             );
             Ok(timestamp_lt_boundary(actual, boundary))

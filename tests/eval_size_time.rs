@@ -288,6 +288,21 @@ fn daystart_day_matching_uses_calendar_day_boundaries() {
 }
 
 #[test]
+fn daystart_fractional_days_use_duration_from_local_day_start() {
+    let daystart = local_day_start(Timestamp::new(1_700_000_000, 0)).unwrap();
+    let matcher = RelativeTimeMatcher::new(
+        TimestampKind::Modification,
+        RelativeTimeUnit::Days,
+        TimeComparison::GreaterThan("0.5".parse().unwrap()),
+        daystart,
+        true,
+    );
+
+    assert!(!matcher.matches_timestamp(Timestamp::new(daystart.seconds - 43_200, 0)));
+    assert!(matcher.matches_timestamp(Timestamp::new(daystart.seconds - 43_201, 999_999_999,)));
+}
+
+#[test]
 fn relative_time_evaluation_reads_the_active_follow_mode_timestamp() {
     let root = tempdir().unwrap();
     let target = root.path().join("target.bin");

@@ -12,6 +12,8 @@
 - Permission predicate: `-perm`
 - Size/time predicates: `-size`, `-empty`, `-used`, `-mtime`, `-atime`, `-ctime`, `-mmin`,
   `-amin`, `-cmin`, `-newer`, `-anewer`, `-cnewer`, full read-only `-newerXY`, `-daystart`
+- Time predicates and `-used` accept GNU-style fractional magnitudes such as `0.5`, `+1.25`,
+  and `-0.75`
 - Symlink-content predicates: `-lname`, `-ilname`
 - Traversal controls: `-mindepth`, `-maxdepth`
 - Output actions: `-print`, `-print0`

@@ -2,10 +2,9 @@ use findoxide::birth::read_birth_time;
 use findoxide::entry::EntryContext;
 use findoxide::eval::evaluate;
 use findoxide::follow::FollowMode;
-use findoxide::numeric::NumericComparison;
 use findoxide::output::RecordingSink;
 use findoxide::planner::{RuntimeExpr, RuntimePredicate};
-use findoxide::time::{NewerMatcher, Timestamp, TimestampKind, UsedMatcher};
+use findoxide::time::{NewerMatcher, TimeComparison, Timestamp, TimestampKind, UsedMatcher};
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{self as unix_fs, MetadataExt};
@@ -155,13 +154,13 @@ fn nonempty_directory_empty_probe_does_not_flip_used_when_atime_is_older_than_ct
             Box::new(RuntimeExpr::Predicate(RuntimePredicate::Empty)),
             Box::new(RuntimeExpr::Predicate(RuntimePredicate::Used(
                 UsedMatcher {
-                    comparison: NumericComparison::Exactly(1),
+                    comparison: TimeComparison::Exactly("1".parse().unwrap()),
                 },
             ))),
         )),
         Box::new(RuntimeExpr::Predicate(RuntimePredicate::Used(
             UsedMatcher {
-                comparison: NumericComparison::LessThan(1),
+                comparison: TimeComparison::LessThan("1".parse().unwrap()),
             },
         ))),
     );
