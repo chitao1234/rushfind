@@ -1,7 +1,6 @@
 use findoxide::entry::EntryContext;
 use findoxide::eval::evaluate;
 use findoxide::follow::FollowMode;
-use findoxide::numeric::NumericComparison;
 use findoxide::output::RecordingSink;
 use findoxide::planner::{RuntimeExpr, RuntimePredicate};
 use findoxide::size::parse_size_argument;
@@ -65,28 +64,28 @@ fn minute_relative_time_matcher_uses_gnu_shifted_windows() {
     let exact_zero = RelativeTimeMatcher::new(
         TimestampKind::Modification,
         RelativeTimeUnit::Minutes,
-        TimeComparison::Exactly(0),
+        TimeComparison::Exactly("0".parse().unwrap()),
         now,
         false,
     );
     let exact_one = RelativeTimeMatcher::new(
         TimestampKind::Modification,
         RelativeTimeUnit::Minutes,
-        TimeComparison::Exactly(1),
+        TimeComparison::Exactly("1".parse().unwrap()),
         now,
         false,
     );
     let less_than_one = RelativeTimeMatcher::new(
         TimestampKind::Modification,
         RelativeTimeUnit::Minutes,
-        TimeComparison::LessThan(1),
+        TimeComparison::LessThan("1".parse().unwrap()),
         now,
         false,
     );
     let greater_than_one = RelativeTimeMatcher::new(
         TimestampKind::Modification,
         RelativeTimeUnit::Minutes,
-        TimeComparison::GreaterThan(1),
+        TimeComparison::GreaterThan("1".parse().unwrap()),
         now,
         false,
     );
@@ -112,21 +111,21 @@ fn minute_relative_time_matcher_preserves_subsecond_boundaries() {
     let exact_one = RelativeTimeMatcher::new(
         TimestampKind::Modification,
         RelativeTimeUnit::Minutes,
-        TimeComparison::Exactly(1),
+        TimeComparison::Exactly("1".parse().unwrap()),
         now,
         false,
     );
     let less_than_one = RelativeTimeMatcher::new(
         TimestampKind::Modification,
         RelativeTimeUnit::Minutes,
-        TimeComparison::LessThan(1),
+        TimeComparison::LessThan("1".parse().unwrap()),
         now,
         false,
     );
     let greater_than_one = RelativeTimeMatcher::new(
         TimestampKind::Modification,
         RelativeTimeUnit::Minutes,
-        TimeComparison::GreaterThan(1),
+        TimeComparison::GreaterThan("1".parse().unwrap()),
         now,
         false,
     );
@@ -152,28 +151,28 @@ fn day_relative_time_matcher_uses_gnu_day_windows() {
     let exact_zero = RelativeTimeMatcher::new(
         TimestampKind::Modification,
         RelativeTimeUnit::Days,
-        TimeComparison::Exactly(0),
+        TimeComparison::Exactly("0".parse().unwrap()),
         now,
         false,
     );
     let exact_one = RelativeTimeMatcher::new(
         TimestampKind::Modification,
         RelativeTimeUnit::Days,
-        TimeComparison::Exactly(1),
+        TimeComparison::Exactly("1".parse().unwrap()),
         now,
         false,
     );
     let less_than_one = RelativeTimeMatcher::new(
         TimestampKind::Modification,
         RelativeTimeUnit::Days,
-        TimeComparison::LessThan(1),
+        TimeComparison::LessThan("1".parse().unwrap()),
         now,
         false,
     );
     let greater_than_one = RelativeTimeMatcher::new(
         TimestampKind::Modification,
         RelativeTimeUnit::Days,
-        TimeComparison::GreaterThan(1),
+        TimeComparison::GreaterThan("1".parse().unwrap()),
         now,
         false,
     );
@@ -197,16 +196,16 @@ fn day_relative_time_matcher_uses_gnu_day_windows() {
 #[test]
 fn used_matcher_matches_gnu_used_windows() {
     let exact_zero = UsedMatcher {
-        comparison: NumericComparison::Exactly(0),
+        comparison: TimeComparison::Exactly("0".parse().unwrap()),
     };
     let exact_one = UsedMatcher {
-        comparison: NumericComparison::Exactly(1),
+        comparison: TimeComparison::Exactly("1".parse().unwrap()),
     };
     let greater_than_one = UsedMatcher {
-        comparison: NumericComparison::GreaterThan(1),
+        comparison: TimeComparison::GreaterThan("1".parse().unwrap()),
     };
     let less_than_one = UsedMatcher {
-        comparison: NumericComparison::LessThan(1),
+        comparison: TimeComparison::LessThan("1".parse().unwrap()),
     };
 
     assert!(!exact_zero.matches(Timestamp::new(1, 0), Timestamp::new(0, 0)));
@@ -218,12 +217,68 @@ fn used_matcher_matches_gnu_used_windows() {
 }
 
 #[test]
+fn fractional_minute_thresholds_quantize_after_unit_conversion() {
+    let now = Timestamp::new(10_000, 100_000_000);
+    let five_point_nine_seconds_old = Timestamp::new(9_994, 200_000_001);
+    let exactly_six_seconds_old = Timestamp::new(9_994, 100_000_000);
+    let sixty_five_point_nine_seconds_old = Timestamp::new(9_934, 200_000_001);
+    let exactly_sixty_six_seconds_old = Timestamp::new(9_934, 100_000_000);
+
+    let exact = RelativeTimeMatcher::new(
+        TimestampKind::Modification,
+        RelativeTimeUnit::Minutes,
+        TimeComparison::Exactly("1.1".parse().unwrap()),
+        now,
+        false,
+    );
+    let less = RelativeTimeMatcher::new(
+        TimestampKind::Modification,
+        RelativeTimeUnit::Minutes,
+        TimeComparison::LessThan("1.1".parse().unwrap()),
+        now,
+        false,
+    );
+    let greater = RelativeTimeMatcher::new(
+        TimestampKind::Modification,
+        RelativeTimeUnit::Minutes,
+        TimeComparison::GreaterThan("1.1".parse().unwrap()),
+        now,
+        false,
+    );
+
+    assert!(!exact.matches_timestamp(five_point_nine_seconds_old));
+    assert!(exact.matches_timestamp(exactly_six_seconds_old));
+    assert!(exact.matches_timestamp(sixty_five_point_nine_seconds_old));
+    assert!(!exact.matches_timestamp(exactly_sixty_six_seconds_old));
+    assert!(less.matches_timestamp(sixty_five_point_nine_seconds_old));
+    assert!(!less.matches_timestamp(exactly_sixty_six_seconds_old));
+    assert!(!greater.matches_timestamp(exactly_sixty_six_seconds_old));
+}
+
+#[test]
+fn used_matcher_accepts_fractional_day_thresholds() {
+    let exact = UsedMatcher {
+        comparison: TimeComparison::Exactly("1.5".parse().unwrap()),
+    };
+    let greater = UsedMatcher {
+        comparison: TimeComparison::GreaterThan("1.5".parse().unwrap()),
+    };
+
+    assert!(!exact.matches(Timestamp::new(43_199, 999_999_999), Timestamp::new(0, 0)));
+    assert!(exact.matches(Timestamp::new(43_200, 0), Timestamp::new(0, 0)));
+    assert!(exact.matches(Timestamp::new(129_599, 999_999_999), Timestamp::new(0, 0)));
+    assert!(!exact.matches(Timestamp::new(129_600, 0), Timestamp::new(0, 0)));
+    assert!(!greater.matches(Timestamp::new(129_600, 0), Timestamp::new(0, 0)));
+    assert!(greater.matches(Timestamp::new(129_600, 1), Timestamp::new(0, 0)));
+}
+
+#[test]
 fn daystart_day_matching_uses_calendar_day_boundaries() {
     let daystart = local_day_start(Timestamp::new(1_700_000_000, 0)).unwrap();
     let exact_today = RelativeTimeMatcher::new(
         TimestampKind::Modification,
         RelativeTimeUnit::Days,
-        TimeComparison::Exactly(0),
+        TimeComparison::Exactly("0".parse().unwrap()),
         daystart,
         true,
     );
@@ -249,7 +304,7 @@ fn relative_time_evaluation_reads_the_active_follow_mode_timestamp() {
     let expr = RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(RelativeTimeMatcher::new(
         TimestampKind::Modification,
         RelativeTimeUnit::Minutes,
-        TimeComparison::GreaterThan(1),
+        TimeComparison::GreaterThan("1".parse().unwrap()),
         Timestamp::new(1_700_000_000, 0),
         false,
     )));

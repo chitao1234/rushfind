@@ -83,7 +83,9 @@ impl FromStr for TimeAmount {
         if whole.is_empty() || !whole.bytes().all(|byte| byte.is_ascii_digit()) {
             return Err(Diagnostic::parse("invalid time amount"));
         }
-        if frac.is_some_and(|value| value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit())) {
+        if frac.is_some_and(|value| {
+            value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit())
+        }) {
             return Err(Diagnostic::parse("invalid time amount"));
         }
 
@@ -162,18 +164,25 @@ impl RelativeTimeMatcher {
     }
 
     pub fn matches_timestamp_checked(&self, actual: Timestamp) -> Result<bool, Diagnostic> {
-        let comparison = WindowComparison::try_from(&self.comparison)?;
-        if self.daystart && matches!(self.unit, RelativeTimeUnit::Days) {
+        if self.daystart
+            && matches!(self.unit, RelativeTimeUnit::Days)
+            && self.comparison.integral_value().is_some()
+        {
             let baseline_day = local_calendar_day(self.baseline)?;
             let actual_day = local_calendar_day(actual)?;
-            Ok(matches_calendar_day_window(comparison, baseline_day - actual_day))
+            Ok(matches_calendar_day_window(
+                &self.comparison,
+                baseline_day - actual_day,
+            ))
         } else {
-            Ok(matches_timestamp_window(
-                comparison,
+            matches_time_window(
+                &self.comparison,
                 self.baseline,
                 actual,
-                self.unit.window(),
-            ))
+                self.unit.seconds(),
+                self.unit.exact_shift_units(),
+                self.unit.greater_shift_units(),
+            )
         }
     }
 }
@@ -201,81 +210,31 @@ impl UsedMatcher {
             return false;
         }
 
-        let Ok(comparison) = WindowComparison::try_from(&self.comparison) else {
-            return false;
-        };
-
-        matches_timestamp_window(
-            comparison,
+        matches_time_window(
+            &self.comparison,
             atime,
             ctime,
-            WholeSecondWindow::shifted_exact(RelativeTimeUnit::Days.seconds()),
+            RelativeTimeUnit::Days.seconds(),
+            1,
+            0,
         )
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct WholeSecondWindow {
-    unit_seconds: i64,
-    exact_shift_units: i64,
-    greater_shift_units: i64,
-}
-
-impl WholeSecondWindow {
-    const fn new(unit_seconds: i64, exact_shift_units: i64, greater_shift_units: i64) -> Self {
-        Self {
-            unit_seconds,
-            exact_shift_units,
-            greater_shift_units,
-        }
-    }
-
-    const fn shifted_exact(unit_seconds: i64) -> Self {
-        Self::new(unit_seconds, 1, 0)
-    }
-
-    const fn elapsed(unit_seconds: i64) -> Self {
-        Self::new(unit_seconds, 0, 1)
+        .expect("used time comparison should be computable")
     }
 }
 
 impl RelativeTimeUnit {
-    const fn window(self) -> WholeSecondWindow {
+    const fn exact_shift_units(self) -> i64 {
         match self {
-            Self::Minutes => WholeSecondWindow::shifted_exact(Self::Minutes.seconds()),
-            Self::Days => WholeSecondWindow::elapsed(Self::Days.seconds()),
+            Self::Minutes => 1,
+            Self::Days => 0,
         }
     }
-}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum WindowComparison {
-    Exactly(WindowExpected),
-    LessThan(WindowExpected),
-    GreaterThan(WindowExpected),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum WindowExpected {
-    Finite(i64),
-}
-
-impl TryFrom<&TimeComparison> for WindowComparison {
-    type Error = Diagnostic;
-
-    fn try_from(value: &TimeComparison) -> Result<Self, Self::Error> {
-        let Some(expected) = value.integral_value() else {
-            return Err(Diagnostic::new(
-                "fractional time comparisons are not yet implemented",
-                1,
-            ));
-        };
-
-        Ok(match value {
-            TimeComparison::Exactly(_) => Self::Exactly(WindowExpected::Finite(expected)),
-            TimeComparison::LessThan(_) => Self::LessThan(WindowExpected::Finite(expected)),
-            TimeComparison::GreaterThan(_) => Self::GreaterThan(WindowExpected::Finite(expected)),
-        })
+    const fn greater_shift_units(self) -> i64 {
+        match self {
+            Self::Minutes => 0,
+            Self::Days => 1,
+        }
     }
 }
 
@@ -286,90 +245,253 @@ enum TimestampBoundary {
     AfterAll,
 }
 
-fn matches_calendar_day_window(comparison: WindowComparison, elapsed_days: i64) -> bool {
-    match comparison {
-        WindowComparison::Exactly(WindowExpected::Finite(expected)) => elapsed_days == expected,
-        WindowComparison::LessThan(WindowExpected::Finite(expected)) => elapsed_days < expected,
-        WindowComparison::GreaterThan(WindowExpected::Finite(expected)) => elapsed_days > expected,
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RoundingMode {
+    Floor,
+    Ceil,
 }
 
-fn matches_timestamp_window(
-    comparison: WindowComparison,
-    baseline: Timestamp,
-    actual: Timestamp,
-    window: WholeSecondWindow,
-) -> bool {
-    match comparison {
-        WindowComparison::Exactly(WindowExpected::Finite(expected)) => {
-            let lower = shift_timestamp_boundary(
-                baseline,
-                window.unit_seconds,
-                expected,
-                window.exact_shift_units,
-            );
-            let upper = shift_timestamp_boundary(
-                baseline,
-                window.unit_seconds,
-                expected,
-                window.exact_shift_units - 1,
-            );
-
-            timestamp_le_boundary(actual, lower) && timestamp_gt_boundary(actual, upper)
-        }
-        WindowComparison::LessThan(WindowExpected::Finite(expected)) => {
-            let boundary = shift_timestamp_boundary(baseline, window.unit_seconds, expected, 0);
-            timestamp_gt_boundary(actual, boundary)
-        }
-        WindowComparison::GreaterThan(WindowExpected::Finite(expected)) => {
-            let boundary = shift_timestamp_boundary(
-                baseline,
-                window.unit_seconds,
-                expected,
-                -window.greater_shift_units,
-            );
-            timestamp_lt_boundary(actual, boundary)
-        }
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QuantizedOffset {
+    Finite(Timestamp),
+    Overflow,
 }
 
-fn shift_timestamp_boundary(
-    baseline: Timestamp,
-    unit_seconds: i64,
-    expected_units: i64,
-    boundary_units: i64,
-) -> TimestampBoundary {
-    let delta_units = match boundary_units.checked_sub(expected_units) {
-        Some(delta_units) => delta_units,
-        None if expected_units.is_negative() => return TimestampBoundary::AfterAll,
-        None => return TimestampBoundary::BeforeAll,
+fn matches_calendar_day_window(comparison: &TimeComparison, elapsed_days: i64) -> bool {
+    let Some(expected) = comparison.integral_value() else {
+        return false;
     };
 
-    shift_timestamp_units(baseline, unit_seconds, delta_units)
+    match comparison {
+        TimeComparison::Exactly(_) => elapsed_days == expected,
+        TimeComparison::LessThan(_) => elapsed_days < expected,
+        TimeComparison::GreaterThan(_) => elapsed_days > expected,
+    }
 }
 
-fn shift_timestamp_units(
+fn matches_time_window(
+    comparison: &TimeComparison,
+    baseline: Timestamp,
+    actual: Timestamp,
+    unit_seconds: i64,
+    exact_shift_units: i64,
+    greater_shift_units: i64,
+) -> Result<bool, Diagnostic> {
+    match comparison {
+        TimeComparison::Exactly(amount) => {
+            let lower = threshold_boundary(
+                baseline,
+                amount,
+                unit_seconds,
+                -exact_shift_units,
+                RoundingMode::Ceil,
+            );
+            let upper = threshold_boundary(
+                baseline,
+                amount,
+                unit_seconds,
+                1 - exact_shift_units,
+                RoundingMode::Floor,
+            );
+
+            Ok(timestamp_le_boundary(actual, lower) && timestamp_gt_boundary(actual, upper))
+        }
+        TimeComparison::LessThan(amount) => {
+            let boundary =
+                threshold_boundary(baseline, amount, unit_seconds, 0, RoundingMode::Ceil);
+            Ok(timestamp_gt_boundary(actual, boundary))
+        }
+        TimeComparison::GreaterThan(amount) => {
+            let boundary = threshold_boundary(
+                baseline,
+                amount,
+                unit_seconds,
+                greater_shift_units,
+                RoundingMode::Floor,
+            );
+            Ok(timestamp_lt_boundary(actual, boundary))
+        }
+    }
+}
+
+fn threshold_boundary(
+    baseline: Timestamp,
+    amount: &TimeAmount,
+    unit_seconds: i64,
+    unit_adjustment: i64,
+    rounding: RoundingMode,
+) -> TimestampBoundary {
+    let adjusted = shift_timestamp_by_units(baseline, unit_seconds, unit_adjustment);
+    let TimestampBoundary::Finite(adjusted) = adjusted else {
+        return adjusted;
+    };
+
+    shift_timestamp_by_offset(adjusted, amount.quantize_offset(unit_seconds, rounding))
+}
+
+fn shift_timestamp_by_units(
     timestamp: Timestamp,
     unit_seconds: i64,
     delta_units: i64,
 ) -> TimestampBoundary {
-    let quotient = timestamp.seconds.div_euclid(unit_seconds);
-    let remainder = timestamp.seconds.rem_euclid(unit_seconds);
-    let shifted_quotient = match quotient.checked_add(delta_units) {
-        Some(shifted_quotient) => shifted_quotient,
-        None if delta_units.is_negative() => return TimestampBoundary::BeforeAll,
-        None => return TimestampBoundary::AfterAll,
+    let delta_seconds = match unit_seconds.checked_mul(delta_units) {
+        Some(delta_seconds) => delta_seconds,
+        None if delta_units.is_negative() => return TimestampBoundary::AfterAll,
+        None => return TimestampBoundary::BeforeAll,
     };
-    let shifted_seconds = match shifted_quotient
-        .checked_mul(unit_seconds)
-        .and_then(|seconds| seconds.checked_add(remainder))
-    {
+    let shifted_seconds = match timestamp.seconds.checked_sub(delta_seconds) {
         Some(shifted_seconds) => shifted_seconds,
-        None if shifted_quotient.is_negative() => return TimestampBoundary::BeforeAll,
-        None => return TimestampBoundary::AfterAll,
+        None if delta_seconds.is_negative() => return TimestampBoundary::AfterAll,
+        None => return TimestampBoundary::BeforeAll,
     };
 
     TimestampBoundary::Finite(Timestamp::new(shifted_seconds, timestamp.nanos))
+}
+
+fn shift_timestamp_by_offset(timestamp: Timestamp, offset: QuantizedOffset) -> TimestampBoundary {
+    let QuantizedOffset::Finite(offset) = offset else {
+        return TimestampBoundary::BeforeAll;
+    };
+
+    let mut shifted_seconds = match timestamp.seconds.checked_sub(offset.seconds) {
+        Some(shifted_seconds) => shifted_seconds,
+        None => return TimestampBoundary::BeforeAll,
+    };
+    let shifted_nanos = if timestamp.nanos >= offset.nanos {
+        timestamp.nanos - offset.nanos
+    } else {
+        shifted_seconds = match shifted_seconds.checked_sub(1) {
+            Some(shifted_seconds) => shifted_seconds,
+            None => return TimestampBoundary::BeforeAll,
+        };
+        timestamp.nanos + 1_000_000_000 - offset.nanos
+    };
+
+    TimestampBoundary::Finite(Timestamp::new(shifted_seconds, shifted_nanos))
+}
+
+impl TimeAmount {
+    fn quantize_offset(&self, unit_seconds: i64, rounding: RoundingMode) -> QuantizedOffset {
+        let seconds_digits = multiply_decimal_digits(&self.digits, unit_seconds as u32);
+        let nanos_digits = quantized_nanoseconds_digits(&seconds_digits, self.scale, rounding);
+        quantized_offset_from_nanoseconds(&nanos_digits)
+    }
+}
+
+fn multiply_decimal_digits(digits: &[u8], multiplier: u32) -> Vec<u8> {
+    let mut carry = 0u32;
+    let mut product = Vec::with_capacity(digits.len() + 5);
+
+    for digit in digits.iter().rev() {
+        let value = u32::from(*digit - b'0') * multiplier + carry;
+        product.push((value % 10) as u8 + b'0');
+        carry = value / 10;
+    }
+
+    while carry > 0 {
+        product.push((carry % 10) as u8 + b'0');
+        carry /= 10;
+    }
+
+    product.reverse();
+    product
+}
+
+fn quantized_nanoseconds_digits(digits: &[u8], scale: u32, rounding: RoundingMode) -> Vec<u8> {
+    if scale <= 9 {
+        let mut quantized = digits.to_vec();
+        quantized.extend(std::iter::repeat_n(b'0', (9 - scale) as usize));
+        trim_leading_zero_digits(&mut quantized);
+        return quantized;
+    }
+
+    let truncated = (scale - 9) as usize;
+    if truncated >= digits.len() {
+        return match rounding {
+            RoundingMode::Floor => vec![b'0'],
+            RoundingMode::Ceil if digits.iter().any(|digit| *digit != b'0') => vec![b'1'],
+            RoundingMode::Ceil => vec![b'0'],
+        };
+    }
+
+    let split = digits.len() - truncated;
+    let mut quantized = digits[..split].to_vec();
+    let remainder_nonzero = digits[split..].iter().any(|digit| *digit != b'0');
+    trim_leading_zero_digits(&mut quantized);
+
+    if matches!(rounding, RoundingMode::Ceil) && remainder_nonzero {
+        increment_decimal_digits(&mut quantized);
+    }
+
+    quantized
+}
+
+fn quantized_offset_from_nanoseconds(digits: &[u8]) -> QuantizedOffset {
+    let len = digits.len();
+    let seconds_digits = if len > 9 { &digits[..len - 9] } else { b"0" };
+    let seconds = match parse_nonnegative_i64_digits(seconds_digits) {
+        Some(seconds) => seconds,
+        None => return QuantizedOffset::Overflow,
+    };
+
+    let mut nanos_digits = [b'0'; 9];
+    if len > 9 {
+        nanos_digits.copy_from_slice(&digits[len - 9..]);
+    } else {
+        nanos_digits[9 - len..].copy_from_slice(digits);
+    }
+
+    QuantizedOffset::Finite(Timestamp::new(
+        seconds,
+        str::from_utf8(&nanos_digits)
+            .expect("nanosecond digits are ascii")
+            .parse::<i32>()
+            .expect("nanosecond digits fit in i32"),
+    ))
+}
+
+fn parse_nonnegative_i64_digits(digits: &[u8]) -> Option<i64> {
+    let normalized = normalized_digit_slice(digits);
+    let max = b"9223372036854775807";
+    if normalized.len() > max.len() || (normalized.len() == max.len() && normalized > max) {
+        return None;
+    }
+
+    str::from_utf8(normalized).ok()?.parse::<i64>().ok()
+}
+
+fn normalized_digit_slice(digits: &[u8]) -> &[u8] {
+    let index = digits
+        .iter()
+        .position(|digit| *digit != b'0')
+        .unwrap_or(digits.len().saturating_sub(1));
+    &digits[index..]
+}
+
+fn trim_leading_zero_digits(digits: &mut Vec<u8>) {
+    while digits.len() > 1 && digits.first() == Some(&b'0') {
+        digits.remove(0);
+    }
+}
+
+fn increment_decimal_digits(digits: &mut Vec<u8>) {
+    let mut carry = true;
+    for digit in digits.iter_mut().rev() {
+        if !carry {
+            break;
+        }
+
+        if *digit == b'9' {
+            *digit = b'0';
+        } else {
+            *digit += 1;
+            carry = false;
+        }
+    }
+
+    if carry {
+        digits.insert(0, b'1');
+    }
 }
 
 fn timestamp_gt_boundary(actual: Timestamp, boundary: TimestampBoundary) -> bool {
