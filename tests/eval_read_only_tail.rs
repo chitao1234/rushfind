@@ -25,34 +25,42 @@ fn empty_matches_only_empty_regular_files_and_directories() {
     let expr = RuntimeExpr::Predicate(RuntimePredicate::Empty);
     let mut sink = RecordingSink::default();
 
-    assert!(evaluate(
-        &expr,
-        &EntryContext::new(empty_dir, 0, true),
-        FollowMode::Physical,
-        &mut sink
-    )
-    .unwrap());
-    assert!(!evaluate(
-        &expr,
-        &EntryContext::new(nonempty_dir, 0, true),
-        FollowMode::Physical,
-        &mut sink
-    )
-    .unwrap());
-    assert!(evaluate(
-        &expr,
-        &EntryContext::new(empty_file, 0, true),
-        FollowMode::Physical,
-        &mut sink
-    )
-    .unwrap());
-    assert!(!evaluate(
-        &expr,
-        &EntryContext::new(nonempty_file, 0, true),
-        FollowMode::Physical,
-        &mut sink
-    )
-    .unwrap());
+    assert!(
+        evaluate(
+            &expr,
+            &EntryContext::new(empty_dir, 0, true),
+            FollowMode::Physical,
+            &mut sink
+        )
+        .unwrap()
+    );
+    assert!(
+        !evaluate(
+            &expr,
+            &EntryContext::new(nonempty_dir, 0, true),
+            FollowMode::Physical,
+            &mut sink
+        )
+        .unwrap()
+    );
+    assert!(
+        evaluate(
+            &expr,
+            &EntryContext::new(empty_file, 0, true),
+            FollowMode::Physical,
+            &mut sink
+        )
+        .unwrap()
+    );
+    assert!(
+        !evaluate(
+            &expr,
+            &EntryContext::new(nonempty_file, 0, true),
+            FollowMode::Physical,
+            &mut sink
+        )
+        .unwrap()
+    );
 }
 
 #[test]

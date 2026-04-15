@@ -256,9 +256,11 @@ fn reports_unsupported_exec_during_planning() {
         .unwrap();
 
     assert_ne!(output.status.code(), Some(0));
-    assert!(String::from_utf8(output.stderr)
-        .unwrap()
-        .contains("unsupported in read-only v0"));
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("unsupported in read-only v0")
+    );
 }
 
 #[test]
@@ -270,9 +272,11 @@ fn reports_parse_errors_nonzero() {
         .unwrap();
 
     assert_ne!(output.status.code(), Some(0));
-    assert!(String::from_utf8(output.stderr)
-        .unwrap()
-        .contains("expected `)`"));
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("expected `)`")
+    );
 }
 
 #[test]

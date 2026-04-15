@@ -6,8 +6,8 @@ use findoxide::output::RecordingSink;
 use findoxide::planner::{RuntimeExpr, RuntimePredicate};
 use findoxide::size::parse_size_argument;
 use findoxide::time::{
-    local_day_start, NewerMatcher, RelativeTimeMatcher, RelativeTimeUnit, TimeComparison,
-    Timestamp, TimestampKind, UsedMatcher,
+    NewerMatcher, RelativeTimeMatcher, RelativeTimeUnit, TimeComparison, Timestamp, TimestampKind,
+    UsedMatcher, local_day_start,
 };
 use std::ffi::OsStr;
 use std::fs;
@@ -162,20 +162,24 @@ fn newer_matcher_compares_full_timestamp_precision() {
     }));
     let mut sink = RecordingSink::default();
 
-    assert!(!evaluate(
-        &expr,
-        &EntryContext::new(older, 0, true),
-        FollowMode::Physical,
-        &mut sink,
-    )
-    .unwrap());
-    assert!(evaluate(
-        &expr,
-        &EntryContext::new(newer, 0, true),
-        FollowMode::Physical,
-        &mut sink,
-    )
-    .unwrap());
+    assert!(
+        !evaluate(
+            &expr,
+            &EntryContext::new(older, 0, true),
+            FollowMode::Physical,
+            &mut sink,
+        )
+        .unwrap()
+    );
+    assert!(
+        evaluate(
+            &expr,
+            &EntryContext::new(newer, 0, true),
+            FollowMode::Physical,
+            &mut sink,
+        )
+        .unwrap()
+    );
 }
 
 fn evaluate_size(path: &Path, raw: &str, follow_mode: FollowMode) -> bool {

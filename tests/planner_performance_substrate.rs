@@ -1,7 +1,7 @@
 mod support;
 
 use findoxide::parser::parse_command;
-use findoxide::planner::{plan_command, OutputAction, RuntimeExpr, RuntimePredicate};
+use findoxide::planner::{OutputAction, RuntimeExpr, RuntimePredicate, plan_command};
 use support::argv;
 
 #[test]

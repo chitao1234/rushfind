@@ -163,7 +163,7 @@ mod tests {
     use crate::follow::FollowMode;
     use crate::output::RecordingSink;
     use crate::parser::parse_command;
-    use crate::planner::{plan_command, ExecutionPlan, RuntimeExpr, RuntimePredicate};
+    use crate::planner::{ExecutionPlan, RuntimeExpr, RuntimePredicate, plan_command};
     use std::ffi::OsString;
     use std::fs;
     use std::os::unix::fs as unix_fs;

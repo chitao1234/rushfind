@@ -8,16 +8,7 @@ use support::argv;
 #[test]
 fn parses_metadata_ownership_predicates() {
     let ast = parse_command(&argv(&[
-        ".",
-        "-uid",
-        "+42",
-        "-gid",
-        "-2",
-        "-user",
-        "alice",
-        "-group",
-        "staff",
-        "-nouser",
+        ".", "-uid", "+42", "-gid", "-2", "-user", "alice", "-group", "staff", "-nouser",
         "-nogroup",
     ]))
     .unwrap();
@@ -43,7 +34,11 @@ fn parses_metadata_ownership_predicates() {
 fn reports_missing_argument_for_metadata_ownership_predicates() {
     for flag in ["-uid", "-gid", "-user", "-group"] {
         let error = parse_command(&argv(&[".", flag])).unwrap_err();
-        assert!(error.message.contains(&format!("missing argument for `{flag}`")));
+        assert!(
+            error
+                .message
+                .contains(&format!("missing argument for `{flag}`"))
+        );
     }
 }
 
@@ -51,6 +46,10 @@ fn reports_missing_argument_for_metadata_ownership_predicates() {
 fn reports_malformed_uid_and_gid_numeric_arguments() {
     for (flag, value) in [("-uid", "+"), ("-gid", "--2"), ("-uid", "abc")] {
         let error = parse_command(&argv(&[".", flag, value])).unwrap_err();
-        assert!(error.message.contains(&format!("invalid numeric argument for `{flag}`")));
+        assert!(
+            error
+                .message
+                .contains(&format!("invalid numeric argument for `{flag}`"))
+        );
     }
 }

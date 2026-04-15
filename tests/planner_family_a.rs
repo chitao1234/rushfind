@@ -57,8 +57,9 @@ fn samefile_reference_uses_follow_mode_rules() {
 fn broken_samefile_reference_falls_back_to_physical_metadata() {
     let root = tempdir().unwrap();
     unix_fs::symlink(root.path().join("missing"), root.path().join("broken-link")).unwrap();
-    let expected =
-        FileIdentity::from_metadata(&fs::symlink_metadata(root.path().join("broken-link")).unwrap());
+    let expected = FileIdentity::from_metadata(
+        &fs::symlink_metadata(root.path().join("broken-link")).unwrap(),
+    );
 
     for flag in ["-H", "-L"] {
         let args = vec![

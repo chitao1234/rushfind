@@ -223,9 +223,19 @@ fn assign_target_bits(who: WhoMask) -> u32 {
 }
 
 fn class_bits(who: WhoMask, template: u32) -> u32 {
-    (if who.0 & 0b001 != 0 { template & 0o700 } else { 0 })
-        | (if who.0 & 0b010 != 0 { template & 0o070 } else { 0 })
-        | (if who.0 & 0b100 != 0 { template & 0o007 } else { 0 })
+    (if who.0 & 0b001 != 0 {
+        template & 0o700
+    } else {
+        0
+    }) | (if who.0 & 0b010 != 0 {
+        template & 0o070
+    } else {
+        0
+    }) | (if who.0 & 0b100 != 0 {
+        template & 0o007
+    } else {
+        0
+    })
 }
 
 fn copy_class_bits(current_mode: u32, who: WhoMask, source_mask: u32) -> u32 {

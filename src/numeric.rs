@@ -22,10 +22,7 @@ pub fn validate_numeric_argument(flag: &str, value: &OsStr) -> Result<(), Diagno
     parse_numeric_argument(flag, value).map(|_| ())
 }
 
-pub fn parse_numeric_argument(
-    flag: &str,
-    value: &OsStr,
-) -> Result<NumericComparison, Diagnostic> {
+pub fn parse_numeric_argument(flag: &str, value: &OsStr) -> Result<NumericComparison, Diagnostic> {
     let bytes = value.as_encoded_bytes();
     let (kind, digits) = match bytes {
         [b'+', rest @ ..] => (NumericComparisonKind::GreaterThan, rest),

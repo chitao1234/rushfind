@@ -61,9 +61,11 @@ fn reports_missing_arguments_for_stage8_predicates() {
         "-cnewer", "-neweram",
     ] {
         let error = parse_command(&argv(&[".", flag])).unwrap_err();
-        assert!(error
-            .message
-            .contains(&format!("missing argument for `{flag}`")));
+        assert!(
+            error
+                .message
+                .contains(&format!("missing argument for `{flag}`"))
+        );
     }
 }
 
@@ -71,8 +73,10 @@ fn reports_missing_arguments_for_stage8_predicates() {
 fn reports_malformed_relative_time_arguments() {
     for (flag, value) in [("-mtime", "+"), ("-amin", "--2"), ("-cmin", "abc")] {
         let error = parse_command(&argv(&[".", flag, value])).unwrap_err();
-        assert!(error
-            .message
-            .contains(&format!("invalid numeric argument for `{flag}`")));
+        assert!(
+            error
+                .message
+                .contains(&format!("invalid numeric argument for `{flag}`"))
+        );
     }
 }

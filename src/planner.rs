@@ -3,13 +3,13 @@ use crate::ast::{Action, CommandAst, Expr, FileTypeFilter, GlobalOption, Predica
 use crate::diagnostics::Diagnostic;
 use crate::follow::FollowMode;
 use crate::identity::FileIdentity;
-use crate::numeric::{parse_numeric_argument, NumericComparison};
+use crate::numeric::{NumericComparison, parse_numeric_argument};
 use crate::optimizer::optimize_read_only_and_chains;
-use crate::perm::{parse_perm_argument, PermMatcher};
-use crate::size::{parse_size_argument, SizeMatcher};
+use crate::perm::{PermMatcher, parse_perm_argument};
+use crate::size::{SizeMatcher, parse_size_argument};
 use crate::time::{
-    local_day_start, parse_relative_time_argument, resolve_reference_matcher, NewerMatcher,
-    RelativeTimeMatcher, RelativeTimeUnit, Timestamp, TimestampKind, UsedMatcher,
+    NewerMatcher, RelativeTimeMatcher, RelativeTimeUnit, Timestamp, TimestampKind, UsedMatcher,
+    local_day_start, parse_relative_time_argument, resolve_reference_matcher,
 };
 use std::ffi::OsString;
 use std::fs;

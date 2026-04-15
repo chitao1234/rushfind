@@ -3,11 +3,11 @@ mod support;
 use findoxide::birth::read_birth_time;
 use findoxide::numeric::NumericComparison;
 use findoxide::parser::parse_command;
-use findoxide::planner::{plan_command, plan_command_with_now, RuntimeExpr, RuntimePredicate};
+use findoxide::planner::{RuntimeExpr, RuntimePredicate, plan_command, plan_command_with_now};
 use findoxide::size::{SizeMatcher, SizeUnit};
 use findoxide::time::{
-    local_day_start, NewerMatcher, RelativeTimeMatcher, RelativeTimeUnit, TimeComparison,
-    Timestamp, TimestampKind,
+    NewerMatcher, RelativeTimeMatcher, RelativeTimeUnit, TimeComparison, Timestamp, TimestampKind,
+    local_day_start,
 };
 use std::fs;
 use std::os::unix::fs::MetadataExt;
@@ -165,9 +165,11 @@ fn lowers_newer_shorthands_and_supported_newerxy_forms() {
             1,
         )
         .unwrap();
-        assert!(predicate_items(&plan.expr)
-            .into_iter()
-            .any(|predicate| matches!(predicate, RuntimePredicate::Newer(_))));
+        assert!(
+            predicate_items(&plan.expr)
+                .into_iter()
+                .any(|predicate| matches!(predicate, RuntimePredicate::Newer(_)))
+        );
     }
 
     let plan = plan_command(
@@ -220,15 +222,17 @@ fn stage9_supports_birth_and_literal_reference_forms() {
         1,
     )
     .unwrap();
-    assert!(predicate_items(&literal.expr)
-        .into_iter()
-        .any(|predicate| matches!(
-            predicate,
-            RuntimePredicate::Newer(NewerMatcher {
-                current: TimestampKind::Birth,
-                reference,
-            }) if reference == Timestamp::new(1_700_000_000, 500_000_000)
-        )));
+    assert!(
+        predicate_items(&literal.expr)
+            .into_iter()
+            .any(|predicate| matches!(
+                predicate,
+                RuntimePredicate::Newer(NewerMatcher {
+                    current: TimestampKind::Birth,
+                    reference,
+                }) if reference == Timestamp::new(1_700_000_000, 500_000_000)
+            ))
+    );
 
     let root = tempdir().unwrap();
     let reference = root.path().join("birth-reference.txt");
@@ -246,15 +250,17 @@ fn stage9_supports_birth_and_literal_reference_forms() {
             )
             .unwrap();
 
-            assert!(predicate_items(&plan.expr)
-                .into_iter()
-                .any(|predicate| matches!(
-                    predicate,
-                    RuntimePredicate::Newer(NewerMatcher {
-                        current: TimestampKind::Modification,
-                        reference,
-                    }) if reference == expected_birth
-                )));
+            assert!(
+                predicate_items(&plan.expr)
+                    .into_iter()
+                    .any(|predicate| matches!(
+                        predicate,
+                        RuntimePredicate::Newer(NewerMatcher {
+                            current: TimestampKind::Modification,
+                            reference,
+                        }) if reference == expected_birth
+                    ))
+            );
         }
         None => {
             let error = plan_command(

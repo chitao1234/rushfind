@@ -8,19 +8,8 @@ use support::argv;
 #[test]
 fn parses_perm_predicates() {
     let ast = parse_command(&argv(&[
-        ".",
-        "-perm",
-        "754",
-        "-perm",
-        "-g+w,u+w",
-        "-perm",
-        "/u=w,g=w",
-        "-perm",
-        "g=u",
-        "-perm",
-        "+t",
-        "-perm",
-        "+X",
+        ".", "-perm", "754", "-perm", "-g+w,u+w", "-perm", "/u=w,g=w", "-perm", "g=u", "-perm",
+        "+t", "-perm", "+X",
     ]))
     .unwrap();
 

@@ -1,23 +1,15 @@
 mod support;
 
 use findoxide::parser::parse_command;
-use findoxide::perm::{parse_perm_argument, PermMatcher};
-use findoxide::planner::{plan_command, RuntimeExpr, RuntimePredicate};
+use findoxide::perm::{PermMatcher, parse_perm_argument};
+use findoxide::planner::{RuntimeExpr, RuntimePredicate, plan_command};
 use std::ffi::OsStr;
 use support::argv;
 
 #[test]
 fn lowers_octal_and_symbolic_perm_matchers() {
     for raw in [
-        "754",
-        "-g+w,u+w",
-        "/u=w,g=w",
-        "g=u",
-        "u=",
-        "-u=",
-        "/u=",
-        "+t",
-        "+X",
+        "754", "-g+w,u+w", "/u=w,g=w", "g=u", "u=", "-u=", "/u=", "+t", "+X",
     ] {
         let plan = plan_command(parse_command(&argv(&[".", "-perm", raw])).unwrap(), 1).unwrap();
         let expected = parse_perm_argument(OsStr::new(raw)).unwrap();

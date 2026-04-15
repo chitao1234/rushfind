@@ -47,9 +47,11 @@ fn parses_stage9_read_only_tail_predicates() {
 fn reports_missing_arguments_for_stage9_tail_predicates() {
     for flag in ["-used", "-newerBt", "-newermB"] {
         let error = parse_command(&argv(&[".", flag])).unwrap_err();
-        assert!(error
-            .message
-            .contains(&format!("missing argument for `{flag}`")));
+        assert!(
+            error
+                .message
+                .contains(&format!("missing argument for `{flag}`"))
+        );
     }
 }
 
@@ -57,8 +59,10 @@ fn reports_missing_arguments_for_stage9_tail_predicates() {
 fn reports_malformed_used_numeric_arguments() {
     for value in ["+", "--2", "abc"] {
         let error = parse_command(&argv(&[".", "-used", value])).unwrap_err();
-        assert!(error
-            .message
-            .contains("invalid numeric argument for `-used`"));
+        assert!(
+            error
+                .message
+                .contains("invalid numeric argument for `-used`")
+        );
     }
 }

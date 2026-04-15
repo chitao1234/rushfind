@@ -2,7 +2,7 @@ mod support;
 
 use findoxide::numeric::NumericComparison;
 use findoxide::parser::parse_command;
-use findoxide::planner::{plan_command, RuntimeExpr, RuntimePredicate};
+use findoxide::planner::{RuntimeExpr, RuntimePredicate, plan_command};
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::process::Command;
@@ -62,12 +62,16 @@ fn lowers_nouser_and_nogroup_into_runtime_predicates() {
     .unwrap();
     let predicates = predicate_items(&plan.expr);
 
-    assert!(predicates
-        .iter()
-        .any(|predicate| matches!(predicate, RuntimePredicate::NoUser)));
-    assert!(predicates
-        .iter()
-        .any(|predicate| matches!(predicate, RuntimePredicate::NoGroup)));
+    assert!(
+        predicates
+            .iter()
+            .any(|predicate| matches!(predicate, RuntimePredicate::NoUser))
+    );
+    assert!(
+        predicates
+            .iter()
+            .any(|predicate| matches!(predicate, RuntimePredicate::NoGroup))
+    );
 }
 
 #[test]
@@ -84,9 +88,11 @@ fn rejects_unknown_user_and_group_names() {
         1,
     )
     .unwrap_err();
-    assert!(group_error
-        .message
-        .contains("not the name of an existing group"));
+    assert!(
+        group_error
+            .message
+            .contains("not the name of an existing group")
+    );
 }
 
 fn predicate_items(expr: &RuntimeExpr) -> Vec<&RuntimePredicate> {

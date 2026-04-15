@@ -3,7 +3,7 @@ mod support;
 use findoxide::birth::read_birth_time;
 use findoxide::numeric::NumericComparison;
 use findoxide::parser::parse_command;
-use findoxide::planner::{plan_command, RuntimeExpr, RuntimePredicate};
+use findoxide::planner::{RuntimeExpr, RuntimePredicate, plan_command};
 use findoxide::time::{NewerMatcher, Timestamp, TimestampKind};
 use std::fs;
 use support::argv;
@@ -23,9 +23,11 @@ fn lowers_empty_and_used_predicates() {
         RuntimePredicate::Used(matcher)
             if matcher.comparison == NumericComparison::GreaterThan(2)
     )));
-    assert!(predicates
-        .iter()
-        .any(|predicate| matches!(predicate, RuntimePredicate::Empty)));
+    assert!(
+        predicates
+            .iter()
+            .any(|predicate| matches!(predicate, RuntimePredicate::Empty))
+    );
 }
 
 #[test]
@@ -35,15 +37,17 @@ fn lowers_supported_birth_and_literal_newerxy_forms() {
         1,
     )
     .unwrap();
-    assert!(predicate_items(&literal.expr)
-        .iter()
-        .any(|predicate| matches!(
-            predicate,
-            RuntimePredicate::Newer(NewerMatcher {
-                current: TimestampKind::Birth,
-                reference,
-            }) if *reference == Timestamp::new(1_700_000_000, 250_000_000)
-        )));
+    assert!(
+        predicate_items(&literal.expr)
+            .iter()
+            .any(|predicate| matches!(
+                predicate,
+                RuntimePredicate::Newer(NewerMatcher {
+                    current: TimestampKind::Birth,
+                    reference,
+                }) if *reference == Timestamp::new(1_700_000_000, 250_000_000)
+            ))
+    );
 
     let root = tempdir().unwrap();
     let reference = root.path().join("reference.txt");

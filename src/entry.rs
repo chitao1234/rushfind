@@ -441,8 +441,8 @@ pub(crate) mod test_support {
     use std::fs::Metadata;
     use std::io;
     use std::path::{Path, PathBuf};
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[derive(Clone, Default)]
     pub(crate) struct CountingReader {
@@ -508,8 +508,8 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    use super::test_support::CountingReader;
     use super::EntryKind;
+    use super::test_support::CountingReader;
     use crate::follow::FollowMode;
     use std::ffi::OsString;
     use std::fs;
