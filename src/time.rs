@@ -31,10 +31,6 @@ impl Timestamp {
             duration.subsec_nanos() as i32,
         ))
     }
-
-    fn total_nanos(self) -> i128 {
-        (self.seconds as i128 * 1_000_000_000) + self.nanos as i128
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,10 +48,10 @@ pub enum RelativeTimeUnit {
 }
 
 impl RelativeTimeUnit {
-    fn bucket_nanos(self) -> i128 {
+    const fn seconds(self) -> i64 {
         match self {
-            Self::Minutes => 60 * 1_000_000_000,
-            Self::Days => 86_400 * 1_000_000_000,
+            Self::Minutes => 60,
+            Self::Days => 86_400,
         }
     }
 }
@@ -99,40 +95,20 @@ impl RelativeTimeMatcher {
     }
 
     pub fn matches_timestamp_checked(self, actual: Timestamp) -> Result<bool, Diagnostic> {
-        if matches!(self.unit, RelativeTimeUnit::Minutes) {
-            return Ok(self.matches_minute_timestamp(actual));
-        }
-
-        let bucket = self.bucket(actual)?;
-
-        Ok(match self.comparison {
-            TimeComparison::Exactly(expected) => bucket == expected as i128,
-            TimeComparison::LessThan(expected) => bucket < expected as i128,
-            TimeComparison::GreaterThan(expected) => bucket > expected as i128,
-        })
-    }
-
-    fn bucket(self, actual: Timestamp) -> Result<i128, Diagnostic> {
         if self.daystart && matches!(self.unit, RelativeTimeUnit::Days) {
             let baseline_day = local_calendar_day(self.baseline)?;
             let actual_day = local_calendar_day(actual)?;
-            Ok((baseline_day - actual_day) as i128)
+            Ok(matches_calendar_day_window(
+                WindowComparison::from(self.comparison),
+                baseline_day - actual_day,
+            ))
         } else {
-            Ok((self.baseline.total_nanos() - actual.total_nanos()) / self.unit.bucket_nanos())
-        }
-    }
-
-    fn matches_minute_timestamp(self, actual: Timestamp) -> bool {
-        let elapsed = self.baseline.total_nanos() - actual.total_nanos();
-        let minute = RelativeTimeUnit::Minutes.bucket_nanos();
-
-        match self.comparison {
-            TimeComparison::Exactly(expected) => {
-                let expected = expected as i128;
-                elapsed >= (expected - 1) * minute && elapsed < expected * minute
-            }
-            TimeComparison::LessThan(expected) => elapsed < expected as i128 * minute,
-            TimeComparison::GreaterThan(expected) => elapsed > expected as i128 * minute,
+            Ok(matches_timestamp_window(
+                WindowComparison::from(self.comparison),
+                self.baseline,
+                actual,
+                self.unit.window(),
+            ))
         }
     }
 }
@@ -160,17 +136,215 @@ impl UsedMatcher {
             return false;
         }
 
-        let elapsed = atime.total_nanos() - ctime.total_nanos();
-        let day = RelativeTimeUnit::Days.bucket_nanos();
+        matches_timestamp_window(
+            WindowComparison::from(self.comparison),
+            atime,
+            ctime,
+            WholeSecondWindow::shifted_exact(RelativeTimeUnit::Days.seconds()),
+        )
+    }
+}
 
-        match self.comparison {
-            NumericComparison::Exactly(expected) => {
-                let expected = expected as i128;
-                elapsed >= (expected - 1) * day && elapsed < expected * day
-            }
-            NumericComparison::LessThan(expected) => elapsed < expected as i128 * day,
-            NumericComparison::GreaterThan(expected) => elapsed > expected as i128 * day,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WholeSecondWindow {
+    unit_seconds: i64,
+    exact_shift_units: i64,
+    greater_shift_units: i64,
+}
+
+impl WholeSecondWindow {
+    const fn new(unit_seconds: i64, exact_shift_units: i64, greater_shift_units: i64) -> Self {
+        Self {
+            unit_seconds,
+            exact_shift_units,
+            greater_shift_units,
         }
+    }
+
+    const fn shifted_exact(unit_seconds: i64) -> Self {
+        Self::new(unit_seconds, 1, 0)
+    }
+
+    const fn elapsed(unit_seconds: i64) -> Self {
+        Self::new(unit_seconds, 0, 1)
+    }
+}
+
+impl RelativeTimeUnit {
+    const fn window(self) -> WholeSecondWindow {
+        match self {
+            Self::Minutes => WholeSecondWindow::shifted_exact(Self::Minutes.seconds()),
+            Self::Days => WholeSecondWindow::elapsed(Self::Days.seconds()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WindowComparison {
+    Exactly(WindowExpected),
+    LessThan(WindowExpected),
+    GreaterThan(WindowExpected),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WindowExpected {
+    Finite(i64),
+    PositiveOverflow,
+}
+
+impl From<TimeComparison> for WindowComparison {
+    fn from(value: TimeComparison) -> Self {
+        match value {
+            TimeComparison::Exactly(expected) => Self::Exactly(WindowExpected::Finite(expected)),
+            TimeComparison::LessThan(expected) => Self::LessThan(WindowExpected::Finite(expected)),
+            TimeComparison::GreaterThan(expected) => {
+                Self::GreaterThan(WindowExpected::Finite(expected))
+            }
+        }
+    }
+}
+
+impl From<NumericComparison> for WindowComparison {
+    fn from(value: NumericComparison) -> Self {
+        match value {
+            NumericComparison::Exactly(expected) => Self::Exactly(WindowExpected::from(expected)),
+            NumericComparison::LessThan(expected) => Self::LessThan(WindowExpected::from(expected)),
+            NumericComparison::GreaterThan(expected) => {
+                Self::GreaterThan(WindowExpected::from(expected))
+            }
+        }
+    }
+}
+
+impl From<u64> for WindowExpected {
+    fn from(value: u64) -> Self {
+        match i64::try_from(value) {
+            Ok(value) => Self::Finite(value),
+            Err(_) => Self::PositiveOverflow,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TimestampBoundary {
+    BeforeAll,
+    Finite(Timestamp),
+    AfterAll,
+}
+
+fn matches_calendar_day_window(comparison: WindowComparison, elapsed_days: i64) -> bool {
+    match comparison {
+        WindowComparison::Exactly(WindowExpected::Finite(expected)) => elapsed_days == expected,
+        WindowComparison::Exactly(WindowExpected::PositiveOverflow) => false,
+        WindowComparison::LessThan(WindowExpected::Finite(expected)) => elapsed_days < expected,
+        WindowComparison::LessThan(WindowExpected::PositiveOverflow) => true,
+        WindowComparison::GreaterThan(WindowExpected::Finite(expected)) => elapsed_days > expected,
+        WindowComparison::GreaterThan(WindowExpected::PositiveOverflow) => false,
+    }
+}
+
+fn matches_timestamp_window(
+    comparison: WindowComparison,
+    baseline: Timestamp,
+    actual: Timestamp,
+    window: WholeSecondWindow,
+) -> bool {
+    match comparison {
+        WindowComparison::Exactly(WindowExpected::Finite(expected)) => {
+            let lower = shift_timestamp_boundary(
+                baseline,
+                window.unit_seconds,
+                expected,
+                window.exact_shift_units,
+            );
+            let upper = shift_timestamp_boundary(
+                baseline,
+                window.unit_seconds,
+                expected,
+                window.exact_shift_units - 1,
+            );
+
+            timestamp_le_boundary(actual, lower) && timestamp_gt_boundary(actual, upper)
+        }
+        WindowComparison::Exactly(WindowExpected::PositiveOverflow) => false,
+        WindowComparison::LessThan(WindowExpected::Finite(expected)) => {
+            let boundary = shift_timestamp_boundary(baseline, window.unit_seconds, expected, 0);
+            timestamp_gt_boundary(actual, boundary)
+        }
+        WindowComparison::LessThan(WindowExpected::PositiveOverflow) => true,
+        WindowComparison::GreaterThan(WindowExpected::Finite(expected)) => {
+            let boundary = shift_timestamp_boundary(
+                baseline,
+                window.unit_seconds,
+                expected,
+                -window.greater_shift_units,
+            );
+            timestamp_lt_boundary(actual, boundary)
+        }
+        WindowComparison::GreaterThan(WindowExpected::PositiveOverflow) => false,
+    }
+}
+
+fn shift_timestamp_boundary(
+    baseline: Timestamp,
+    unit_seconds: i64,
+    expected_units: i64,
+    boundary_units: i64,
+) -> TimestampBoundary {
+    let delta_units = match boundary_units.checked_sub(expected_units) {
+        Some(delta_units) => delta_units,
+        None if expected_units.is_negative() => return TimestampBoundary::AfterAll,
+        None => return TimestampBoundary::BeforeAll,
+    };
+
+    shift_timestamp_units(baseline, unit_seconds, delta_units)
+}
+
+fn shift_timestamp_units(
+    timestamp: Timestamp,
+    unit_seconds: i64,
+    delta_units: i64,
+) -> TimestampBoundary {
+    let quotient = timestamp.seconds.div_euclid(unit_seconds);
+    let remainder = timestamp.seconds.rem_euclid(unit_seconds);
+    let shifted_quotient = match quotient.checked_add(delta_units) {
+        Some(shifted_quotient) => shifted_quotient,
+        None if delta_units.is_negative() => return TimestampBoundary::BeforeAll,
+        None => return TimestampBoundary::AfterAll,
+    };
+    let shifted_seconds = match shifted_quotient
+        .checked_mul(unit_seconds)
+        .and_then(|seconds| seconds.checked_add(remainder))
+    {
+        Some(shifted_seconds) => shifted_seconds,
+        None if shifted_quotient.is_negative() => return TimestampBoundary::BeforeAll,
+        None => return TimestampBoundary::AfterAll,
+    };
+
+    TimestampBoundary::Finite(Timestamp::new(shifted_seconds, timestamp.nanos))
+}
+
+fn timestamp_gt_boundary(actual: Timestamp, boundary: TimestampBoundary) -> bool {
+    match boundary {
+        TimestampBoundary::BeforeAll => true,
+        TimestampBoundary::Finite(boundary) => actual > boundary,
+        TimestampBoundary::AfterAll => false,
+    }
+}
+
+fn timestamp_lt_boundary(actual: Timestamp, boundary: TimestampBoundary) -> bool {
+    match boundary {
+        TimestampBoundary::BeforeAll => false,
+        TimestampBoundary::Finite(boundary) => actual < boundary,
+        TimestampBoundary::AfterAll => true,
+    }
+}
+
+fn timestamp_le_boundary(actual: Timestamp, boundary: TimestampBoundary) -> bool {
+    match boundary {
+        TimestampBoundary::BeforeAll => false,
+        TimestampBoundary::Finite(boundary) => actual <= boundary,
+        TimestampBoundary::AfterAll => true,
     }
 }
 

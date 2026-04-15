@@ -104,6 +104,97 @@ fn minute_relative_time_matcher_uses_gnu_shifted_windows() {
 }
 
 #[test]
+fn minute_relative_time_matcher_preserves_subsecond_boundaries() {
+    let now = Timestamp::new(10_000, 100_000_000);
+    let just_under_one_minute = Timestamp::new(9_940, 200_000_000);
+    let just_over_one_minute = Timestamp::new(9_940, 0);
+
+    let exact_one = RelativeTimeMatcher::new(
+        TimestampKind::Modification,
+        RelativeTimeUnit::Minutes,
+        TimeComparison::Exactly(1),
+        now,
+        false,
+    );
+    let less_than_one = RelativeTimeMatcher::new(
+        TimestampKind::Modification,
+        RelativeTimeUnit::Minutes,
+        TimeComparison::LessThan(1),
+        now,
+        false,
+    );
+    let greater_than_one = RelativeTimeMatcher::new(
+        TimestampKind::Modification,
+        RelativeTimeUnit::Minutes,
+        TimeComparison::GreaterThan(1),
+        now,
+        false,
+    );
+
+    assert!(exact_one.matches_timestamp(just_under_one_minute));
+    assert!(!exact_one.matches_timestamp(just_over_one_minute));
+    assert!(less_than_one.matches_timestamp(just_under_one_minute));
+    assert!(!less_than_one.matches_timestamp(just_over_one_minute));
+    assert!(!greater_than_one.matches_timestamp(just_under_one_minute));
+    assert!(greater_than_one.matches_timestamp(just_over_one_minute));
+}
+
+#[test]
+fn day_relative_time_matcher_uses_gnu_day_windows() {
+    let now = Timestamp::new(200_000, 0);
+    let fresh = Timestamp::new(199_999, 0);
+    let almost_one_day_old = Timestamp::new(200_000 - 86_399, 0);
+    let exactly_one_day_old = Timestamp::new(200_000 - 86_400, 0);
+    let almost_two_days_old = Timestamp::new(200_000 - 172_799, 0);
+    let exactly_two_days_old = Timestamp::new(200_000 - 172_800, 0);
+    let more_than_two_days_old = Timestamp::new(200_000 - 172_801, 0);
+
+    let exact_zero = RelativeTimeMatcher::new(
+        TimestampKind::Modification,
+        RelativeTimeUnit::Days,
+        TimeComparison::Exactly(0),
+        now,
+        false,
+    );
+    let exact_one = RelativeTimeMatcher::new(
+        TimestampKind::Modification,
+        RelativeTimeUnit::Days,
+        TimeComparison::Exactly(1),
+        now,
+        false,
+    );
+    let less_than_one = RelativeTimeMatcher::new(
+        TimestampKind::Modification,
+        RelativeTimeUnit::Days,
+        TimeComparison::LessThan(1),
+        now,
+        false,
+    );
+    let greater_than_one = RelativeTimeMatcher::new(
+        TimestampKind::Modification,
+        RelativeTimeUnit::Days,
+        TimeComparison::GreaterThan(1),
+        now,
+        false,
+    );
+
+    assert!(exact_zero.matches_timestamp(fresh));
+    assert!(exact_zero.matches_timestamp(almost_one_day_old));
+    assert!(!exact_zero.matches_timestamp(exactly_one_day_old));
+    assert!(!exact_zero.matches_timestamp(almost_two_days_old));
+    assert!(!exact_one.matches_timestamp(almost_one_day_old));
+    assert!(exact_one.matches_timestamp(exactly_one_day_old));
+    assert!(exact_one.matches_timestamp(almost_two_days_old));
+    assert!(!exact_one.matches_timestamp(exactly_two_days_old));
+    assert!(less_than_one.matches_timestamp(fresh));
+    assert!(less_than_one.matches_timestamp(almost_one_day_old));
+    assert!(!less_than_one.matches_timestamp(exactly_one_day_old));
+    assert!(!greater_than_one.matches_timestamp(almost_two_days_old));
+    assert!(!greater_than_one.matches_timestamp(exactly_two_days_old));
+    assert!(greater_than_one.matches_timestamp(more_than_two_days_old));
+}
+
+#[test]
 fn used_matcher_matches_gnu_used_windows() {
     let exact_zero = UsedMatcher {
         comparison: NumericComparison::Exactly(0),
