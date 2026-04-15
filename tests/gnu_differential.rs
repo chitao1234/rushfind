@@ -26,8 +26,28 @@ fn build_identity_tree() -> tempfile::TempDir {
         root.path().join("real/file-hard.txt"),
     )
     .unwrap();
-    unix_fs::symlink(root.path().join("real/file.txt"), root.path().join("file-link")).unwrap();
+    unix_fs::symlink(
+        root.path().join("real/file.txt"),
+        root.path().join("file-link"),
+    )
+    .unwrap();
     unix_fs::symlink(root.path().join("missing"), root.path().join("broken-link")).unwrap();
+    root
+}
+
+fn build_symlink_content_tree() -> tempfile::TempDir {
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("real")).unwrap();
+    fs::write(root.path().join("real/file.txt"), "hello\n").unwrap();
+    unix_fs::symlink(
+        root.path().join("real/file.txt"),
+        root.path().join("file-link"),
+    )
+    .unwrap();
+    unix_fs::symlink("missing-target", root.path().join("broken-link")).unwrap();
+    unix_fs::symlink(root.path().join("real"), root.path().join("root-link")).unwrap();
+    unix_fs::symlink("missing-target", root.path().join("broken-root")).unwrap();
+    unix_fs::symlink("file.txt", root.path().join("real/child-link")).unwrap();
     root
 }
 
@@ -42,6 +62,8 @@ fn readme_documents_worker_selection_contract() {
     assert!(readme.contains("`-samefile`"));
     assert!(readme.contains("`-inum`"));
     assert!(readme.contains("`-links`"));
+    assert!(readme.contains("`-lname`"));
+    assert!(readme.contains("`-ilname`"));
     assert!(readme.contains("loop-safe"));
 }
 
@@ -56,11 +78,9 @@ fn reports_unsupported_exec_during_planning() {
         .unwrap();
 
     assert_ne!(output.status.code(), Some(0));
-    assert!(
-        String::from_utf8(output.stderr)
-            .unwrap()
-            .contains("unsupported in read-only v0")
-    );
+    assert!(String::from_utf8(output.stderr)
+        .unwrap()
+        .contains("unsupported in read-only v0"));
 }
 
 #[test]
@@ -72,11 +92,9 @@ fn reports_parse_errors_nonzero() {
         .unwrap();
 
     assert_ne!(output.status.code(), Some(0));
-    assert!(
-        String::from_utf8(output.stderr)
-            .unwrap()
-            .contains("expected `)`")
-    );
+    assert!(String::from_utf8(output.stderr)
+        .unwrap()
+        .contains("expected `)`"));
 }
 
 #[test]
@@ -325,7 +343,12 @@ fn parallel_family_a_matches_gnu_find_as_sets() {
             "-inum".into(),
             logical_inode.into(),
         ],
-        vec!["-L".into(), path_arg(root.path()), "-links".into(), "2".into()],
+        vec![
+            "-L".into(),
+            path_arg(root.path()),
+            "-links".into(),
+            "2".into(),
+        ],
     ];
 
     for args in args_sets {
@@ -339,5 +362,137 @@ fn parallel_family_a_matches_gnu_find_as_sets() {
 
         assert_eq!(actual.status.code(), expected.status.code());
         assert_eq!(lines(&actual.stdout), lines(&expected.stdout));
+    }
+}
+
+#[test]
+fn ordered_symlink_content_matches_gnu_find_exactly() {
+    let root = build_symlink_content_tree();
+    let args_sets = vec![
+        vec![
+            "-P".into(),
+            path_arg(root.path()),
+            "(".into(),
+            "-lname".into(),
+            "*file.txt".into(),
+            "-o".into(),
+            "-ilname".into(),
+            "*MISSING*".into(),
+            ")".into(),
+        ],
+        vec![
+            "-H".into(),
+            path_arg(root.path()),
+            "(".into(),
+            "-lname".into(),
+            "*file.txt".into(),
+            "-o".into(),
+            "-ilname".into(),
+            "*MISSING*".into(),
+            ")".into(),
+        ],
+        vec![
+            "-L".into(),
+            path_arg(root.path()),
+            "(".into(),
+            "-lname".into(),
+            "*file.txt".into(),
+            "-o".into(),
+            "-ilname".into(),
+            "*MISSING*".into(),
+            ")".into(),
+        ],
+        vec![
+            "-H".into(),
+            path_arg(&root.path().join("root-link")),
+            "-lname".into(),
+            "*file.txt".into(),
+        ],
+        vec![
+            "-H".into(),
+            path_arg(&root.path().join("broken-root")),
+            "-ilname".into(),
+            "*MISSING*".into(),
+        ],
+    ];
+
+    for args in args_sets {
+        let expected = Command::new("find").args(&args).output().unwrap();
+        let actual = Command::cargo_bin("findoxide")
+            .unwrap()
+            .env("FINDOXIDE_WORKERS", "1")
+            .args(&args)
+            .output()
+            .unwrap();
+
+        assert_eq!(actual.status.code(), expected.status.code());
+        assert_eq!(actual.stdout, expected.stdout);
+        assert_eq!(actual.stderr, expected.stderr);
+    }
+}
+
+#[test]
+fn parallel_symlink_content_matches_gnu_find_as_sets() {
+    let root = build_symlink_content_tree();
+    let args_sets = vec![
+        vec![
+            "-P".into(),
+            path_arg(root.path()),
+            "(".into(),
+            "-lname".into(),
+            "*file.txt".into(),
+            "-o".into(),
+            "-ilname".into(),
+            "*MISSING*".into(),
+            ")".into(),
+        ],
+        vec![
+            "-H".into(),
+            path_arg(root.path()),
+            "(".into(),
+            "-lname".into(),
+            "*file.txt".into(),
+            "-o".into(),
+            "-ilname".into(),
+            "*MISSING*".into(),
+            ")".into(),
+        ],
+        vec![
+            "-L".into(),
+            path_arg(root.path()),
+            "(".into(),
+            "-lname".into(),
+            "*file.txt".into(),
+            "-o".into(),
+            "-ilname".into(),
+            "*MISSING*".into(),
+            ")".into(),
+        ],
+        vec![
+            "-H".into(),
+            path_arg(&root.path().join("root-link")),
+            "-lname".into(),
+            "*file.txt".into(),
+        ],
+        vec![
+            "-H".into(),
+            path_arg(&root.path().join("broken-root")),
+            "-ilname".into(),
+            "*MISSING*".into(),
+        ],
+    ];
+
+    for args in args_sets {
+        let expected = Command::new("find").args(&args).output().unwrap();
+        let actual = Command::cargo_bin("findoxide")
+            .unwrap()
+            .env("FINDOXIDE_WORKERS", "4")
+            .args(&args)
+            .output()
+            .unwrap();
+
+        assert_eq!(actual.status.code(), expected.status.code());
+        assert_eq!(lines(&actual.stdout), lines(&expected.stdout));
+        assert_eq!(lines(&actual.stderr), lines(&expected.stderr));
     }
 }
