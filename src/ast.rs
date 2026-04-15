@@ -50,6 +50,8 @@ pub enum Predicate {
     NoGroup,
     Perm(OsString),
     Size(OsString),
+    Empty,
+    Used(OsString),
     ATime(OsString),
     CTime(OsString),
     MTime(OsString),
@@ -62,7 +64,7 @@ pub enum Predicate {
     NewerXY {
         current: char,
         reference: char,
-        reference_path: PathBuf,
+        reference_arg: OsString,
     },
     DayStart,
     Type(FileTypeFilter),

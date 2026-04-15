@@ -231,6 +231,12 @@ impl<'a> Parser<'a> {
             Expr::Predicate(Predicate::Perm(self.take_os_string("-perm")?))
         } else if token.matches("-size") {
             Expr::Predicate(Predicate::Size(self.take_os_string("-size")?))
+        } else if token.matches("-empty") {
+            Expr::Predicate(Predicate::Empty)
+        } else if token.matches("-used") {
+            let raw = self.take_os_string("-used")?;
+            validate_numeric_argument("-used", raw.as_os_str())?;
+            Expr::Predicate(Predicate::Used(raw))
         } else if token.matches("-inum") {
             let raw = self.take_os_string("-inum")?;
             validate_numeric_argument("-inum", raw.as_os_str())?;
@@ -283,7 +289,7 @@ impl<'a> Parser<'a> {
             Expr::Predicate(Predicate::NewerXY {
                 current,
                 reference,
-                reference_path: PathBuf::from(self.take_os_string(token_display.as_str())?),
+                reference_arg: self.take_os_string(token_display.as_str())?,
             })
         } else if token.matches("-daystart") {
             Expr::Predicate(Predicate::DayStart)

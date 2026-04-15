@@ -2,6 +2,7 @@ mod support;
 
 use findoxide::ast::{CommandAst, Expr, Predicate};
 use findoxide::parser::parse_command;
+use std::ffi::OsString;
 use std::path::PathBuf;
 use support::argv;
 
@@ -44,7 +45,7 @@ fn parses_stage8_size_time_predicates() {
                 Expr::Predicate(Predicate::NewerXY {
                     current: 'a',
                     reference: 'c',
-                    reference_path: PathBuf::from("ref-xy"),
+                    reference_arg: OsString::from("ref-xy"),
                 }),
                 Expr::Predicate(Predicate::DayStart),
                 Expr::Predicate(Predicate::MMin("+9".into())),
@@ -56,20 +57,13 @@ fn parses_stage8_size_time_predicates() {
 #[test]
 fn reports_missing_arguments_for_stage8_predicates() {
     for flag in [
-        "-size",
-        "-mtime",
-        "-atime",
-        "-ctime",
-        "-mmin",
-        "-amin",
-        "-cmin",
-        "-newer",
-        "-anewer",
-        "-cnewer",
-        "-neweram",
+        "-size", "-mtime", "-atime", "-ctime", "-mmin", "-amin", "-cmin", "-newer", "-anewer",
+        "-cnewer", "-neweram",
     ] {
         let error = parse_command(&argv(&[".", flag])).unwrap_err();
-        assert!(error.message.contains(&format!("missing argument for `{flag}`")));
+        assert!(error
+            .message
+            .contains(&format!("missing argument for `{flag}`")));
     }
 }
 
@@ -77,6 +71,8 @@ fn reports_missing_arguments_for_stage8_predicates() {
 fn reports_malformed_relative_time_arguments() {
     for (flag, value) in [("-mtime", "+"), ("-amin", "--2"), ("-cmin", "abc")] {
         let error = parse_command(&argv(&[".", flag, value])).unwrap_err();
-        assert!(error.message.contains(&format!("invalid numeric argument for `{flag}`")));
+        assert!(error
+            .message
+            .contains(&format!("invalid numeric argument for `{flag}`")));
     }
 }

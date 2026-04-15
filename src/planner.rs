@@ -264,6 +264,12 @@ fn lower_predicate(
         Predicate::Size(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Size(
             parse_size_argument(raw.as_os_str())?,
         ))),
+        Predicate::Empty => Err(Diagnostic::unsupported(
+            "unsupported in stage 8: `-empty` planning is not implemented yet",
+        )),
+        Predicate::Used(_) => Err(Diagnostic::unsupported(
+            "unsupported in stage 8: `-used` planning is not implemented yet",
+        )),
         Predicate::ATime(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(
             parse_relative_time_argument(
                 "-atime",
@@ -336,13 +342,13 @@ fn lower_predicate(
         Predicate::NewerXY {
             current,
             reference,
-            reference_path,
+            reference_arg,
         } => Ok(RuntimeExpr::Predicate(RuntimePredicate::Newer(
             resolve_reference_matcher(
                 "-newerXY",
                 current,
                 reference,
-                &reference_path,
+                std::path::Path::new(reference_arg.as_os_str()),
                 follow_mode,
             )?,
         ))),
