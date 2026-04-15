@@ -6,6 +6,7 @@ pub(crate) enum Requirement {
     FullPath,
     FileType,
     ActiveMetadata,
+    DirectoryRead,
     LinkTarget,
     Nss,
 }
@@ -16,6 +17,7 @@ enum CostTier {
     StringOnly,
     FileType,
     ActiveMetadata,
+    DirectoryRead,
     Expensive,
 }
 
@@ -31,6 +33,7 @@ const BASENAME: &[Requirement] = &[Requirement::Basename];
 const FULL_PATH: &[Requirement] = &[Requirement::FullPath];
 const FILE_TYPE: &[Requirement] = &[Requirement::FileType];
 const ACTIVE_METADATA: &[Requirement] = &[Requirement::ActiveMetadata];
+const DIRECTORY_READ: &[Requirement] = &[Requirement::ActiveMetadata, Requirement::DirectoryRead];
 const LINK_TARGET: &[Requirement] = &[Requirement::LinkTarget];
 const ACTIVE_METADATA_AND_NSS: &[Requirement] = &[Requirement::ActiveMetadata, Requirement::Nss];
 
@@ -94,6 +97,7 @@ pub(crate) fn predicate_profile(predicate: &RuntimePredicate) -> PredicateProfil
         RuntimePredicate::Type(_) | RuntimePredicate::XType(_) => {
             profile(FILE_TYPE, CostTier::FileType)
         }
+        RuntimePredicate::Empty => profile(DIRECTORY_READ, CostTier::DirectoryRead),
         RuntimePredicate::Inum(_)
         | RuntimePredicate::Links(_)
         | RuntimePredicate::SameFile(_)
@@ -103,6 +107,7 @@ pub(crate) fn predicate_profile(predicate: &RuntimePredicate) -> PredicateProfil
         | RuntimePredicate::Group(_)
         | RuntimePredicate::Perm(_)
         | RuntimePredicate::Size(_)
+        | RuntimePredicate::Used(_)
         | RuntimePredicate::RelativeTime(_)
         | RuntimePredicate::Newer(_) => profile(ACTIVE_METADATA, CostTier::ActiveMetadata),
         RuntimePredicate::LName { .. } => profile(LINK_TARGET, CostTier::Expensive),

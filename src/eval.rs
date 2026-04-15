@@ -96,6 +96,11 @@ fn evaluate_predicate(
             Ok(matcher.matches(entry.active_mode_bits(follow_mode)?))
         }
         RuntimePredicate::Size(matcher) => Ok(matcher.matches(entry.active_size(follow_mode)?)),
+        RuntimePredicate::Empty => entry.active_is_empty(follow_mode),
+        RuntimePredicate::Used(matcher) => Ok(matcher.matches(
+            entry.active_atime(follow_mode)?,
+            entry.active_ctime(follow_mode)?,
+        )),
         RuntimePredicate::RelativeTime(matcher) => {
             matcher.matches_timestamp_checked(entry_timestamp(entry, follow_mode, matcher.kind)?)
         }
@@ -145,7 +150,7 @@ mod tests {
     use crate::follow::FollowMode;
     use crate::output::RecordingSink;
     use crate::parser::parse_command;
-    use crate::planner::{plan_command, ExecutionPlan};
+    use crate::planner::{plan_command, ExecutionPlan, RuntimeExpr, RuntimePredicate};
     use std::ffi::OsString;
     use std::fs;
     use std::os::unix::fs as unix_fs;
@@ -183,6 +188,38 @@ mod tests {
         assert_eq!(reader.metadata_calls(), 0);
         assert_eq!(reader.read_link_calls(), 0);
         assert_eq!(sink.into_utf8(), "");
+    }
+
+    #[test]
+    fn planned_name_mismatch_skips_later_directory_probe() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("empty-dir");
+        fs::create_dir(&path).unwrap();
+        let reader = CountingReader::default();
+        let entry = reader.entry(path, 0, true);
+        let plan = plan_for(&[".", "-empty", "-name", "does-not-match"]);
+        let mut sink = RecordingSink::default();
+
+        assert!(!evaluate(&plan.expr, &entry, FollowMode::Physical, &mut sink).unwrap());
+        assert_eq!(reader.symlink_metadata_calls(), 0);
+        assert_eq!(reader.metadata_calls(), 0);
+        assert_eq!(reader.read_link_calls(), 0);
+        assert_eq!(reader.directory_probe_calls(), 0);
+    }
+
+    #[test]
+    fn empty_directory_probe_is_loaded_once() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("empty-dir");
+        fs::create_dir(&path).unwrap();
+        let reader = CountingReader::default();
+        let entry = reader.entry(path, 0, true);
+        let expr = RuntimeExpr::Predicate(RuntimePredicate::Empty);
+        let mut sink = RecordingSink::default();
+
+        assert!(evaluate(&expr, &entry, FollowMode::Physical, &mut sink).unwrap());
+        assert!(evaluate(&expr, &entry, FollowMode::Physical, &mut sink).unwrap());
+        assert_eq!(reader.directory_probe_calls(), 1);
     }
 
     fn plan_for(args: &[&str]) -> ExecutionPlan {

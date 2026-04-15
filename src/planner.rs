@@ -9,7 +9,7 @@ use crate::perm::{parse_perm_argument, PermMatcher};
 use crate::size::{parse_size_argument, SizeMatcher};
 use crate::time::{
     local_day_start, parse_relative_time_argument, resolve_reference_matcher, NewerMatcher,
-    RelativeTimeMatcher, RelativeTimeUnit, Timestamp, TimestampKind,
+    RelativeTimeMatcher, RelativeTimeUnit, Timestamp, TimestampKind, UsedMatcher,
 };
 use std::ffi::OsString;
 use std::fs;
@@ -72,6 +72,8 @@ pub enum RuntimePredicate {
     NoGroup,
     Perm(PermMatcher),
     Size(SizeMatcher),
+    Empty,
+    Used(UsedMatcher),
     RelativeTime(RelativeTimeMatcher),
     Newer(NewerMatcher),
     Type(FileTypeFilter),
@@ -264,12 +266,12 @@ fn lower_predicate(
         Predicate::Size(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Size(
             parse_size_argument(raw.as_os_str())?,
         ))),
-        Predicate::Empty => Err(Diagnostic::unsupported(
-            "unsupported in stage 8: `-empty` planning is not implemented yet",
-        )),
-        Predicate::Used(_) => Err(Diagnostic::unsupported(
-            "unsupported in stage 8: `-used` planning is not implemented yet",
-        )),
+        Predicate::Empty => Ok(RuntimeExpr::Predicate(RuntimePredicate::Empty)),
+        Predicate::Used(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Used(
+            UsedMatcher {
+                comparison: parse_numeric_argument("-used", raw.as_os_str())?,
+            },
+        ))),
         Predicate::ATime(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(
             parse_relative_time_argument(
                 "-atime",

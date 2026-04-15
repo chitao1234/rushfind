@@ -101,6 +101,14 @@ fn daystart_is_an_optimizer_barrier() {
     );
 }
 
+#[test]
+fn directory_probe_predicates_stay_after_cheaper_type_checks() {
+    let ast = parse_command(&argv(&[".", "-empty", "-type", "f", "-name", "*.rs"])).unwrap();
+    let plan = plan_command(ast, 1).unwrap();
+
+    assert_eq!(predicate_labels(&plan.expr), vec!["name", "type", "empty"]);
+}
+
 fn predicate_labels(expr: &RuntimeExpr) -> Vec<&'static str> {
     let mut labels = Vec::new();
     collect_predicate_labels(expr, &mut labels);
@@ -187,6 +195,8 @@ fn predicate_label(predicate: &RuntimePredicate) -> &'static str {
         RuntimePredicate::NoGroup => "nogroup",
         RuntimePredicate::Perm(_) => "perm",
         RuntimePredicate::Size(_) => "size",
+        RuntimePredicate::Empty => "empty",
+        RuntimePredicate::Used(_) => "used",
         RuntimePredicate::Newer(_) => "newer",
         RuntimePredicate::RelativeTime(matcher) => match (matcher.kind, matcher.unit) {
             (findoxide::time::TimestampKind::Access, findoxide::time::RelativeTimeUnit::Days) => {

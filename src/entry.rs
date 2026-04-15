@@ -26,6 +26,7 @@ pub(crate) trait EntryReader: Send + Sync {
     fn symlink_metadata(&self, path: &Path) -> io::Result<Metadata>;
     fn metadata(&self, path: &Path) -> io::Result<Metadata>;
     fn read_link(&self, path: &Path) -> io::Result<PathBuf>;
+    fn directory_is_empty(&self, path: &Path) -> io::Result<bool>;
 }
 
 #[derive(Debug)]
@@ -42,6 +43,14 @@ impl EntryReader for FsEntryReader {
 
     fn read_link(&self, path: &Path) -> io::Result<PathBuf> {
         std::fs::read_link(path)
+    }
+
+    fn directory_is_empty(&self, path: &Path) -> io::Result<bool> {
+        let mut entries = std::fs::read_dir(path)?;
+        match entries.next() {
+            None => Ok(true),
+            Some(result) => result.map(|_| false),
+        }
     }
 }
 
@@ -61,6 +70,7 @@ struct EntryData {
     physical_identity: OnceLock<Result<FileIdentity, Diagnostic>>,
     logical_identity: OnceLock<Option<FileIdentity>>,
     physical_link_target: OnceLock<Result<Option<OsString>, Diagnostic>>,
+    active_directory_empty: OnceLock<Result<bool, Diagnostic>>,
 }
 
 impl fmt::Debug for EntryContext {
@@ -129,6 +139,7 @@ impl EntryContext {
                 physical_identity: OnceLock::new(),
                 logical_identity: OnceLock::new(),
                 physical_link_target: OnceLock::new(),
+                active_directory_empty: OnceLock::new(),
             }),
         }
     }
@@ -240,6 +251,22 @@ impl EntryContext {
 
     pub fn active_link_count(&self, follow_mode: FollowMode) -> Result<u64, Diagnostic> {
         Ok(self.active_metadata(follow_mode)?.nlink())
+    }
+
+    pub fn active_is_empty(&self, follow_mode: FollowMode) -> Result<bool, Diagnostic> {
+        match self.active_kind(follow_mode)? {
+            EntryKind::File => Ok(self.active_size(follow_mode)? == 0),
+            EntryKind::Directory => match self.data.active_directory_empty.get_or_init(|| {
+                self.data
+                    .reader
+                    .directory_is_empty(&self.path)
+                    .map_err(|error| path_error(&self.path, error))
+            }) {
+                Ok(is_empty) => Ok(*is_empty),
+                Err(error) => Err(error.clone()),
+            },
+            _ => Ok(false),
+        }
     }
 
     pub fn active_kind(&self, follow_mode: FollowMode) -> Result<EntryKind, Diagnostic> {
@@ -377,14 +404,15 @@ pub(crate) mod test_support {
     use std::fs::Metadata;
     use std::io;
     use std::path::{Path, PathBuf};
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     #[derive(Clone, Default)]
     pub(crate) struct CountingReader {
         symlink_metadata_calls: Arc<AtomicUsize>,
         metadata_calls: Arc<AtomicUsize>,
         read_link_calls: Arc<AtomicUsize>,
+        directory_probe_calls: Arc<AtomicUsize>,
     }
 
     impl CountingReader {
@@ -408,6 +436,10 @@ pub(crate) mod test_support {
         pub(crate) fn read_link_calls(&self) -> usize {
             self.read_link_calls.load(Ordering::SeqCst)
         }
+
+        pub(crate) fn directory_probe_calls(&self) -> usize {
+            self.directory_probe_calls.load(Ordering::SeqCst)
+        }
     }
 
     impl EntryReader for CountingReader {
@@ -425,13 +457,22 @@ pub(crate) mod test_support {
             self.read_link_calls.fetch_add(1, Ordering::SeqCst);
             std::fs::read_link(path)
         }
+
+        fn directory_is_empty(&self, path: &Path) -> io::Result<bool> {
+            self.directory_probe_calls.fetch_add(1, Ordering::SeqCst);
+            let mut entries = std::fs::read_dir(path)?;
+            match entries.next() {
+                None => Ok(true),
+                Some(result) => result.map(|_| false),
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::EntryKind;
     use super::test_support::CountingReader;
+    use super::EntryKind;
     use crate::follow::FollowMode;
     use std::ffi::OsString;
     use std::fs;

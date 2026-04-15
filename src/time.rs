@@ -1,5 +1,6 @@
 use crate::diagnostics::Diagnostic;
 use crate::follow::FollowMode;
+use crate::numeric::NumericComparison;
 use std::ffi::OsStr;
 use std::fs::{self, Metadata};
 use std::mem::MaybeUninit;
@@ -124,6 +125,23 @@ pub struct NewerMatcher {
 impl NewerMatcher {
     pub fn matches_timestamp(self, actual: Timestamp) -> bool {
         actual > self.reference
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UsedMatcher {
+    pub comparison: NumericComparison,
+}
+
+impl UsedMatcher {
+    pub fn matches(self, atime: Timestamp, ctime: Timestamp) -> bool {
+        let bucket =
+            (atime.total_nanos() - ctime.total_nanos()) / RelativeTimeUnit::Days.bucket_nanos();
+        match self.comparison {
+            NumericComparison::Exactly(expected) => bucket == expected as i128,
+            NumericComparison::LessThan(expected) => bucket < expected as i128,
+            NumericComparison::GreaterThan(expected) => bucket > expected as i128,
+        }
     }
 }
 

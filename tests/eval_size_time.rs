@@ -1,12 +1,13 @@
 use findoxide::entry::EntryContext;
 use findoxide::eval::evaluate;
 use findoxide::follow::FollowMode;
+use findoxide::numeric::NumericComparison;
 use findoxide::output::RecordingSink;
 use findoxide::planner::{RuntimeExpr, RuntimePredicate};
 use findoxide::size::parse_size_argument;
 use findoxide::time::{
     local_day_start, NewerMatcher, RelativeTimeMatcher, RelativeTimeUnit, TimeComparison,
-    Timestamp, TimestampKind,
+    Timestamp, TimestampKind, UsedMatcher,
 };
 use std::ffi::OsStr;
 use std::fs;
@@ -77,6 +78,23 @@ fn relative_time_matcher_uses_signed_age_buckets() {
     assert!(exact_zero.matches_timestamp(thirty_seconds_future));
     assert!(!exact_zero.matches_timestamp(ninety_seconds_future));
     assert!(less_than_one.matches_timestamp(thirty_seconds_future));
+}
+
+#[test]
+fn used_matcher_uses_signed_day_buckets() {
+    let exact_zero = UsedMatcher {
+        comparison: NumericComparison::Exactly(0),
+    };
+    let greater_than_one = UsedMatcher {
+        comparison: NumericComparison::GreaterThan(1),
+    };
+    let less_than_one = UsedMatcher {
+        comparison: NumericComparison::LessThan(1),
+    };
+
+    assert!(exact_zero.matches(Timestamp::new(86_401, 0), Timestamp::new(86_400, 0)));
+    assert!(greater_than_one.matches(Timestamp::new(259_201, 0), Timestamp::new(0, 0)));
+    assert!(less_than_one.matches(Timestamp::new(0, 0), Timestamp::new(172_801, 0)));
 }
 
 #[test]
