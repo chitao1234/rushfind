@@ -99,6 +99,10 @@ impl RelativeTimeMatcher {
     }
 
     pub fn matches_timestamp_checked(self, actual: Timestamp) -> Result<bool, Diagnostic> {
+        if matches!(self.unit, RelativeTimeUnit::Minutes) {
+            return Ok(self.matches_minute_timestamp(actual));
+        }
+
         let bucket = self.bucket(actual)?;
 
         Ok(match self.comparison {
@@ -115,6 +119,20 @@ impl RelativeTimeMatcher {
             Ok((baseline_day - actual_day) as i128)
         } else {
             Ok((self.baseline.total_nanos() - actual.total_nanos()) / self.unit.bucket_nanos())
+        }
+    }
+
+    fn matches_minute_timestamp(self, actual: Timestamp) -> bool {
+        let elapsed = self.baseline.total_nanos() - actual.total_nanos();
+        let minute = RelativeTimeUnit::Minutes.bucket_nanos();
+
+        match self.comparison {
+            TimeComparison::Exactly(expected) => {
+                let expected = expected as i128;
+                elapsed >= (expected - 1) * minute && elapsed < expected * minute
+            }
+            TimeComparison::LessThan(expected) => elapsed < expected as i128 * minute,
+            TimeComparison::GreaterThan(expected) => elapsed > expected as i128 * minute,
         }
     }
 }

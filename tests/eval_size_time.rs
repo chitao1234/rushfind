@@ -55,15 +55,24 @@ fn size_reads_the_active_follow_mode_view() {
 }
 
 #[test]
-fn relative_time_matcher_uses_signed_age_buckets() {
+fn minute_relative_time_matcher_uses_gnu_shifted_windows() {
     let now = Timestamp::new(10_000, 0);
-    let thirty_seconds_future = Timestamp::new(10_030, 0);
-    let ninety_seconds_future = Timestamp::new(10_090, 0);
+    let fresh = Timestamp::new(10_000, 0);
+    let thirty_seconds_old = Timestamp::new(9_970, 0);
+    let sixty_seconds_old = Timestamp::new(9_940, 0);
+    let sixty_one_seconds_old = Timestamp::new(9_939, 0);
 
     let exact_zero = RelativeTimeMatcher::new(
         TimestampKind::Modification,
         RelativeTimeUnit::Minutes,
         TimeComparison::Exactly(0),
+        now,
+        false,
+    );
+    let exact_one = RelativeTimeMatcher::new(
+        TimestampKind::Modification,
+        RelativeTimeUnit::Minutes,
+        TimeComparison::Exactly(1),
         now,
         false,
     );
@@ -74,10 +83,24 @@ fn relative_time_matcher_uses_signed_age_buckets() {
         now,
         false,
     );
+    let greater_than_one = RelativeTimeMatcher::new(
+        TimestampKind::Modification,
+        RelativeTimeUnit::Minutes,
+        TimeComparison::GreaterThan(1),
+        now,
+        false,
+    );
 
-    assert!(exact_zero.matches_timestamp(thirty_seconds_future));
-    assert!(!exact_zero.matches_timestamp(ninety_seconds_future));
-    assert!(less_than_one.matches_timestamp(thirty_seconds_future));
+    assert!(!exact_zero.matches_timestamp(fresh));
+    assert!(!exact_zero.matches_timestamp(thirty_seconds_old));
+    assert!(exact_one.matches_timestamp(fresh));
+    assert!(exact_one.matches_timestamp(thirty_seconds_old));
+    assert!(!exact_one.matches_timestamp(sixty_seconds_old));
+    assert!(less_than_one.matches_timestamp(fresh));
+    assert!(less_than_one.matches_timestamp(thirty_seconds_old));
+    assert!(!less_than_one.matches_timestamp(sixty_seconds_old));
+    assert!(!greater_than_one.matches_timestamp(sixty_seconds_old));
+    assert!(greater_than_one.matches_timestamp(sixty_one_seconds_old));
 }
 
 #[test]

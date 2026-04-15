@@ -811,6 +811,8 @@ fn ordered_stage8_predicates_match_gnu_find_exactly() {
         vec![path_arg(root.path()), "-mtime".into(), "+1".into()],
         vec![path_arg(root.path()), "-atime".into(), "+1".into()],
         vec![path_arg(root.path()), "-ctime".into(), "0".into()],
+        vec![path_arg(root.path()), "-mmin".into(), "16".into()],
+        vec![path_arg(root.path()), "-mmin".into(), "+15".into()],
         vec![path_arg(root.path()), "-mmin".into(), "+5".into()],
         vec![path_arg(root.path()), "-amin".into(), "+5".into()],
         vec![path_arg(root.path()), "-cmin".into(), "-1".into()],
