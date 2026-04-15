@@ -65,7 +65,18 @@ fn evaluate_predicate(
             Ok(expected.matches(entry.active_link_count(follow_mode)))
         }
         RuntimePredicate::SameFile(expected) => Ok(*expected == entry.active_identity(follow_mode)),
-        RuntimePredicate::LName { .. } => Ok(false),
+        RuntimePredicate::LName {
+            pattern,
+            case_insensitive,
+        } => match entry.active_link_target(follow_mode)? {
+            Some(target) => matches_pattern(
+                pattern.as_os_str(),
+                target.as_os_str(),
+                *case_insensitive,
+                false,
+            ),
+            None => Ok(false),
+        },
         RuntimePredicate::Type(expected) => {
             Ok(matches_type(*expected, entry.active_kind(follow_mode)))
         }

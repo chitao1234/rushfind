@@ -1,5 +1,7 @@
+use crate::diagnostics::Diagnostic;
 use crate::follow::FollowMode;
 use crate::identity::FileIdentity;
+use std::ffi::OsString;
 use std::fs::{FileType, Metadata};
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::path::PathBuf;
@@ -53,13 +55,15 @@ impl EntryContext {
     pub fn active_metadata(&self, follow_mode: FollowMode) -> &Metadata {
         match follow_mode {
             FollowMode::Physical => &self.physical_metadata,
-            FollowMode::CommandLineOnly if self.is_command_line_root => {
-                self.logical_metadata
-                    .as_ref()
-                    .unwrap_or(&self.physical_metadata)
-            }
+            FollowMode::CommandLineOnly if self.is_command_line_root => self
+                .logical_metadata
+                .as_ref()
+                .unwrap_or(&self.physical_metadata),
             FollowMode::CommandLineOnly => &self.physical_metadata,
-            FollowMode::Logical => self.logical_metadata.as_ref().unwrap_or(&self.physical_metadata),
+            FollowMode::Logical => self
+                .logical_metadata
+                .as_ref()
+                .unwrap_or(&self.physical_metadata),
         }
     }
 
@@ -104,6 +108,44 @@ impl EntryContext {
         match follow_mode {
             FollowMode::Logical => self.physical_kind(),
             FollowMode::Physical | FollowMode::CommandLineOnly => self.logical_kind(),
+        }
+    }
+
+    pub fn physical_link_target(&self) -> Result<Option<OsString>, Diagnostic> {
+        if self.physical_kind() != EntryKind::Symlink {
+            return Ok(None);
+        }
+
+        std::fs::read_link(&self.path)
+            .map(|target| Some(target.into_os_string()))
+            .map_err(|error| Diagnostic::new(format!("{}: {error}", self.path.display()), 1))
+    }
+
+    pub fn active_link_target(
+        &self,
+        follow_mode: FollowMode,
+    ) -> Result<Option<OsString>, Diagnostic> {
+        if self.physical_kind() != EntryKind::Symlink {
+            return Ok(None);
+        }
+
+        match follow_mode {
+            FollowMode::Physical => self.physical_link_target(),
+            FollowMode::CommandLineOnly if self.is_command_line_root => {
+                if self.logical_metadata.is_some() {
+                    Ok(None)
+                } else {
+                    self.physical_link_target()
+                }
+            }
+            FollowMode::CommandLineOnly => self.physical_link_target(),
+            FollowMode::Logical => {
+                if self.logical_metadata.is_some() {
+                    Ok(None)
+                } else {
+                    self.physical_link_target()
+                }
+            }
         }
     }
 }
