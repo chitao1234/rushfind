@@ -25,6 +25,7 @@ fn readme_documents_worker_selection_contract() {
     assert!(readme.contains("GNU `find` syntax"));
     assert!(readme.contains("`-P`, `-H`, `-L`"));
     assert!(readme.contains("`-xtype`"));
+    assert!(readme.contains("loop-safe"));
 }
 
 #[test]
@@ -152,6 +153,35 @@ fn ordered_follow_modes_match_gnu_find_exactly() {
 }
 
 #[test]
+fn ordered_alias_preservation_matches_gnu_find_exactly() {
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("real")).unwrap();
+    fs::create_dir(root.path().join("real/sub")).unwrap();
+    fs::write(root.path().join("real/sub/file.txt"), "hello\n").unwrap();
+    unix_fs::symlink(root.path().join("real"), root.path().join("link-a")).unwrap();
+    unix_fs::symlink(root.path().join("real"), root.path().join("link-b")).unwrap();
+
+    let args = vec![
+        "-L".into(),
+        path_arg(root.path()),
+        "-name".into(),
+        "file.txt".into(),
+    ];
+
+    let expected = Command::new("find").args(&args).output().unwrap();
+    let actual = Command::cargo_bin("findoxide")
+        .unwrap()
+        .env("FINDOXIDE_WORKERS", "1")
+        .args(&args)
+        .output()
+        .unwrap();
+
+    assert_eq!(actual.status.code(), expected.status.code());
+    assert_eq!(actual.stdout, expected.stdout);
+    assert_eq!(actual.stderr, expected.stderr);
+}
+
+#[test]
 fn parallel_follow_modes_match_gnu_find_as_sets() {
     let root = build_tree();
     unix_fs::symlink(root.path().join("src"), root.path().join("src-link")).unwrap();
@@ -166,6 +196,34 @@ fn parallel_follow_modes_match_gnu_find_as_sets() {
         "-xtype".into(),
         "l".into(),
         ")".into(),
+    ];
+
+    let expected = Command::new("find").args(&args).output().unwrap();
+    let actual = Command::cargo_bin("findoxide")
+        .unwrap()
+        .env("FINDOXIDE_WORKERS", "4")
+        .args(&args)
+        .output()
+        .unwrap();
+
+    assert_eq!(actual.status.code(), expected.status.code());
+    assert_eq!(lines(&actual.stdout), lines(&expected.stdout));
+}
+
+#[test]
+fn parallel_alias_preservation_matches_gnu_find_as_sets() {
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("real")).unwrap();
+    fs::create_dir(root.path().join("real/sub")).unwrap();
+    fs::write(root.path().join("real/sub/file.txt"), "hello\n").unwrap();
+    unix_fs::symlink(root.path().join("real"), root.path().join("link-a")).unwrap();
+    unix_fs::symlink(root.path().join("real"), root.path().join("link-b")).unwrap();
+
+    let args = vec![
+        "-L".into(),
+        path_arg(root.path()),
+        "-name".into(),
+        "file.txt".into(),
     ];
 
     let expected = Command::new("find").args(&args).output().unwrap();

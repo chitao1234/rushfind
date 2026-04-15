@@ -2,7 +2,7 @@
 
 `findoxide` is a fresh Rust implementation of Unix `find` that targets GNU `find` syntax while adding a parallel traversal engine.
 
-## v0 and stage-2 scope
+## v0 and stage-3 scope
 
 - GNU-style argv parsing
 - Global follow-mode options: `-P`, `-H`, `-L`
@@ -25,6 +25,7 @@ Use the `FINDOXIDE_WORKERS` environment variable to control execution mode:
 - `-P` keeps physical traversal semantics and is the default
 - `-H` follows symlinks only for command-line roots
 - `-L` follows symlinks logically during traversal
+- Followed-directory traversal is loop-safe and reports a runtime error instead of recursing forever
 
 ## Unsupported in read-only v0
 
