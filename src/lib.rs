@@ -5,6 +5,7 @@ pub mod diagnostics;
 pub mod entry;
 pub mod eval;
 pub mod follow;
+pub mod identity;
 pub mod output;
 pub mod parser;
 pub mod pattern;

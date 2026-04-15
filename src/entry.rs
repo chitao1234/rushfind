@@ -1,4 +1,5 @@
 use crate::follow::FollowMode;
+use crate::identity::FileIdentity;
 use std::fs::{FileType, Metadata};
 use std::os::unix::fs::FileTypeExt;
 use std::path::PathBuf;
@@ -45,11 +46,21 @@ impl EntryContext {
         file_type_to_kind(self.physical_metadata.file_type())
     }
 
+    pub fn physical_identity(&self) -> FileIdentity {
+        FileIdentity::from_metadata(&self.physical_metadata)
+    }
+
     pub fn logical_kind(&self) -> EntryKind {
         self.logical_metadata
             .as_ref()
             .map(|metadata| file_type_to_kind(metadata.file_type()))
             .unwrap_or_else(|| self.physical_kind())
+    }
+
+    pub fn logical_identity(&self) -> Option<FileIdentity> {
+        self.logical_metadata
+            .as_ref()
+            .map(FileIdentity::from_metadata)
     }
 
     pub fn active_kind(&self, follow_mode: FollowMode) -> EntryKind {
@@ -58,6 +69,19 @@ impl EntryContext {
             FollowMode::CommandLineOnly if self.is_command_line_root => self.logical_kind(),
             FollowMode::CommandLineOnly => self.physical_kind(),
             FollowMode::Logical => self.logical_kind(),
+        }
+    }
+
+    pub fn active_directory_identity(&self, follow_mode: FollowMode) -> Option<FileIdentity> {
+        if self.active_kind(follow_mode) != EntryKind::Directory {
+            return None;
+        }
+
+        match follow_mode {
+            FollowMode::Physical => Some(self.physical_identity()),
+            FollowMode::CommandLineOnly if self.is_command_line_root => self.logical_identity(),
+            FollowMode::CommandLineOnly => Some(self.physical_identity()),
+            FollowMode::Logical => self.logical_identity(),
         }
     }
 
