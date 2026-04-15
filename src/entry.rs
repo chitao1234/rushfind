@@ -286,15 +286,22 @@ impl EntryContext {
     pub fn active_is_empty(&self, follow_mode: FollowMode) -> Result<bool, Diagnostic> {
         match self.active_kind(follow_mode)? {
             EntryKind::File => Ok(self.active_size(follow_mode)? == 0),
-            EntryKind::Directory => match self.data.active_directory_empty.get_or_init(|| {
-                self.data
-                    .reader
-                    .directory_is_empty(&self.path)
-                    .map_err(|error| path_error(&self.path, error))
-            }) {
-                Ok(is_empty) => Ok(*is_empty),
-                Err(error) => Err(error.clone()),
-            },
+            EntryKind::Directory => {
+                // GNU find evaluates predicates against one metadata snapshot per entry.
+                // Loading the active metadata before probing the directory prevents the
+                // probe from changing atime and influencing later metadata predicates.
+                let _ = self.active_metadata(follow_mode)?;
+
+                match self.data.active_directory_empty.get_or_init(|| {
+                    self.data
+                        .reader
+                        .directory_is_empty(&self.path)
+                        .map_err(|error| path_error(&self.path, error))
+                }) {
+                    Ok(is_empty) => Ok(*is_empty),
+                    Err(error) => Err(error.clone()),
+                }
+            }
             _ => Ok(false),
         }
     }

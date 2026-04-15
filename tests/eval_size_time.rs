@@ -81,9 +81,12 @@ fn relative_time_matcher_uses_signed_age_buckets() {
 }
 
 #[test]
-fn used_matcher_uses_signed_day_buckets() {
+fn used_matcher_matches_gnu_used_windows() {
     let exact_zero = UsedMatcher {
         comparison: NumericComparison::Exactly(0),
+    };
+    let exact_one = UsedMatcher {
+        comparison: NumericComparison::Exactly(1),
     };
     let greater_than_one = UsedMatcher {
         comparison: NumericComparison::GreaterThan(1),
@@ -92,9 +95,12 @@ fn used_matcher_uses_signed_day_buckets() {
         comparison: NumericComparison::LessThan(1),
     };
 
-    assert!(exact_zero.matches(Timestamp::new(86_401, 0), Timestamp::new(86_400, 0)));
-    assert!(greater_than_one.matches(Timestamp::new(259_201, 0), Timestamp::new(0, 0)));
-    assert!(less_than_one.matches(Timestamp::new(0, 0), Timestamp::new(172_801, 0)));
+    assert!(!exact_zero.matches(Timestamp::new(1, 0), Timestamp::new(0, 0)));
+    assert!(exact_one.matches(Timestamp::new(1, 0), Timestamp::new(0, 0)));
+    assert!(!exact_one.matches(Timestamp::new(86_400, 0), Timestamp::new(0, 0)));
+    assert!(greater_than_one.matches(Timestamp::new(86_401, 0), Timestamp::new(0, 0)));
+    assert!(less_than_one.matches(Timestamp::new(1, 0), Timestamp::new(0, 0)));
+    assert!(!less_than_one.matches(Timestamp::new(0, 0), Timestamp::new(1, 0)));
 }
 
 #[test]

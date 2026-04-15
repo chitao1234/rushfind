@@ -138,12 +138,20 @@ pub struct UsedMatcher {
 
 impl UsedMatcher {
     pub fn matches(self, atime: Timestamp, ctime: Timestamp) -> bool {
-        let bucket =
-            (atime.total_nanos() - ctime.total_nanos()) / RelativeTimeUnit::Days.bucket_nanos();
+        if atime < ctime {
+            return false;
+        }
+
+        let elapsed = atime.total_nanos() - ctime.total_nanos();
+        let day = RelativeTimeUnit::Days.bucket_nanos();
+
         match self.comparison {
-            NumericComparison::Exactly(expected) => bucket == expected as i128,
-            NumericComparison::LessThan(expected) => bucket < expected as i128,
-            NumericComparison::GreaterThan(expected) => bucket > expected as i128,
+            NumericComparison::Exactly(expected) => {
+                let expected = expected as i128;
+                elapsed >= (expected - 1) * day && elapsed < expected * day
+            }
+            NumericComparison::LessThan(expected) => elapsed < expected as i128 * day,
+            NumericComparison::GreaterThan(expected) => elapsed > expected as i128 * day,
         }
     }
 }

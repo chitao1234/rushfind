@@ -1,6 +1,7 @@
 mod support;
 
 use assert_cmd::cargo::CommandCargoExt;
+use findoxide::birth::read_birth_time;
 use std::ffi::OsString;
 use std::fs;
 use std::os::unix::fs::{self as unix_fs, MetadataExt, PermissionsExt};
@@ -114,9 +115,53 @@ fn build_size_time_tree() -> tempfile::TempDir {
     root
 }
 
+fn build_read_only_tail_tree() -> tempfile::TempDir {
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("empty-dir")).unwrap();
+    fs::create_dir(root.path().join("nonempty-dir")).unwrap();
+    fs::write(root.path().join("nonempty-dir/child"), "child\n").unwrap();
+    fs::write(root.path().join("empty-file"), []).unwrap();
+    fs::write(root.path().join("nonempty-file"), "hello\n").unwrap();
+    fs::write(root.path().join("reference-file"), "reference\n").unwrap();
+    fs::write(root.path().join("used-one.txt"), "one\n").unwrap();
+    fs::write(root.path().join("used-negative.txt"), "negative\n").unwrap();
+    unix_fs::symlink("empty-dir", root.path().join("empty-dir-link")).unwrap();
+    unix_fs::symlink("reference-file", root.path().join("reference-link")).unwrap();
+
+    touch_time(
+        &root.path().join("used-one.txt"),
+        &["-a", "-m", "-d", "2 days ago"],
+    );
+    touch_time(
+        &root.path().join("used-negative.txt"),
+        &["-a", "-m", "-d", "2 days ago"],
+    );
+    toggle_user_execute(&root.path().join("used-one.txt"));
+    toggle_user_execute(&root.path().join("used-negative.txt"));
+    let _ = fs::read(root.path().join("used-one.txt")).unwrap();
+
+    root
+}
+
 fn touch_time(path: &Path, args: &[&str]) {
     let status = Command::new("touch").args(args).arg(path).status().unwrap();
     assert!(status.success(), "touch failed for {}", path.display());
+}
+
+fn toggle_user_execute(path: &Path) {
+    let metadata = fs::metadata(path).unwrap();
+    let mut permissions = metadata.permissions();
+    permissions.set_mode(metadata.permissions().mode() ^ 0o100);
+    fs::set_permissions(path, permissions).unwrap();
+}
+
+fn gnu_supports_birth_time_predicates(root: &Path) -> bool {
+    Command::new("find")
+        .arg(root)
+        .args(["-newerBt", "@1700000000.25"])
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
 }
 
 fn current_id_output(flag: &str) -> String {
@@ -179,10 +224,12 @@ fn readme_documents_worker_selection_contract() {
 }
 
 #[test]
-fn readme_documents_stage8_size_and_time_surface() {
+fn readme_documents_stage9_read_only_tail_surface() {
     let readme = fs::read_to_string("README.md").unwrap();
 
     assert!(readme.contains("`-size`"));
+    assert!(readme.contains("`-empty`"));
+    assert!(readme.contains("`-used`"));
     assert!(readme.contains("`-mtime`"));
     assert!(readme.contains("`-atime`"));
     assert!(readme.contains("`-ctime`"));
@@ -192,9 +239,10 @@ fn readme_documents_stage8_size_and_time_surface() {
     assert!(readme.contains("`-newer`"));
     assert!(readme.contains("`-anewer`"));
     assert!(readme.contains("`-cnewer`"));
-    assert!(readme.contains("`-newerXY`"));
+    assert!(readme.contains("full read-only `-newerXY`"));
     assert!(readme.contains("`-daystart`"));
-    assert!(readme.contains("without `B` or `t`"));
+    assert!(readme.contains("`@<unix-seconds>[.frac]`"));
+    assert!(readme.contains("`YYYY-MM-DD`"));
 }
 
 #[test]
@@ -853,4 +901,70 @@ fn parallel_stage8_predicates_match_gnu_find_as_a_set() {
     for args in args_sets {
         assert_matches_gnu_as_sets(&args);
     }
+}
+
+#[test]
+fn ordered_stage9_read_only_tail_matches_gnu_find_exactly() {
+    let root = build_read_only_tail_tree();
+    let mut args_sets = vec![
+        vec![path_arg(root.path()), "-empty".into()],
+        vec![path_arg(root.path()), "-used".into(), "0".into()],
+        vec![path_arg(root.path()), "-used".into(), "1".into()],
+        vec![path_arg(root.path()), "-used".into(), "-1".into()],
+        vec!["-L".into(), path_arg(root.path()), "-empty".into()],
+    ];
+    let gnu_supports_birth = gnu_supports_birth_time_predicates(root.path());
+
+    if gnu_supports_birth {
+        args_sets.push(vec![
+            path_arg(root.path()),
+            "-newerBt".into(),
+            "@1700000000.25".into(),
+        ]);
+    }
+
+    for args in args_sets {
+        assert_matches_gnu_exact(&args);
+    }
+
+    if gnu_supports_birth
+        && read_birth_time(&root.path().join("reference-file"), true)
+            .unwrap()
+            .is_some()
+    {
+        assert_matches_gnu_exact(&[
+            path_arg(root.path()),
+            "-newermB".into(),
+            path_arg(&root.path().join("reference-file")),
+        ]);
+    }
+}
+
+#[test]
+fn parallel_stage9_read_only_tail_matches_gnu_find_as_sets() {
+    let root = build_read_only_tail_tree();
+    let args = vec![
+        path_arg(root.path()),
+        "-mindepth".into(),
+        "1".into(),
+        "(".into(),
+        "-empty".into(),
+        "-o".into(),
+        "-used".into(),
+        "1".into(),
+        "-o".into(),
+        "-used".into(),
+        "-1".into(),
+        ")".into(),
+        "-a".into(),
+        "(".into(),
+        "-type".into(),
+        "f".into(),
+        "-o".into(),
+        "-type".into(),
+        "d".into(),
+        ")".into(),
+    ];
+
+    assert_matches_gnu_as_sets(&args);
 }
