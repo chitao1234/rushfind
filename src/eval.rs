@@ -117,3 +117,57 @@ fn matches_type(expected: FileTypeFilter, actual: EntryKind) -> bool {
             | (FileTypeFilter::Socket, EntryKind::Socket)
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::evaluate;
+    use crate::entry::test_support::CountingReader;
+    use crate::follow::FollowMode;
+    use crate::output::RecordingSink;
+    use crate::parser::parse_command;
+    use crate::planner::{ExecutionPlan, plan_command};
+    use std::ffi::OsString;
+    use std::fs;
+    use std::os::unix::fs as unix_fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn planned_name_mismatch_skips_later_metadata_predicate() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("file.txt");
+        fs::write(&path, "hello\n").unwrap();
+        let reader = CountingReader::default();
+        let entry = reader.entry(path, 0, true);
+        let plan = plan_for(&[".", "-uid", "0", "-name", "does-not-match"]);
+        let mut sink = RecordingSink::default();
+
+        assert!(!evaluate(&plan.expr, &entry, FollowMode::Physical, &mut sink).unwrap());
+        assert_eq!(reader.symlink_metadata_calls(), 0);
+        assert_eq!(reader.metadata_calls(), 0);
+        assert_eq!(reader.read_link_calls(), 0);
+        assert_eq!(sink.into_utf8(), "");
+    }
+
+    #[test]
+    fn planned_name_mismatch_skips_later_link_target_predicate() {
+        let root = tempdir().unwrap();
+        fs::write(root.path().join("real.txt"), "hello\n").unwrap();
+        unix_fs::symlink("real.txt", root.path().join("file-link")).unwrap();
+        let reader = CountingReader::default();
+        let entry = reader.entry(root.path().join("file-link"), 0, true);
+        let plan = plan_for(&[".", "-lname", "*", "-name", "does-not-match"]);
+        let mut sink = RecordingSink::default();
+
+        assert!(!evaluate(&plan.expr, &entry, FollowMode::Physical, &mut sink).unwrap());
+        assert_eq!(reader.symlink_metadata_calls(), 0);
+        assert_eq!(reader.metadata_calls(), 0);
+        assert_eq!(reader.read_link_calls(), 0);
+        assert_eq!(sink.into_utf8(), "");
+    }
+
+    fn plan_for(args: &[&str]) -> ExecutionPlan {
+        let argv: Vec<OsString> = args.iter().map(OsString::from).collect();
+        let ast = parse_command(&argv).unwrap();
+        plan_command(ast, 1).unwrap()
+    }
+}
