@@ -97,7 +97,7 @@ fn evaluate_predicate(
         }
         RuntimePredicate::Size(matcher) => Ok(matcher.matches(entry.active_size(follow_mode)?)),
         RuntimePredicate::RelativeTime(matcher) => {
-            Ok(matcher.matches_timestamp(entry_timestamp(entry, follow_mode, matcher.kind)?))
+            matcher.matches_timestamp_checked(entry_timestamp(entry, follow_mode, matcher.kind)?)
         }
         RuntimePredicate::Newer(matcher) => {
             Ok(matcher.matches_timestamp(entry_timestamp(entry, follow_mode, matcher.current)?))

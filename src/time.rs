@@ -69,6 +69,7 @@ pub struct RelativeTimeMatcher {
     pub unit: RelativeTimeUnit,
     pub comparison: TimeComparison,
     pub baseline: Timestamp,
+    pub daystart: bool,
 }
 
 impl RelativeTimeMatcher {
@@ -77,23 +78,39 @@ impl RelativeTimeMatcher {
         unit: RelativeTimeUnit,
         comparison: TimeComparison,
         baseline: Timestamp,
+        daystart: bool,
     ) -> Self {
         Self {
             kind,
             unit,
             comparison,
             baseline,
+            daystart,
         }
     }
 
     pub fn matches_timestamp(self, actual: Timestamp) -> bool {
-        let bucket =
-            (self.baseline.total_nanos() - actual.total_nanos()) / self.unit.bucket_nanos();
+        self.matches_timestamp_checked(actual)
+            .expect("relative time comparison should be computable")
+    }
 
-        match self.comparison {
+    pub fn matches_timestamp_checked(self, actual: Timestamp) -> Result<bool, Diagnostic> {
+        let bucket = self.bucket(actual)?;
+
+        Ok(match self.comparison {
             TimeComparison::Exactly(expected) => bucket == expected as i128,
             TimeComparison::LessThan(expected) => bucket < expected as i128,
             TimeComparison::GreaterThan(expected) => bucket > expected as i128,
+        })
+    }
+
+    fn bucket(self, actual: Timestamp) -> Result<i128, Diagnostic> {
+        if self.daystart && matches!(self.unit, RelativeTimeUnit::Days) {
+            let baseline_day = local_calendar_day(self.baseline)?;
+            let actual_day = local_calendar_day(actual)?;
+            Ok((baseline_day - actual_day) as i128)
+        } else {
+            Ok((self.baseline.total_nanos() - actual.total_nanos()) / self.unit.bucket_nanos())
         }
     }
 }
@@ -116,27 +133,19 @@ pub fn parse_relative_time_argument(
     kind: TimestampKind,
     unit: RelativeTimeUnit,
     baseline: Timestamp,
+    daystart: bool,
 ) -> Result<RelativeTimeMatcher, Diagnostic> {
     Ok(RelativeTimeMatcher::new(
         kind,
         unit,
         parse_time_comparison(flag, value)?,
         baseline,
+        daystart,
     ))
 }
 
 pub fn local_day_start(now: Timestamp) -> Result<Timestamp, Diagnostic> {
-    let raw = now.seconds as libc::time_t;
-    let mut local = MaybeUninit::<libc::tm>::uninit();
-    let ptr = unsafe { libc::localtime_r(&raw, local.as_mut_ptr()) };
-    if ptr.is_null() {
-        return Err(Diagnostic::new(
-            "failed to resolve local time for -daystart",
-            1,
-        ));
-    }
-
-    let mut local = unsafe { local.assume_init() };
+    let mut local = local_time(now.seconds)?;
     local.tm_hour = 0;
     local.tm_min = 0;
     local.tm_sec = 0;
@@ -148,6 +157,44 @@ pub fn local_day_start(now: Timestamp) -> Result<Timestamp, Diagnostic> {
     }
 
     Ok(Timestamp::new(day_start as i64, 0))
+}
+
+fn local_calendar_day(timestamp: Timestamp) -> Result<i64, Diagnostic> {
+    let local = local_time(timestamp.seconds)?;
+    Ok(days_from_civil(
+        local.tm_year + 1900,
+        (local.tm_mon + 1) as u32,
+        local.tm_mday as u32,
+    ))
+}
+
+fn local_time(seconds: i64) -> Result<libc::tm, Diagnostic> {
+    let raw = seconds as libc::time_t;
+    let mut local = MaybeUninit::<libc::tm>::uninit();
+    let ptr = unsafe { libc::localtime_r(&raw, local.as_mut_ptr()) };
+    if ptr.is_null() {
+        return Err(Diagnostic::new(
+            "failed to resolve local time for relative time matching",
+            1,
+        ));
+    }
+
+    Ok(unsafe { local.assume_init() })
+}
+
+fn days_from_civil(year: i32, month: u32, day: u32) -> i64 {
+    let adjusted_year = year - i32::from(month <= 2);
+    let era = if adjusted_year >= 0 {
+        adjusted_year
+    } else {
+        adjusted_year - 399
+    } / 400;
+    let year_of_era = adjusted_year - (era * 400);
+    let shifted_month = month as i32 + if month > 2 { -3 } else { 9 };
+    let day_of_year = ((153 * shifted_month) + 2) / 5 + day as i32 - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+
+    (era * 146_097 + day_of_era - 719_468) as i64
 }
 
 pub fn resolve_reference_matcher(

@@ -271,6 +271,7 @@ fn lower_predicate(
                 TimestampKind::Access,
                 RelativeTimeUnit::Days,
                 temporal.relative_baseline()?,
+                temporal.daystart_active,
             )?,
         ))),
         Predicate::CTime(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(
@@ -280,6 +281,7 @@ fn lower_predicate(
                 TimestampKind::Change,
                 RelativeTimeUnit::Days,
                 temporal.relative_baseline()?,
+                temporal.daystart_active,
             )?,
         ))),
         Predicate::MTime(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(
@@ -289,6 +291,7 @@ fn lower_predicate(
                 TimestampKind::Modification,
                 RelativeTimeUnit::Days,
                 temporal.relative_baseline()?,
+                temporal.daystart_active,
             )?,
         ))),
         Predicate::AMin(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(
@@ -298,6 +301,7 @@ fn lower_predicate(
                 TimestampKind::Access,
                 RelativeTimeUnit::Minutes,
                 temporal.relative_baseline()?,
+                temporal.daystart_active,
             )?,
         ))),
         Predicate::CMin(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(
@@ -307,6 +311,7 @@ fn lower_predicate(
                 TimestampKind::Change,
                 RelativeTimeUnit::Minutes,
                 temporal.relative_baseline()?,
+                temporal.daystart_active,
             )?,
         ))),
         Predicate::MMin(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(
@@ -316,6 +321,7 @@ fn lower_predicate(
                 TimestampKind::Modification,
                 RelativeTimeUnit::Minutes,
                 temporal.relative_baseline()?,
+                temporal.daystart_active,
             )?,
         ))),
         Predicate::Newer(path) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Newer(

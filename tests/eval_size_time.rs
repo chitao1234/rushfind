@@ -5,7 +5,8 @@ use findoxide::output::RecordingSink;
 use findoxide::planner::{RuntimeExpr, RuntimePredicate};
 use findoxide::size::parse_size_argument;
 use findoxide::time::{
-    NewerMatcher, RelativeTimeMatcher, RelativeTimeUnit, TimeComparison, Timestamp, TimestampKind,
+    local_day_start, NewerMatcher, RelativeTimeMatcher, RelativeTimeUnit, TimeComparison,
+    Timestamp, TimestampKind,
 };
 use std::ffi::OsStr;
 use std::fs;
@@ -63,17 +64,34 @@ fn relative_time_matcher_uses_signed_age_buckets() {
         RelativeTimeUnit::Minutes,
         TimeComparison::Exactly(0),
         now,
+        false,
     );
     let less_than_one = RelativeTimeMatcher::new(
         TimestampKind::Modification,
         RelativeTimeUnit::Minutes,
         TimeComparison::LessThan(1),
         now,
+        false,
     );
 
     assert!(exact_zero.matches_timestamp(thirty_seconds_future));
     assert!(!exact_zero.matches_timestamp(ninety_seconds_future));
     assert!(less_than_one.matches_timestamp(thirty_seconds_future));
+}
+
+#[test]
+fn daystart_day_matching_uses_calendar_day_boundaries() {
+    let daystart = local_day_start(Timestamp::new(1_700_000_000, 0)).unwrap();
+    let exact_today = RelativeTimeMatcher::new(
+        TimestampKind::Modification,
+        RelativeTimeUnit::Days,
+        TimeComparison::Exactly(0),
+        daystart,
+        true,
+    );
+
+    assert!(exact_today.matches_timestamp(Timestamp::new(daystart.seconds + 1, 0)));
+    assert!(!exact_today.matches_timestamp(Timestamp::new(daystart.seconds - 1, 0)));
 }
 
 #[test]
@@ -95,6 +113,7 @@ fn relative_time_evaluation_reads_the_active_follow_mode_timestamp() {
         RelativeTimeUnit::Minutes,
         TimeComparison::GreaterThan(1),
         Timestamp::new(1_700_000_000, 0),
+        false,
     )));
     let entry = EntryContext::new(link, 0, true);
     let mut sink = RecordingSink::default();

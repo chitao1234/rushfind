@@ -97,7 +97,8 @@ fn lowers_relative_time_predicates_with_a_fixed_now_snapshot() {
             unit: RelativeTimeUnit::Minutes,
             comparison: TimeComparison::GreaterThan(5),
             baseline,
-        }) if *baseline == now
+            daystart,
+        }) if *baseline == now && !daystart
     )));
     assert!(predicates.iter().any(|predicate| matches!(
         predicate,
@@ -106,7 +107,8 @@ fn lowers_relative_time_predicates_with_a_fixed_now_snapshot() {
             unit: RelativeTimeUnit::Days,
             comparison: TimeComparison::Exactly(1),
             baseline,
-        }) if *baseline == now
+            daystart,
+        }) if *baseline == now && !daystart
     )));
 }
 
@@ -138,7 +140,9 @@ fn daystart_affects_only_later_relative_time_predicates() {
 
     let matchers = relative_time_matchers(&plan.expr);
     assert_eq!(matchers[0].baseline, now);
+    assert!(!matchers[0].daystart);
     assert_eq!(matchers[1].baseline, daystart);
+    assert!(matchers[1].daystart);
 }
 
 #[test]

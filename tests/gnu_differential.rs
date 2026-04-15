@@ -1,8 +1,10 @@
 mod support;
 
 use assert_cmd::cargo::CommandCargoExt;
+use std::ffi::OsString;
 use std::fs;
 use std::os::unix::fs::{self as unix_fs, MetadataExt, PermissionsExt};
+use std::path::Path;
 use std::process::Command;
 use support::{lines, path_arg};
 use tempfile::tempdir;
@@ -80,10 +82,75 @@ fn build_perm_tree() -> tempfile::TempDir {
     root
 }
 
+fn build_size_time_tree() -> tempfile::TempDir {
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("empty.bin"), []).unwrap();
+    fs::write(root.path().join("blockish.bin"), vec![b'x'; 513]).unwrap();
+    fs::write(root.path().join("large.bin"), vec![b'x'; 2049]).unwrap();
+    fs::write(root.path().join("older.txt"), "older\n").unwrap();
+    fs::write(root.path().join("recent.txt"), "recent\n").unwrap();
+    fs::write(root.path().join("reference.txt"), "reference\n").unwrap();
+    unix_fs::symlink("reference.txt", root.path().join("reference-link")).unwrap();
+
+    touch_time(&root.path().join("older.txt"), &["-a", "-d", "2 days ago"]);
+    touch_time(&root.path().join("older.txt"), &["-m", "-d", "2 days ago"]);
+    touch_time(
+        &root.path().join("recent.txt"),
+        &["-a", "-d", "15 minutes ago"],
+    );
+    touch_time(
+        &root.path().join("recent.txt"),
+        &["-m", "-d", "15 minutes ago"],
+    );
+    touch_time(
+        &root.path().join("reference.txt"),
+        &["-a", "-d", "3 days ago"],
+    );
+    touch_time(
+        &root.path().join("reference.txt"),
+        &["-m", "-d", "1 day ago"],
+    );
+
+    root
+}
+
+fn touch_time(path: &Path, args: &[&str]) {
+    let status = Command::new("touch").args(args).arg(path).status().unwrap();
+    assert!(status.success(), "touch failed for {}", path.display());
+}
+
 fn current_id_output(flag: &str) -> String {
     let output = Command::new("id").arg(flag).output().unwrap();
     assert!(output.status.success());
     String::from_utf8(output.stdout).unwrap().trim().to_owned()
+}
+
+fn assert_matches_gnu_exact(args: &[OsString]) {
+    let expected = Command::new("find").args(args).output().unwrap();
+    let actual = Command::cargo_bin("findoxide")
+        .unwrap()
+        .env("FINDOXIDE_WORKERS", "1")
+        .args(args)
+        .output()
+        .unwrap();
+
+    assert_eq!(actual.status.code(), expected.status.code());
+    assert_eq!(actual.stdout, expected.stdout);
+    assert_eq!(actual.stderr, expected.stderr);
+}
+
+fn assert_matches_gnu_as_sets(args: &[OsString]) {
+    let expected = Command::new("find").args(args).output().unwrap();
+    let actual = Command::cargo_bin("findoxide")
+        .unwrap()
+        .env("FINDOXIDE_WORKERS", "4")
+        .args(args)
+        .output()
+        .unwrap();
+
+    assert_eq!(actual.status.code(), expected.status.code());
+    assert_eq!(lines(&actual.stdout), lines(&expected.stdout));
+    assert_eq!(lines(&actual.stderr), lines(&expected.stderr));
 }
 
 #[test]
@@ -112,6 +179,25 @@ fn readme_documents_worker_selection_contract() {
 }
 
 #[test]
+fn readme_documents_stage8_size_and_time_surface() {
+    let readme = fs::read_to_string("README.md").unwrap();
+
+    assert!(readme.contains("`-size`"));
+    assert!(readme.contains("`-mtime`"));
+    assert!(readme.contains("`-atime`"));
+    assert!(readme.contains("`-ctime`"));
+    assert!(readme.contains("`-mmin`"));
+    assert!(readme.contains("`-amin`"));
+    assert!(readme.contains("`-cmin`"));
+    assert!(readme.contains("`-newer`"));
+    assert!(readme.contains("`-anewer`"));
+    assert!(readme.contains("`-cnewer`"));
+    assert!(readme.contains("`-newerXY`"));
+    assert!(readme.contains("`-daystart`"));
+    assert!(readme.contains("without `B` or `t`"));
+}
+
+#[test]
 fn reports_unsupported_exec_during_planning() {
     let root = build_tree();
     let output = Command::cargo_bin("findoxide")
@@ -122,11 +208,9 @@ fn reports_unsupported_exec_during_planning() {
         .unwrap();
 
     assert_ne!(output.status.code(), Some(0));
-    assert!(
-        String::from_utf8(output.stderr)
-            .unwrap()
-            .contains("unsupported in read-only v0")
-    );
+    assert!(String::from_utf8(output.stderr)
+        .unwrap()
+        .contains("unsupported in read-only v0"));
 }
 
 #[test]
@@ -138,11 +222,9 @@ fn reports_parse_errors_nonzero() {
         .unwrap();
 
     assert_ne!(output.status.code(), Some(0));
-    assert!(
-        String::from_utf8(output.stderr)
-            .unwrap()
-            .contains("expected `)`")
-    );
+    assert!(String::from_utf8(output.stderr)
+        .unwrap()
+        .contains("expected `)`"));
 }
 
 #[test]
@@ -665,5 +747,110 @@ fn parallel_symlink_content_matches_gnu_find_as_sets() {
         assert_eq!(actual.status.code(), expected.status.code());
         assert_eq!(lines(&actual.stdout), lines(&expected.stdout));
         assert_eq!(lines(&actual.stderr), lines(&expected.stderr));
+    }
+}
+
+#[test]
+fn ordered_stage8_predicates_match_gnu_find_exactly() {
+    let root = build_size_time_tree();
+    let args_sets = vec![
+        vec![path_arg(root.path()), "-size".into(), "2b".into()],
+        vec![path_arg(root.path()), "-size".into(), "-1M".into()],
+        vec![path_arg(root.path()), "-mtime".into(), "+1".into()],
+        vec![path_arg(root.path()), "-atime".into(), "+1".into()],
+        vec![path_arg(root.path()), "-ctime".into(), "0".into()],
+        vec![path_arg(root.path()), "-mmin".into(), "+5".into()],
+        vec![path_arg(root.path()), "-amin".into(), "+5".into()],
+        vec![path_arg(root.path()), "-cmin".into(), "-1".into()],
+        vec![
+            path_arg(root.path()),
+            "-daystart".into(),
+            "-mtime".into(),
+            "0".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-newer".into(),
+            path_arg(&root.path().join("reference.txt")),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-anewer".into(),
+            path_arg(&root.path().join("reference.txt")),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-cnewer".into(),
+            path_arg(&root.path().join("reference.txt")),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-newerma".into(),
+            path_arg(&root.path().join("reference.txt")),
+        ],
+        vec![
+            "-P".into(),
+            path_arg(root.path()),
+            "-newer".into(),
+            path_arg(&root.path().join("reference-link")),
+        ],
+        vec![
+            "-L".into(),
+            path_arg(root.path()),
+            "-newer".into(),
+            path_arg(&root.path().join("reference-link")),
+        ],
+    ];
+
+    for args in args_sets {
+        assert_matches_gnu_exact(&args);
+    }
+}
+
+#[test]
+fn parallel_stage8_predicates_match_gnu_find_as_a_set() {
+    let root = build_size_time_tree();
+    let args_sets = vec![
+        vec![
+            path_arg(root.path()),
+            "(".into(),
+            "-size".into(),
+            "+1c".into(),
+            "-a".into(),
+            "-daystart".into(),
+            "-mtime".into(),
+            "0".into(),
+            ")".into(),
+            "-o".into(),
+            "(".into(),
+            "-newer".into(),
+            path_arg(&root.path().join("reference.txt")),
+            "-a".into(),
+            "-type".into(),
+            "f".into(),
+            ")".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "(".into(),
+            "-amin".into(),
+            "+5".into(),
+            "-a".into(),
+            "-size".into(),
+            "+0c".into(),
+            ")".into(),
+            "-o".into(),
+            "(".into(),
+            "-newerma".into(),
+            path_arg(&root.path().join("reference.txt")),
+            "-a".into(),
+            "-type".into(),
+            "f".into(),
+            ")".into(),
+        ],
+    ];
+
+    for args in args_sets {
+        assert_matches_gnu_as_sets(&args);
     }
 }
