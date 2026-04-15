@@ -1,3 +1,4 @@
+use crate::account::{group_exists, user_exists};
 use crate::ast::FileTypeFilter;
 use crate::diagnostics::Diagnostic;
 use crate::entry::{EntryContext, EntryKind};
@@ -77,12 +78,13 @@ fn evaluate_predicate(
             ),
             None => Ok(false),
         },
-        RuntimePredicate::Uid(_)
-        | RuntimePredicate::Gid(_)
-        | RuntimePredicate::User(_)
-        | RuntimePredicate::Group(_)
-        | RuntimePredicate::NoUser
-        | RuntimePredicate::NoGroup => Ok(false),
+        RuntimePredicate::Uid(expected) => Ok(expected.matches(entry.active_uid(follow_mode).into())),
+        RuntimePredicate::Gid(expected) => Ok(expected.matches(entry.active_gid(follow_mode).into())),
+        RuntimePredicate::User(expected) => Ok(*expected == entry.active_uid(follow_mode)),
+        RuntimePredicate::Group(expected) => Ok(*expected == entry.active_gid(follow_mode)),
+        RuntimePredicate::NoUser => Ok(!user_exists(entry.active_uid(follow_mode))?),
+        RuntimePredicate::NoGroup => Ok(!group_exists(entry.active_gid(follow_mode))?),
+        RuntimePredicate::Perm(matcher) => Ok(matcher.matches(entry.active_mode_bits(follow_mode))),
         RuntimePredicate::Type(expected) => {
             Ok(matches_type(*expected, entry.active_kind(follow_mode)))
         }

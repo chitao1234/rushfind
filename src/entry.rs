@@ -88,6 +88,18 @@ impl EntryContext {
         self.active_metadata(follow_mode).ino()
     }
 
+    pub fn active_uid(&self, follow_mode: FollowMode) -> u32 {
+        self.active_metadata(follow_mode).uid()
+    }
+
+    pub fn active_gid(&self, follow_mode: FollowMode) -> u32 {
+        self.active_metadata(follow_mode).gid()
+    }
+
+    pub fn active_mode_bits(&self, follow_mode: FollowMode) -> u32 {
+        self.active_metadata(follow_mode).mode() & 0o7777
+    }
+
     pub fn active_link_count(&self, follow_mode: FollowMode) -> u64 {
         self.active_metadata(follow_mode).nlink()
     }

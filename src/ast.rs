@@ -48,6 +48,7 @@ pub enum Predicate {
     Group(OsString),
     NoUser,
     NoGroup,
+    Perm(OsString),
     Type(FileTypeFilter),
     XType(FileTypeFilter),
     True,

@@ -226,6 +226,8 @@ impl<'a> Parser<'a> {
             Expr::Predicate(Predicate::NoUser)
         } else if token.matches("-nogroup") {
             Expr::Predicate(Predicate::NoGroup)
+        } else if token.matches("-perm") {
+            Expr::Predicate(Predicate::Perm(self.take_os_string("-perm")?))
         } else if token.matches("-inum") {
             let raw = self.take_os_string("-inum")?;
             validate_numeric_argument("-inum", raw.as_os_str())?;

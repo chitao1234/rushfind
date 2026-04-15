@@ -4,6 +4,7 @@ use crate::diagnostics::Diagnostic;
 use crate::follow::FollowMode;
 use crate::identity::FileIdentity;
 use crate::numeric::{parse_numeric_argument, NumericComparison};
+use crate::perm::{parse_perm_argument, PermMatcher};
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -61,6 +62,7 @@ pub enum RuntimePredicate {
     Group(u32),
     NoUser,
     NoGroup,
+    Perm(PermMatcher),
     Type(FileTypeFilter),
     XType(FileTypeFilter),
     True,
@@ -201,6 +203,9 @@ fn lower_predicate(
         ))),
         Predicate::NoUser => Ok(RuntimeExpr::Predicate(RuntimePredicate::NoUser)),
         Predicate::NoGroup => Ok(RuntimeExpr::Predicate(RuntimePredicate::NoGroup)),
+        Predicate::Perm(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Perm(
+            parse_perm_argument(raw.as_os_str())?,
+        ))),
         Predicate::Type(kind) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Type(kind))),
         Predicate::XType(kind) => Ok(RuntimeExpr::Predicate(RuntimePredicate::XType(kind))),
         Predicate::True => Ok(RuntimeExpr::Predicate(RuntimePredicate::True)),

@@ -11,6 +11,7 @@ pub mod numeric;
 pub mod output;
 pub mod parser;
 pub mod pattern;
+pub mod perm;
 pub mod planner;
 pub mod runner;
 pub mod walker;

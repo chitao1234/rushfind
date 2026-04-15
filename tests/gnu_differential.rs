@@ -2,7 +2,7 @@ mod support;
 
 use assert_cmd::cargo::CommandCargoExt;
 use std::fs;
-use std::os::unix::fs::{self as unix_fs, MetadataExt};
+use std::os::unix::fs::{self as unix_fs, MetadataExt, PermissionsExt};
 use std::process::Command;
 use support::{lines, path_arg};
 use tempfile::tempdir;
@@ -51,6 +51,26 @@ fn build_symlink_content_tree() -> tempfile::TempDir {
     root
 }
 
+fn build_perm_tree() -> tempfile::TempDir {
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("file-664"), "hello\n").unwrap();
+    fs::write(root.path().join("file-660"), "hello\n").unwrap();
+    fs::write(root.path().join("file-000"), "hello\n").unwrap();
+    fs::write(root.path().join("file-sticky"), "hello\n").unwrap();
+    fs::set_permissions(root.path().join("file-664"), fs::Permissions::from_mode(0o664)).unwrap();
+    fs::set_permissions(root.path().join("file-660"), fs::Permissions::from_mode(0o660)).unwrap();
+    fs::set_permissions(root.path().join("file-000"), fs::Permissions::from_mode(0o000)).unwrap();
+    fs::set_permissions(root.path().join("file-sticky"), fs::Permissions::from_mode(0o1000))
+        .unwrap();
+    root
+}
+
+fn current_id_output(flag: &str) -> String {
+    let output = Command::new("id").arg(flag).output().unwrap();
+    assert!(output.status.success());
+    String::from_utf8(output.stdout).unwrap().trim().to_owned()
+}
+
 #[test]
 fn readme_documents_worker_selection_contract() {
     let readme = fs::read_to_string("README.md").unwrap();
@@ -64,6 +84,13 @@ fn readme_documents_worker_selection_contract() {
     assert!(readme.contains("`-links`"));
     assert!(readme.contains("`-lname`"));
     assert!(readme.contains("`-ilname`"));
+    assert!(readme.contains("`-uid`"));
+    assert!(readme.contains("`-gid`"));
+    assert!(readme.contains("`-user`"));
+    assert!(readme.contains("`-group`"));
+    assert!(readme.contains("`-nouser`"));
+    assert!(readme.contains("`-nogroup`"));
+    assert!(readme.contains("`-perm`"));
     assert!(readme.contains("loop-safe"));
 }
 
@@ -362,6 +389,129 @@ fn parallel_family_a_matches_gnu_find_as_sets() {
 
         assert_eq!(actual.status.code(), expected.status.code());
         assert_eq!(lines(&actual.stdout), lines(&expected.stdout));
+    }
+}
+
+#[test]
+fn ordered_metadata_ownership_matches_gnu_find_exactly() {
+    let root = build_tree();
+    let metadata = fs::metadata(root.path().join("src/lib.rs")).unwrap();
+    let uid = metadata.uid().to_string();
+    let gid = metadata.gid().to_string();
+    let user = current_id_output("-un");
+    let group = current_id_output("-gn");
+    let args_sets = vec![
+        vec![path_arg(root.path()), "-uid".into(), uid.clone().into()],
+        vec![path_arg(root.path()), "-gid".into(), gid.clone().into()],
+        vec![path_arg(root.path()), "-user".into(), user.into()],
+        vec![path_arg(root.path()), "-group".into(), group.into()],
+        vec![path_arg(root.path()), "-nouser".into()],
+        vec![path_arg(root.path()), "-nogroup".into()],
+    ];
+
+    for args in args_sets {
+        let expected = Command::new("find").args(&args).output().unwrap();
+        let actual = Command::cargo_bin("findoxide")
+            .unwrap()
+            .env("FINDOXIDE_WORKERS", "1")
+            .args(&args)
+            .output()
+            .unwrap();
+
+        assert_eq!(actual.status.code(), expected.status.code());
+        assert_eq!(actual.stdout, expected.stdout);
+        assert_eq!(actual.stderr, expected.stderr);
+    }
+}
+
+#[test]
+fn parallel_metadata_ownership_matches_gnu_find_as_sets() {
+    let root = build_tree();
+    let metadata = fs::metadata(root.path().join("src/lib.rs")).unwrap();
+    let uid = metadata.uid().to_string();
+    let gid = metadata.gid().to_string();
+    let user = current_id_output("-un");
+    let group = current_id_output("-gn");
+    let args_sets = vec![
+        vec![path_arg(root.path()), "-uid".into(), uid.into()],
+        vec![path_arg(root.path()), "-gid".into(), gid.into()],
+        vec![path_arg(root.path()), "-user".into(), user.into()],
+        vec![path_arg(root.path()), "-group".into(), group.into()],
+        vec![path_arg(root.path()), "-nouser".into()],
+        vec![path_arg(root.path()), "-nogroup".into()],
+    ];
+
+    for args in args_sets {
+        let expected = Command::new("find").args(&args).output().unwrap();
+        let actual = Command::cargo_bin("findoxide")
+            .unwrap()
+            .env("FINDOXIDE_WORKERS", "4")
+            .args(&args)
+            .output()
+            .unwrap();
+
+        assert_eq!(actual.status.code(), expected.status.code());
+        assert_eq!(lines(&actual.stdout), lines(&expected.stdout));
+        assert_eq!(lines(&actual.stderr), lines(&expected.stderr));
+    }
+}
+
+#[test]
+fn ordered_perm_matches_gnu_find_exactly() {
+    let root = build_perm_tree();
+    let args_sets = vec![
+        vec![path_arg(root.path()), "-perm".into(), "664".into()],
+        vec![path_arg(root.path()), "-perm".into(), "-g+w,u+w".into()],
+        vec![path_arg(root.path()), "-perm".into(), "/u=w,g=w".into()],
+        vec![path_arg(root.path()), "-perm".into(), "g=u".into()],
+        vec![path_arg(root.path()), "-perm".into(), "u=".into()],
+        vec![path_arg(root.path()), "-perm".into(), "-g=u".into()],
+        vec![path_arg(root.path()), "-perm".into(), "-u=X".into()],
+        vec![path_arg(root.path()), "-perm".into(), "+t".into()],
+        vec![path_arg(root.path()), "-perm".into(), "+X".into()],
+    ];
+
+    for args in args_sets {
+        let expected = Command::new("find").args(&args).output().unwrap();
+        let actual = Command::cargo_bin("findoxide")
+            .unwrap()
+            .env("FINDOXIDE_WORKERS", "1")
+            .args(&args)
+            .output()
+            .unwrap();
+
+        assert_eq!(actual.status.code(), expected.status.code());
+        assert_eq!(actual.stdout, expected.stdout);
+        assert_eq!(actual.stderr, expected.stderr);
+    }
+}
+
+#[test]
+fn parallel_perm_matches_gnu_find_as_sets() {
+    let root = build_perm_tree();
+    let args_sets = vec![
+        vec![path_arg(root.path()), "-perm".into(), "-g+w,u+w".into()],
+        vec![path_arg(root.path()), "-perm".into(), "/u=w,g=w".into()],
+        vec![path_arg(root.path()), "-perm".into(), "g=u".into()],
+        vec![path_arg(root.path()), "-perm".into(), "u=".into()],
+        vec![path_arg(root.path()), "-perm".into(), "-g=u".into()],
+        vec![path_arg(root.path()), "-perm".into(), "-u=X".into()],
+        vec![path_arg(root.path()), "-perm".into(), "+t".into()],
+        vec![path_arg(root.path()), "-perm".into(), "+X".into()],
+    ];
+
+    for args in args_sets {
+        let expected = Command::new("find").args(&args).output().unwrap();
+        let actual = Command::cargo_bin("findoxide")
+            .unwrap()
+            .env("FINDOXIDE_WORKERS", "4")
+            .args(&args)
+            .output()
+            .unwrap();
+
+        assert_eq!(actual.status.code(), expected.status.code());
+        assert_eq!(lines(&actual.stdout), lines(&expected.stdout));
+        assert_eq!(lines(&actual.stderr), lines(&expected.stderr));
     }
 }
 

@@ -2,12 +2,14 @@
 
 `findoxide` is a fresh Rust implementation of Unix `find` that targets GNU `find` syntax while adding a parallel traversal engine.
 
-## v0 and stage-5 scope
+## v0 and stage-6 scope
 
 - GNU-style argv parsing
 - Global follow-mode options: `-P`, `-H`, `-L`
 - Read-only predicates: `-name`, `-iname`, `-path`, `-ipath`, `-type`, `-xtype`, `-true`, `-false`
 - Identity/link predicates: `-samefile`, `-inum`, `-links`
+- Ownership/account predicates: `-uid`, `-gid`, `-user`, `-group`, `-nouser`, `-nogroup`
+- Permission predicate: `-perm`
 - Symlink-content predicates: `-lname`, `-ilname`
 - Traversal controls: `-mindepth`, `-maxdepth`
 - Output actions: `-print`, `-print0`
