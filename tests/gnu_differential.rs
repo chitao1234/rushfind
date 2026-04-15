@@ -2,7 +2,7 @@ mod support;
 
 use assert_cmd::cargo::CommandCargoExt;
 use std::fs;
-use std::os::unix::fs as unix_fs;
+use std::os::unix::fs::{self as unix_fs, MetadataExt};
 use std::process::Command;
 use support::{lines, path_arg};
 use tempfile::tempdir;
@@ -17,6 +17,20 @@ fn build_tree() -> tempfile::TempDir {
     root
 }
 
+fn build_identity_tree() -> tempfile::TempDir {
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("real")).unwrap();
+    fs::write(root.path().join("real/file.txt"), "hello\n").unwrap();
+    fs::hard_link(
+        root.path().join("real/file.txt"),
+        root.path().join("real/file-hard.txt"),
+    )
+    .unwrap();
+    unix_fs::symlink(root.path().join("real/file.txt"), root.path().join("file-link")).unwrap();
+    unix_fs::symlink(root.path().join("missing"), root.path().join("broken-link")).unwrap();
+    root
+}
+
 #[test]
 fn readme_documents_worker_selection_contract() {
     let readme = fs::read_to_string("README.md").unwrap();
@@ -25,6 +39,9 @@ fn readme_documents_worker_selection_contract() {
     assert!(readme.contains("GNU `find` syntax"));
     assert!(readme.contains("`-P`, `-H`, `-L`"));
     assert!(readme.contains("`-xtype`"));
+    assert!(readme.contains("`-samefile`"));
+    assert!(readme.contains("`-inum`"));
+    assert!(readme.contains("`-links`"));
     assert!(readme.contains("loop-safe"));
 }
 
@@ -236,4 +253,91 @@ fn parallel_alias_preservation_matches_gnu_find_as_sets() {
 
     assert_eq!(actual.status.code(), expected.status.code());
     assert_eq!(lines(&actual.stdout), lines(&expected.stdout));
+}
+
+#[test]
+fn ordered_family_a_matches_gnu_find_exactly() {
+    let root = build_identity_tree();
+    let logical_inode = fs::metadata(root.path().join("file-link"))
+        .unwrap()
+        .ino()
+        .to_string();
+    let args_sets = vec![
+        vec![
+            "-P".into(),
+            path_arg(root.path()),
+            "-samefile".into(),
+            path_arg(&root.path().join("file-link")),
+        ],
+        vec![
+            "-L".into(),
+            path_arg(root.path()),
+            "-samefile".into(),
+            path_arg(&root.path().join("file-link")),
+        ],
+        vec![
+            "-L".into(),
+            path_arg(root.path()),
+            "-inum".into(),
+            logical_inode.clone().into(),
+        ],
+        vec![path_arg(root.path()), "-links".into(), "2".into()],
+        vec![
+            "-L".into(),
+            path_arg(root.path()),
+            "-samefile".into(),
+            path_arg(&root.path().join("broken-link")),
+        ],
+    ];
+
+    for args in args_sets {
+        let expected = Command::new("find").args(&args).output().unwrap();
+        let actual = Command::cargo_bin("findoxide")
+            .unwrap()
+            .env("FINDOXIDE_WORKERS", "1")
+            .args(&args)
+            .output()
+            .unwrap();
+
+        assert_eq!(actual.status.code(), expected.status.code());
+        assert_eq!(actual.stdout, expected.stdout);
+        assert_eq!(actual.stderr, expected.stderr);
+    }
+}
+
+#[test]
+fn parallel_family_a_matches_gnu_find_as_sets() {
+    let root = build_identity_tree();
+    let logical_inode = fs::metadata(root.path().join("file-link"))
+        .unwrap()
+        .ino()
+        .to_string();
+    let args_sets = vec![
+        vec![
+            "-L".into(),
+            path_arg(root.path()),
+            "-samefile".into(),
+            path_arg(&root.path().join("file-link")),
+        ],
+        vec![
+            "-L".into(),
+            path_arg(root.path()),
+            "-inum".into(),
+            logical_inode.into(),
+        ],
+        vec!["-L".into(), path_arg(root.path()), "-links".into(), "2".into()],
+    ];
+
+    for args in args_sets {
+        let expected = Command::new("find").args(&args).output().unwrap();
+        let actual = Command::cargo_bin("findoxide")
+            .unwrap()
+            .env("FINDOXIDE_WORKERS", "4")
+            .args(&args)
+            .output()
+            .unwrap();
+
+        assert_eq!(actual.status.code(), expected.status.code());
+        assert_eq!(lines(&actual.stdout), lines(&expected.stdout));
+    }
 }
