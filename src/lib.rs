@@ -19,4 +19,5 @@ pub mod planner;
 pub mod runner;
 pub mod size;
 pub mod time;
+pub(crate) mod traversal_control;
 pub mod walker;

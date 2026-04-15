@@ -30,6 +30,7 @@ pub struct ExecutionPlan {
 pub struct TraversalOptions {
     pub min_depth: usize,
     pub max_depth: Option<usize>,
+    pub same_file_system: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +51,7 @@ pub enum RuntimeExpr {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimePredicate {
+    Prune,
     Name {
         pattern: OsString,
         case_insensitive: bool,
@@ -109,6 +111,7 @@ pub fn plan_command_with_now(
     let mut traversal = TraversalOptions {
         min_depth: 0,
         max_depth: None,
+        same_file_system: false,
     };
     let mut temporal = TemporalPlanningState {
         now,
@@ -215,6 +218,11 @@ fn lower_predicate(
         }
         Predicate::MinDepth(value) => {
             traversal.min_depth = value as usize;
+            Ok(RuntimeExpr::Barrier)
+        }
+        Predicate::Prune => Ok(RuntimeExpr::Predicate(RuntimePredicate::Prune)),
+        Predicate::XDev => {
+            traversal.same_file_system = true;
             Ok(RuntimeExpr::Barrier)
         }
         Predicate::Name {

@@ -2,6 +2,7 @@ use crate::diagnostics::Diagnostic;
 use crate::eval::evaluate;
 use crate::output::StdoutSink;
 use crate::planner::{ExecutionMode, ExecutionPlan};
+use crate::traversal_control::evaluate_for_traversal;
 use crate::walker::{WalkEvent, walk_ordered, walk_parallel};
 use std::io::Write;
 
@@ -41,6 +42,7 @@ where
         &plan.start_paths,
         plan.follow_mode,
         plan.traversal,
+        |entry| evaluate_for_traversal(&plan.expr, entry, plan.follow_mode),
         |event| {
             match event {
                 WalkEvent::Entry(entry) => {
@@ -73,6 +75,8 @@ where
 {
     let mut sink = StdoutSink::new(stdout);
     let mut had_runtime_errors = false;
+    let control_expr = plan.expr.clone();
+    let follow_mode = plan.follow_mode;
     let worker_count = std::env::var("FINDOXIDE_WORKERS")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
@@ -84,6 +88,7 @@ where
         plan.follow_mode,
         plan.traversal,
         worker_count,
+        move |entry| evaluate_for_traversal(&control_expr, entry, follow_mode),
     ) {
         match event {
             WalkEvent::Entry(entry) => {

@@ -41,12 +41,13 @@ pub fn evaluate(
     }
 }
 
-fn evaluate_predicate(
+pub(crate) fn evaluate_predicate(
     predicate: &RuntimePredicate,
     entry: &EntryContext,
     follow_mode: FollowMode,
 ) -> Result<bool, Diagnostic> {
     match predicate {
+        RuntimePredicate::Prune => Ok(true),
         RuntimePredicate::Name {
             pattern,
             case_insensitive,

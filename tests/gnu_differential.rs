@@ -20,6 +20,25 @@ fn build_tree() -> tempfile::TempDir {
     root
 }
 
+fn build_prune_tree() -> tempfile::TempDir {
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("src")).unwrap();
+    fs::create_dir(root.path().join("vendor")).unwrap();
+    fs::create_dir(root.path().join("vendor/nested")).unwrap();
+    fs::write(root.path().join("src/lib.rs"), "pub fn lib() {}\n").unwrap();
+    fs::write(
+        root.path().join("vendor/blocked.rs"),
+        "pub fn blocked() {}\n",
+    )
+    .unwrap();
+    fs::write(
+        root.path().join("vendor/nested/deeper.rs"),
+        "pub fn deeper() {}\n",
+    )
+    .unwrap();
+    root
+}
+
 fn build_identity_tree() -> tempfile::TempDir {
     let root = tempdir().unwrap();
     fs::create_dir(root.path().join("real")).unwrap();
@@ -246,6 +265,16 @@ fn readme_documents_stage9_read_only_tail_surface() {
 }
 
 #[test]
+fn readme_documents_stage10_structural_traversal_surface() {
+    let readme = fs::read_to_string("README.md").unwrap();
+
+    assert!(readme.contains("`-prune`"));
+    assert!(readme.contains("`-xdev`"));
+    assert!(readme.contains("`-mount`"));
+    assert!(readme.contains("traversal-wide structural limits"));
+}
+
+#[test]
 fn reports_unsupported_exec_during_planning() {
     let root = build_tree();
     let output = Command::cargo_bin("findoxide")
@@ -303,6 +332,37 @@ fn ordered_mode_matches_gnu_find_exactly() {
 }
 
 #[test]
+fn ordered_structural_traversal_controls_match_gnu_find_exactly() {
+    let root = build_prune_tree();
+    let args_sets = vec![
+        vec![
+            path_arg(root.path()),
+            "-name".into(),
+            "vendor".into(),
+            "-prune".into(),
+            "-o".into(),
+            "-print".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-type".into(),
+            "d".into(),
+            "-name".into(),
+            "vendor".into(),
+            "-prune".into(),
+            "-o".into(),
+            "-name".into(),
+            "*.rs".into(),
+            "-print".into(),
+        ],
+    ];
+
+    for args in args_sets {
+        assert_matches_gnu_exact(&args);
+    }
+}
+
+#[test]
 fn parallel_mode_matches_gnu_find_as_a_set() {
     let root = build_tree();
     let args = vec![
@@ -328,6 +388,21 @@ fn parallel_mode_matches_gnu_find_as_a_set() {
 
     assert_eq!(actual.status.code(), expected.status.code());
     assert_eq!(lines(&actual.stdout), lines(&expected.stdout));
+}
+
+#[test]
+fn parallel_prune_matches_gnu_as_a_set() {
+    let root = build_prune_tree();
+    let args = vec![
+        path_arg(root.path()),
+        "-name".into(),
+        "vendor".into(),
+        "-prune".into(),
+        "-o".into(),
+        "-print".into(),
+    ];
+
+    assert_matches_gnu_as_sets(&args);
 }
 
 #[test]

@@ -81,6 +81,17 @@ fn traversal_controls_are_optimizer_barriers() {
 }
 
 #[test]
+fn prune_is_an_optimizer_barrier() {
+    let ast = parse_command(&argv(&[".", "-uid", "0", "-prune", "-name", "*.rs"])).unwrap();
+    let plan = plan_command(ast, 1).unwrap();
+
+    assert_eq!(
+        linear_labels(&plan.expr),
+        vec!["uid", "prune", "name", "print"]
+    );
+}
+
+#[test]
 fn daystart_is_an_optimizer_barrier() {
     let ast = parse_command(&argv(&[
         ".",
@@ -198,6 +209,7 @@ fn expr_label(expr: &RuntimeExpr) -> &'static str {
 
 fn predicate_label(predicate: &RuntimePredicate) -> &'static str {
     match predicate {
+        RuntimePredicate::Prune => "prune",
         RuntimePredicate::Name { .. } => "name",
         RuntimePredicate::Path { .. } => "path",
         RuntimePredicate::Inum(_) => "inum",

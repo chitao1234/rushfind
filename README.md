@@ -2,7 +2,7 @@
 
 `findoxide` is a fresh Rust implementation of Unix `find` that targets GNU `find` syntax while adding a parallel traversal engine.
 
-## v0 and stage-9 scope
+## v0 and stage-10 scope
 
 - GNU-style argv parsing
 - Global follow-mode options: `-P`, `-H`, `-L`
@@ -15,9 +15,13 @@
 - Time predicates and `-used` accept GNU-style fractional magnitudes such as `0.5`, `+1.25`,
   and `-0.75`
 - Symlink-content predicates: `-lname`, `-ilname`
-- Traversal controls: `-mindepth`, `-maxdepth`
+- Traversal controls: `-mindepth`, `-maxdepth`, `-prune`, `-xdev`, `-mount`
 - Output actions: `-print`, `-print0`
-- Ordered single-worker mode and relaxed-order parallel mode
+- Ordered single-worker mode stays GNU-oriented for supported structural traversal controls
+- Relaxed-order parallel mode guarantees prune subtree boundaries but does not promise GNU sibling
+  ordering
+- `-xdev` and `-mount` are normalized as traversal-wide structural limits in this stage rather
+  than GNU-style positional controls
 - Internal performance substrate: lazy entry data access and cheap-first planning for pure read-only `-a` chains
 - `-newerXY` supports Linux-first birth-time forms and a strict literal-time subset:
   `@<unix-seconds>[.frac]`, `YYYY-MM-DD`, and `YYYY-MM-DD[ T]HH:MM[:SS][.frac][Z|±HH[:MM]]`

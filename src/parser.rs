@@ -182,6 +182,10 @@ impl<'a> Parser<'a> {
             Expr::Predicate(Predicate::MaxDepth(self.take_u32("-maxdepth")?))
         } else if token.matches("-mindepth") {
             Expr::Predicate(Predicate::MinDepth(self.take_u32("-mindepth")?))
+        } else if token.matches("-prune") {
+            Expr::Predicate(Predicate::Prune)
+        } else if token.matches("-xdev") || token.matches("-mount") {
+            Expr::Predicate(Predicate::XDev)
         } else if token.matches("-name") {
             Expr::Predicate(Predicate::Name {
                 pattern: self.take_os_string("-name")?,

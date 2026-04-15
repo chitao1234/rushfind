@@ -214,6 +214,10 @@ impl EntryContext {
         Ok(self.active_identity(follow_mode)?.ino)
     }
 
+    pub fn active_device(&self, follow_mode: FollowMode) -> Result<u64, Diagnostic> {
+        Ok(self.active_identity(follow_mode)?.dev)
+    }
+
     pub fn active_uid(&self, follow_mode: FollowMode) -> Result<u32, Diagnostic> {
         Ok(self.active_metadata(follow_mode)?.uid())
     }

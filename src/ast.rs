@@ -27,6 +27,8 @@ pub enum Expr {
 pub enum Predicate {
     MaxDepth(u32),
     MinDepth(u32),
+    Prune,
+    XDev,
     Name {
         pattern: OsString,
         case_insensitive: bool,

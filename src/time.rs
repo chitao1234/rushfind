@@ -481,7 +481,9 @@ fn quantized_offset_from_nanoseconds(digits: &[u8]) -> QuantizedOffset {
 fn parse_nonnegative_i64_digits(digits: &[u8]) -> Option<i64> {
     let normalized = normalized_digit_slice(digits);
     let max = b"9223372036854775807";
-    if normalized.len() > max.len() || (normalized.len() == max.len() && normalized > max) {
+    if normalized.len() > max.len()
+        || (normalized.len() == max.len() && normalized > max.as_slice())
+    {
         return None;
     }
 

@@ -94,6 +94,11 @@ fn expr_cost(expr: &RuntimeExpr) -> CostTier {
 
 pub(crate) fn predicate_profile(predicate: &RuntimePredicate) -> PredicateProfile {
     match predicate {
+        RuntimePredicate::Prune => PredicateProfile {
+            reorderable: false,
+            requirements: NONE,
+            cost: CostTier::Constant,
+        },
         RuntimePredicate::True | RuntimePredicate::False => profile(NONE, CostTier::Constant),
         RuntimePredicate::Name { .. } => profile(BASENAME, CostTier::StringOnly),
         RuntimePredicate::Path { .. } => profile(FULL_PATH, CostTier::StringOnly),
