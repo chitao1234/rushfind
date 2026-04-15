@@ -97,8 +97,8 @@ fn or_and_not_boundaries_are_not_crossed() {
 
 #[test]
 fn traversal_controls_are_optimizer_barriers() {
-    let ast = parse_command(&argv(&[".", "-uid", "0", "-maxdepth", "1", "-name", "*.rs"]))
-        .unwrap();
+    let ast =
+        parse_command(&argv(&[".", "-uid", "0", "-maxdepth", "1", "-name", "*.rs"])).unwrap();
     let plan = plan_command(ast, 1).unwrap();
 
     assert_eq!(
@@ -194,6 +194,7 @@ fn predicate_label(predicate: &RuntimePredicate) -> &'static str {
         RuntimePredicate::NoUser => "nouser",
         RuntimePredicate::NoGroup => "nogroup",
         RuntimePredicate::Perm(_) => "perm",
+        RuntimePredicate::Size(_) => "size",
         RuntimePredicate::Type(_) => "type",
         RuntimePredicate::XType(_) => "xtype",
         RuntimePredicate::True => "true",

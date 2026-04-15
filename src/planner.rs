@@ -3,9 +3,10 @@ use crate::ast::{Action, CommandAst, Expr, FileTypeFilter, GlobalOption, Predica
 use crate::diagnostics::Diagnostic;
 use crate::follow::FollowMode;
 use crate::identity::FileIdentity;
-use crate::numeric::{parse_numeric_argument, NumericComparison};
+use crate::numeric::{NumericComparison, parse_numeric_argument};
 use crate::optimizer::optimize_read_only_and_chains;
-use crate::perm::{parse_perm_argument, PermMatcher};
+use crate::perm::{PermMatcher, parse_perm_argument};
+use crate::size::{SizeMatcher, parse_size_argument};
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -65,6 +66,7 @@ pub enum RuntimePredicate {
     NoUser,
     NoGroup,
     Perm(PermMatcher),
+    Size(SizeMatcher),
     Type(FileTypeFilter),
     XType(FileTypeFilter),
     True,
@@ -209,7 +211,9 @@ fn lower_predicate(
         Predicate::Perm(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Perm(
             parse_perm_argument(raw.as_os_str())?,
         ))),
-        Predicate::Size(_) => Err(stage8_planner_unimplemented("-size")),
+        Predicate::Size(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Size(
+            parse_size_argument(raw.as_os_str())?,
+        ))),
         Predicate::ATime(_) => Err(stage8_planner_unimplemented("-atime")),
         Predicate::CTime(_) => Err(stage8_planner_unimplemented("-ctime")),
         Predicate::MTime(_) => Err(stage8_planner_unimplemented("-mtime")),

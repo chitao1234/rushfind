@@ -101,7 +101,8 @@ pub(crate) fn predicate_profile(predicate: &RuntimePredicate) -> PredicateProfil
         | RuntimePredicate::Gid(_)
         | RuntimePredicate::User(_)
         | RuntimePredicate::Group(_)
-        | RuntimePredicate::Perm(_) => profile(ACTIVE_METADATA, CostTier::ActiveMetadata),
+        | RuntimePredicate::Perm(_)
+        | RuntimePredicate::Size(_) => profile(ACTIVE_METADATA, CostTier::ActiveMetadata),
         RuntimePredicate::LName { .. } => profile(LINK_TARGET, CostTier::Expensive),
         RuntimePredicate::NoUser | RuntimePredicate::NoGroup => {
             profile(ACTIVE_METADATA_AND_NSS, CostTier::Expensive)

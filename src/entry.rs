@@ -209,6 +209,10 @@ impl EntryContext {
         Ok(self.active_metadata(follow_mode)?.mode() & 0o7777)
     }
 
+    pub fn active_size(&self, follow_mode: FollowMode) -> Result<u64, Diagnostic> {
+        Ok(self.active_metadata(follow_mode)?.len())
+    }
+
     pub fn active_link_count(&self, follow_mode: FollowMode) -> Result<u64, Diagnostic> {
         Ok(self.active_metadata(follow_mode)?.nlink())
     }

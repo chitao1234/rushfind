@@ -94,6 +94,7 @@ fn evaluate_predicate(
         RuntimePredicate::Perm(matcher) => {
             Ok(matcher.matches(entry.active_mode_bits(follow_mode)?))
         }
+        RuntimePredicate::Size(matcher) => Ok(matcher.matches(entry.active_size(follow_mode)?)),
         RuntimePredicate::Type(expected) => {
             Ok(matches_type(*expected, entry.active_kind(follow_mode)?))
         }
