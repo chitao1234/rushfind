@@ -1,3 +1,4 @@
+use crate::birth::read_birth_time;
 use crate::diagnostics::Diagnostic;
 use crate::follow::FollowMode;
 use crate::identity::FileIdentity;
@@ -71,6 +72,8 @@ struct EntryData {
     logical_identity: OnceLock<Option<FileIdentity>>,
     physical_link_target: OnceLock<Result<Option<OsString>, Diagnostic>>,
     active_directory_empty: OnceLock<Result<bool, Diagnostic>>,
+    physical_birth_time: OnceLock<Result<Option<Timestamp>, Diagnostic>>,
+    logical_birth_time: OnceLock<Result<Option<Timestamp>, Diagnostic>>,
 }
 
 impl fmt::Debug for EntryContext {
@@ -140,6 +143,8 @@ impl EntryContext {
                 logical_identity: OnceLock::new(),
                 physical_link_target: OnceLock::new(),
                 active_directory_empty: OnceLock::new(),
+                physical_birth_time: OnceLock::new(),
+                logical_birth_time: OnceLock::new(),
             }),
         }
     }
@@ -251,6 +256,31 @@ impl EntryContext {
 
     pub fn active_link_count(&self, follow_mode: FollowMode) -> Result<u64, Diagnostic> {
         Ok(self.active_metadata(follow_mode)?.nlink())
+    }
+
+    pub fn active_birth_time(
+        &self,
+        follow_mode: FollowMode,
+    ) -> Result<Option<Timestamp>, Diagnostic> {
+        if self.uses_logical_view(follow_mode) && self.physical_kind()? == EntryKind::Symlink {
+            match self
+                .data
+                .logical_birth_time
+                .get_or_init(|| read_birth_time(&self.path, true))
+            {
+                Ok(timestamp) => Ok(*timestamp),
+                Err(error) => Err(error.clone()),
+            }
+        } else {
+            match self
+                .data
+                .physical_birth_time
+                .get_or_init(|| read_birth_time(&self.path, false))
+            {
+                Ok(timestamp) => Ok(*timestamp),
+                Err(error) => Err(error.clone()),
+            }
+        }
     }
 
     pub fn active_is_empty(&self, follow_mode: FollowMode) -> Result<bool, Diagnostic> {

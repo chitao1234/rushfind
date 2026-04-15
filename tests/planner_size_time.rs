@@ -1,5 +1,6 @@
 mod support;
 
+use findoxide::birth::read_birth_time;
 use findoxide::numeric::NumericComparison;
 use findoxide::parser::parse_command;
 use findoxide::planner::{plan_command, plan_command_with_now, RuntimeExpr, RuntimePredicate};
@@ -213,14 +214,75 @@ fn lowers_newer_shorthands_and_supported_newerxy_forms() {
 }
 
 #[test]
-fn rejects_unsupported_birth_and_literal_reference_forms() {
-    for flag in ["-newerBm", "-newermB", "-newermt", "-newerta"] {
-        let error =
-            plan_command(parse_command(&argv(&[".", flag, "reference"])).unwrap(), 1).unwrap_err();
+fn stage9_supports_birth_and_literal_reference_forms() {
+    let literal = plan_command(
+        parse_command(&argv(&[".", "-newerBt", "@1700000000.5"])).unwrap(),
+        1,
+    )
+    .unwrap();
+    assert!(predicate_items(&literal.expr)
+        .into_iter()
+        .any(|predicate| matches!(
+            predicate,
+            RuntimePredicate::Newer(NewerMatcher {
+                current: TimestampKind::Birth,
+                reference,
+            }) if reference == Timestamp::new(1_700_000_000, 500_000_000)
+        )));
+
+    let root = tempdir().unwrap();
+    let reference = root.path().join("birth-reference.txt");
+    fs::write(&reference, "reference\n").unwrap();
+    match read_birth_time(&reference, true).unwrap() {
+        Some(expected_birth) => {
+            let plan = plan_command(
+                parse_command(&[
+                    ".".into(),
+                    "-newermB".into(),
+                    reference.as_os_str().to_os_string(),
+                ])
+                .unwrap(),
+                1,
+            )
+            .unwrap();
+
+            assert!(predicate_items(&plan.expr)
+                .into_iter()
+                .any(|predicate| matches!(
+                    predicate,
+                    RuntimePredicate::Newer(NewerMatcher {
+                        current: TimestampKind::Modification,
+                        reference,
+                    }) if reference == expected_birth
+                )));
+        }
+        None => {
+            let error = plan_command(
+                parse_command(&[
+                    ".".into(),
+                    "-newermB".into(),
+                    reference.as_os_str().to_os_string(),
+                ])
+                .unwrap(),
+                1,
+            )
+            .unwrap_err();
+            assert!(error.message.contains("birth time"));
+        }
+    }
+}
+
+#[test]
+fn rejects_invalid_current_t_and_unsupported_literal_forms() {
+    for (flag, arg) in [
+        ("-newertm", "ref"),
+        ("-newerBt", "yesterday"),
+        ("-newerBt", "2026-04"),
+    ] {
+        let error = plan_command(parse_command(&argv(&[".", flag, arg])).unwrap(), 1).unwrap_err();
         assert!(
-            error.message.contains("unsupported in stage 8")
-                || error.message.contains("birth time")
-                || error.message.contains("literal time")
+            error.message.contains("invalid `-newerXY`")
+                || error.message.contains("unsupported literal time format")
         );
     }
 }
@@ -273,6 +335,7 @@ fn linear_labels(expr: &RuntimeExpr) -> Vec<&'static str> {
         RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(matcher)) => {
             match (matcher.kind, matcher.unit) {
                 (TimestampKind::Access, RelativeTimeUnit::Days) => vec!["atime"],
+                (TimestampKind::Birth, _) => vec!["time-birth"],
                 (TimestampKind::Change, RelativeTimeUnit::Days) => vec!["ctime"],
                 (TimestampKind::Modification, RelativeTimeUnit::Days) => vec!["mtime"],
                 (TimestampKind::Access, RelativeTimeUnit::Minutes) => vec!["amin"],
@@ -282,6 +345,7 @@ fn linear_labels(expr: &RuntimeExpr) -> Vec<&'static str> {
         }
         RuntimeExpr::Predicate(RuntimePredicate::Newer(matcher)) => match matcher.current {
             TimestampKind::Access => vec!["anewer"],
+            TimestampKind::Birth => vec!["newer-birth"],
             TimestampKind::Change => vec!["cnewer"],
             TimestampKind::Modification => vec!["newer"],
         },

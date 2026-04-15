@@ -1,5 +1,7 @@
+use crate::birth::read_birth_time;
 use crate::diagnostics::Diagnostic;
 use crate::follow::FollowMode;
+use crate::literal_time::parse_literal_time;
 use crate::numeric::NumericComparison;
 use std::ffi::OsStr;
 use std::fs::{self, Metadata};
@@ -38,6 +40,7 @@ impl Timestamp {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TimestampKind {
     Access,
+    Birth,
     Change,
     Modification,
 }
@@ -219,16 +222,13 @@ pub fn resolve_reference_matcher(
     flag: &str,
     current: char,
     reference: char,
-    reference_path: &Path,
+    reference_arg: &OsStr,
     follow_mode: FollowMode,
 ) -> Result<NewerMatcher, Diagnostic> {
     let current = parse_current_timestamp_kind(flag, current)?;
-    let reference = parse_reference_timestamp_kind(flag, reference)?;
-    let metadata = reference_metadata(reference_path, follow_mode)?;
-
     Ok(NewerMatcher {
         current,
-        reference: timestamp_from_metadata(reference, &metadata),
+        reference: resolve_reference_timestamp(flag, reference, reference_arg, follow_mode)?,
     })
 }
 
@@ -266,14 +266,13 @@ fn invalid_numeric_argument(flag: &str, value: &OsStr) -> Diagnostic {
 fn parse_current_timestamp_kind(flag: &str, value: char) -> Result<TimestampKind, Diagnostic> {
     match value {
         'a' => Ok(TimestampKind::Access),
+        'B' => Ok(TimestampKind::Birth),
         'c' => Ok(TimestampKind::Change),
         'm' => Ok(TimestampKind::Modification),
-        'B' => Err(Diagnostic::unsupported(format!(
-            "unsupported in stage 8: `{flag}` forms involving birth time"
-        ))),
-        't' => Err(Diagnostic::unsupported(format!(
-            "unsupported in stage 8: `{flag}` forms involving literal time"
-        ))),
+        't' => Err(Diagnostic::new(
+            format!("invalid `-newerXY` current timestamp kind `t` in `{flag}`"),
+            1,
+        )),
         other => Err(Diagnostic::new(
             format!("invalid `-newerXY` current timestamp kind `{other}`"),
             1,
@@ -281,21 +280,58 @@ fn parse_current_timestamp_kind(flag: &str, value: char) -> Result<TimestampKind
     }
 }
 
-fn parse_reference_timestamp_kind(flag: &str, value: char) -> Result<TimestampKind, Diagnostic> {
-    match value {
-        'a' => Ok(TimestampKind::Access),
-        'c' => Ok(TimestampKind::Change),
-        'm' => Ok(TimestampKind::Modification),
-        'B' => Err(Diagnostic::unsupported(format!(
-            "unsupported in stage 8: `{flag}` forms involving birth time"
-        ))),
-        't' => Err(Diagnostic::unsupported(format!(
-            "unsupported in stage 8: `{flag}` forms involving literal time"
-        ))),
+fn resolve_reference_timestamp(
+    flag: &str,
+    reference: char,
+    reference_arg: &OsStr,
+    follow_mode: FollowMode,
+) -> Result<Timestamp, Diagnostic> {
+    match reference {
+        'a' => {
+            let metadata = reference_metadata(Path::new(reference_arg), follow_mode)?;
+            Ok(timestamp_from_metadata(TimestampKind::Access, &metadata))
+        }
+        'B' => {
+            let path = Path::new(reference_arg);
+            resolve_reference_birth_time(path, follow_mode)?.ok_or_else(|| {
+                Diagnostic::new(
+                    format!(
+                        "reference birth time unavailable for `{}` in `{flag}`",
+                        path.display()
+                    ),
+                    1,
+                )
+            })
+        }
+        'c' => {
+            let metadata = reference_metadata(Path::new(reference_arg), follow_mode)?;
+            Ok(timestamp_from_metadata(TimestampKind::Change, &metadata))
+        }
+        'm' => {
+            let metadata = reference_metadata(Path::new(reference_arg), follow_mode)?;
+            Ok(timestamp_from_metadata(
+                TimestampKind::Modification,
+                &metadata,
+            ))
+        }
+        't' => parse_literal_time(reference_arg),
         other => Err(Diagnostic::new(
             format!("invalid `-newerXY` reference timestamp kind `{other}`"),
             1,
         )),
+    }
+}
+
+fn resolve_reference_birth_time(
+    path: &Path,
+    follow_mode: FollowMode,
+) -> Result<Option<Timestamp>, Diagnostic> {
+    match follow_mode {
+        FollowMode::Physical => read_birth_time(path, false),
+        FollowMode::CommandLineOnly | FollowMode::Logical => match read_birth_time(path, true) {
+            Ok(timestamp) => Ok(timestamp),
+            Err(_) => read_birth_time(path, false),
+        },
     }
 }
 
@@ -314,6 +350,7 @@ fn timestamp_from_metadata(kind: TimestampKind, metadata: &Metadata) -> Timestam
 
     match kind {
         TimestampKind::Access => Timestamp::new(metadata.atime(), metadata.atime_nsec() as i32),
+        TimestampKind::Birth => unreachable!("birth timestamps are resolved via statx"),
         TimestampKind::Change => Timestamp::new(metadata.ctime(), metadata.ctime_nsec() as i32),
         TimestampKind::Modification => {
             Timestamp::new(metadata.mtime(), metadata.mtime_nsec() as i32)

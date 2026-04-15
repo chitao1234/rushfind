@@ -109,6 +109,23 @@ fn directory_probe_predicates_stay_after_cheaper_type_checks() {
     assert_eq!(predicate_labels(&plan.expr), vec!["name", "type", "empty"]);
 }
 
+#[test]
+fn birth_time_predicates_stay_after_ordinary_active_metadata_checks() {
+    let ast = parse_command(&argv(&[
+        ".",
+        "-newerBm",
+        "/proc/self/stat",
+        "-size",
+        "+0c",
+        "-name",
+        "*.rs",
+    ]))
+    .unwrap();
+    let plan = plan_command(ast, 1).unwrap();
+
+    assert_eq!(predicate_labels(&plan.expr), vec!["name", "size", "newer"]);
+}
+
 fn predicate_labels(expr: &RuntimeExpr) -> Vec<&'static str> {
     let mut labels = Vec::new();
     collect_predicate_labels(expr, &mut labels);
@@ -202,6 +219,7 @@ fn predicate_label(predicate: &RuntimePredicate) -> &'static str {
             (findoxide::time::TimestampKind::Access, findoxide::time::RelativeTimeUnit::Days) => {
                 "atime"
             }
+            (findoxide::time::TimestampKind::Birth, _) => "time-birth",
             (findoxide::time::TimestampKind::Change, findoxide::time::RelativeTimeUnit::Days) => {
                 "ctime"
             }

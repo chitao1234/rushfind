@@ -333,13 +333,13 @@ fn lower_predicate(
             )?,
         ))),
         Predicate::Newer(path) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Newer(
-            resolve_reference_matcher("-newer", 'm', 'm', &path, follow_mode)?,
+            resolve_reference_matcher("-newer", 'm', 'm', path.as_os_str(), follow_mode)?,
         ))),
         Predicate::ANewer(path) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Newer(
-            resolve_reference_matcher("-anewer", 'a', 'm', &path, follow_mode)?,
+            resolve_reference_matcher("-anewer", 'a', 'm', path.as_os_str(), follow_mode)?,
         ))),
         Predicate::CNewer(path) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Newer(
-            resolve_reference_matcher("-cnewer", 'c', 'm', &path, follow_mode)?,
+            resolve_reference_matcher("-cnewer", 'c', 'm', path.as_os_str(), follow_mode)?,
         ))),
         Predicate::NewerXY {
             current,
@@ -350,7 +350,7 @@ fn lower_predicate(
                 "-newerXY",
                 current,
                 reference,
-                std::path::Path::new(reference_arg.as_os_str()),
+                reference_arg.as_os_str(),
                 follow_mode,
             )?,
         ))),

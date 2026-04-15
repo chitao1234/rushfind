@@ -6,7 +6,7 @@ use crate::follow::FollowMode;
 use crate::output::OutputSink;
 use crate::pattern::matches_pattern;
 use crate::planner::{RuntimeExpr, RuntimePredicate};
-use crate::time::{Timestamp, TimestampKind};
+use crate::time::{NewerMatcher, Timestamp, TimestampKind};
 use std::ffi::OsStr;
 
 pub fn evaluate(
@@ -104,9 +104,7 @@ fn evaluate_predicate(
         RuntimePredicate::RelativeTime(matcher) => {
             matcher.matches_timestamp_checked(entry_timestamp(entry, follow_mode, matcher.kind)?)
         }
-        RuntimePredicate::Newer(matcher) => {
-            Ok(matcher.matches_timestamp(entry_timestamp(entry, follow_mode, matcher.current)?))
-        }
+        RuntimePredicate::Newer(matcher) => matches_newer(entry, follow_mode, *matcher),
         RuntimePredicate::Type(expected) => {
             Ok(matches_type(*expected, entry.active_kind(follow_mode)?))
         }
@@ -138,9 +136,24 @@ fn entry_timestamp(
 ) -> Result<Timestamp, Diagnostic> {
     match kind {
         TimestampKind::Access => entry.active_atime(follow_mode),
+        TimestampKind::Birth => unreachable!("birth timestamps are handled separately"),
         TimestampKind::Change => entry.active_ctime(follow_mode),
         TimestampKind::Modification => entry.active_mtime(follow_mode),
     }
+}
+
+fn matches_newer(
+    entry: &EntryContext,
+    follow_mode: FollowMode,
+    matcher: NewerMatcher,
+) -> Result<bool, Diagnostic> {
+    if matcher.current == TimestampKind::Birth {
+        return Ok(entry
+            .active_birth_time(follow_mode)?
+            .is_some_and(|actual| matcher.matches_timestamp(actual)));
+    }
+
+    Ok(matcher.matches_timestamp(entry_timestamp(entry, follow_mode, matcher.current)?))
 }
 
 #[cfg(test)]
