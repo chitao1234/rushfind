@@ -14,7 +14,11 @@ use tempfile::tempdir;
 fn perm_exact_matches_exact_mode_only() {
     let root = tempdir().unwrap();
     fs::write(root.path().join("file.txt"), "hello\n").unwrap();
-    fs::set_permissions(root.path().join("file.txt"), fs::Permissions::from_mode(0o664)).unwrap();
+    fs::set_permissions(
+        root.path().join("file.txt"),
+        fs::Permissions::from_mode(0o664),
+    )
+    .unwrap();
     let entry = entry_for(&root.path().join("file.txt"));
     let expr = RuntimeExpr::Predicate(RuntimePredicate::Perm(
         parse_perm_argument(OsStr::new("664")).unwrap(),
@@ -28,7 +32,11 @@ fn perm_exact_matches_exact_mode_only() {
 fn perm_all_bits_and_any_bits_match_symbolic_forms() {
     let root = tempdir().unwrap();
     fs::write(root.path().join("file.txt"), "hello\n").unwrap();
-    fs::set_permissions(root.path().join("file.txt"), fs::Permissions::from_mode(0o660)).unwrap();
+    fs::set_permissions(
+        root.path().join("file.txt"),
+        fs::Permissions::from_mode(0o660),
+    )
+    .unwrap();
     let entry = entry_for(&root.path().join("file.txt"));
     let mut sink = RecordingSink::default();
 
@@ -51,7 +59,11 @@ fn perm_all_bits_and_any_bits_match_symbolic_forms() {
 fn perm_symbolic_zero_baseline_matches_gnu_find_behavior() {
     let root = tempdir().unwrap();
     fs::write(root.path().join("file.txt"), "hello\n").unwrap();
-    fs::set_permissions(root.path().join("file.txt"), fs::Permissions::from_mode(0o000)).unwrap();
+    fs::set_permissions(
+        root.path().join("file.txt"),
+        fs::Permissions::from_mode(0o000),
+    )
+    .unwrap();
     let entry = entry_for(&root.path().join("file.txt"));
     let mut sink = RecordingSink::default();
 
@@ -97,11 +109,5 @@ fn perm_exact_symbolic_sticky_matches() {
 }
 
 fn entry_for(path: &Path) -> EntryContext {
-    EntryContext::new(
-        PathBuf::from(path),
-        0,
-        true,
-        fs::symlink_metadata(path).unwrap(),
-        fs::metadata(path).ok(),
-    )
+    EntryContext::new(PathBuf::from(path), 0, true)
 }

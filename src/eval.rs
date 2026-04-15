@@ -62,11 +62,13 @@ fn evaluate_predicate(
             *case_insensitive,
             true,
         ),
-        RuntimePredicate::Inum(expected) => Ok(expected.matches(entry.active_inode(follow_mode))),
+        RuntimePredicate::Inum(expected) => Ok(expected.matches(entry.active_inode(follow_mode)?)),
         RuntimePredicate::Links(expected) => {
-            Ok(expected.matches(entry.active_link_count(follow_mode)))
+            Ok(expected.matches(entry.active_link_count(follow_mode)?))
         }
-        RuntimePredicate::SameFile(expected) => Ok(*expected == entry.active_identity(follow_mode)),
+        RuntimePredicate::SameFile(expected) => {
+            Ok(*expected == entry.active_identity(follow_mode)?)
+        }
         RuntimePredicate::LName {
             pattern,
             case_insensitive,
@@ -79,18 +81,24 @@ fn evaluate_predicate(
             ),
             None => Ok(false),
         },
-        RuntimePredicate::Uid(expected) => Ok(expected.matches(entry.active_uid(follow_mode).into())),
-        RuntimePredicate::Gid(expected) => Ok(expected.matches(entry.active_gid(follow_mode).into())),
-        RuntimePredicate::User(expected) => Ok(*expected == entry.active_uid(follow_mode)),
-        RuntimePredicate::Group(expected) => Ok(*expected == entry.active_gid(follow_mode)),
-        RuntimePredicate::NoUser => Ok(!user_exists(entry.active_uid(follow_mode))?),
-        RuntimePredicate::NoGroup => Ok(!group_exists(entry.active_gid(follow_mode))?),
-        RuntimePredicate::Perm(matcher) => Ok(matcher.matches(entry.active_mode_bits(follow_mode))),
+        RuntimePredicate::Uid(expected) => {
+            Ok(expected.matches(entry.active_uid(follow_mode)?.into()))
+        }
+        RuntimePredicate::Gid(expected) => {
+            Ok(expected.matches(entry.active_gid(follow_mode)?.into()))
+        }
+        RuntimePredicate::User(expected) => Ok(*expected == entry.active_uid(follow_mode)?),
+        RuntimePredicate::Group(expected) => Ok(*expected == entry.active_gid(follow_mode)?),
+        RuntimePredicate::NoUser => Ok(!user_exists(entry.active_uid(follow_mode)?)?),
+        RuntimePredicate::NoGroup => Ok(!group_exists(entry.active_gid(follow_mode)?)?),
+        RuntimePredicate::Perm(matcher) => {
+            Ok(matcher.matches(entry.active_mode_bits(follow_mode)?))
+        }
         RuntimePredicate::Type(expected) => {
-            Ok(matches_type(*expected, entry.active_kind(follow_mode)))
+            Ok(matches_type(*expected, entry.active_kind(follow_mode)?))
         }
         RuntimePredicate::XType(expected) => {
-            Ok(matches_type(*expected, entry.xtype_kind(follow_mode)))
+            Ok(matches_type(*expected, entry.xtype_kind(follow_mode)?))
         }
         RuntimePredicate::True => Ok(true),
         RuntimePredicate::False => Ok(false),

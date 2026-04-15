@@ -4,7 +4,7 @@ use crate::follow::FollowMode;
 use crate::identity::FileIdentity;
 use crate::planner::TraversalOptions;
 use crossbeam_channel::{Receiver, unbounded};
-use std::fs;
+use std::fs::{self, FileType};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -22,7 +22,14 @@ struct PendingPath {
     path: PathBuf,
     depth: usize,
     is_command_line_root: bool,
+    physical_file_type_hint: Option<FileType>,
     ancestry: Vec<FileIdentity>,
+}
+
+#[derive(Debug, Clone)]
+struct DiscoveredChild {
+    path: PathBuf,
+    physical_file_type_hint: Option<FileType>,
 }
 
 pub fn walk_ordered<F>(
@@ -42,12 +49,13 @@ where
             path,
             depth: 0,
             is_command_line_root: true,
+            physical_file_type_hint: None,
             ancestry: Vec::new(),
         })
         .collect();
 
     while let Some(pending) = stack.pop() {
-        let entry = match load_entry(&pending.path, pending.depth, pending.is_command_line_root) {
+        let entry = match load_entry(&pending) {
             Ok(entry) => entry,
             Err(error) => {
                 emit(WalkEvent::Error(error))?;
@@ -81,9 +89,10 @@ where
 
         for child in children.into_iter().rev() {
             stack.push(PendingPath {
-                path: child,
+                path: child.path,
                 depth: pending.depth + 1,
                 is_command_line_root: false,
+                physical_file_type_hint: child.physical_file_type_hint,
                 ancestry: child_ancestry.clone(),
             });
         }
@@ -109,6 +118,7 @@ pub fn walk_parallel(
                 path: path.clone(),
                 depth: 0,
                 is_command_line_root: true,
+                physical_file_type_hint: None,
                 ancestry: Vec::new(),
             })
             .unwrap();
@@ -124,11 +134,7 @@ pub fn walk_parallel(
             loop {
                 match work_rx.recv_timeout(Duration::from_millis(25)) {
                     Ok(pending) => {
-                        let entry = match load_entry(
-                            &pending.path,
-                            pending.depth,
-                            pending.is_command_line_root,
-                        ) {
+                        let entry = match load_entry(&pending) {
                             Ok(entry) => entry,
                             Err(error) => {
                                 let _ = event_tx.send(WalkEvent::Error(error));
@@ -166,9 +172,10 @@ pub fn walk_parallel(
                                 for child in children {
                                     inflight.fetch_add(1, Ordering::SeqCst);
                                     let _ = work_tx.send(PendingPath {
-                                        path: child,
+                                        path: child.path,
                                         depth: pending.depth + 1,
                                         is_command_line_root: false,
+                                        physical_file_type_hint: child.physical_file_type_hint,
                                         ancestry: child_ancestry.clone(),
                                     });
                                 }
@@ -192,21 +199,19 @@ pub fn walk_parallel(
     event_rx
 }
 
-fn load_entry(
-    path: &Path,
-    depth: usize,
-    is_command_line_root: bool,
-) -> Result<EntryContext, Diagnostic> {
-    let physical_metadata = fs::symlink_metadata(path).map_err(|error| path_error(path, error))?;
-    let logical_metadata = fs::metadata(path).ok();
+fn load_entry(pending: &PendingPath) -> Result<EntryContext, Diagnostic> {
+    let entry = EntryContext::with_file_type_hint(
+        pending.path.clone(),
+        pending.depth,
+        pending.is_command_line_root,
+        pending.physical_file_type_hint,
+    );
 
-    Ok(EntryContext::new(
-        path.to_path_buf(),
-        depth,
-        is_command_line_root,
-        physical_metadata,
-        logical_metadata,
-    ))
+    if pending.is_command_line_root {
+        entry.physical_kind()?;
+    }
+
+    Ok(entry)
 }
 
 fn child_ancestry_for(
@@ -219,7 +224,7 @@ fn child_ancestry_for(
         return Ok(None);
     }
 
-    let Some(directory_identity) = entry.active_directory_identity(follow_mode) else {
+    let Some(directory_identity) = entry.active_directory_identity(follow_mode)? else {
         return Ok(None);
     };
 
@@ -232,14 +237,17 @@ fn child_ancestry_for(
     Ok(Some(next))
 }
 
-fn read_children(path: &Path) -> Result<(Vec<PathBuf>, Vec<Diagnostic>), Diagnostic> {
+fn read_children(path: &Path) -> Result<(Vec<DiscoveredChild>, Vec<Diagnostic>), Diagnostic> {
     let read_dir = fs::read_dir(path).map_err(|error| path_error(path, error))?;
     let mut children = Vec::new();
     let mut diagnostics = Vec::new();
 
     for child in read_dir {
         match child {
-            Ok(child) => children.push(child.path()),
+            Ok(child) => children.push(DiscoveredChild {
+                path: child.path(),
+                physical_file_type_hint: child.file_type().ok(),
+            }),
             Err(error) => diagnostics.push(path_error(path, error)),
         }
     }

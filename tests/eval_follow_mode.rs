@@ -14,9 +14,7 @@ fn type_uses_the_active_follow_mode() {
     fs::create_dir(root.path().join("real")).unwrap();
     unix_fs::symlink(root.path().join("real"), root.path().join("dir-link")).unwrap();
 
-    let physical = fs::symlink_metadata(root.path().join("dir-link")).unwrap();
-    let logical = fs::metadata(root.path().join("dir-link")).ok();
-    let entry = EntryContext::new(root.path().join("dir-link"), 0, true, physical, logical);
+    let entry = EntryContext::new(root.path().join("dir-link"), 0, true);
     let expr = RuntimeExpr::Predicate(RuntimePredicate::Type(FileTypeFilter::Directory));
     let mut sink = RecordingSink::default();
 
@@ -30,9 +28,7 @@ fn xtype_uses_the_complementary_view() {
     fs::create_dir(root.path().join("real")).unwrap();
     unix_fs::symlink(root.path().join("real"), root.path().join("dir-link")).unwrap();
 
-    let physical = fs::symlink_metadata(root.path().join("dir-link")).unwrap();
-    let logical = fs::metadata(root.path().join("dir-link")).ok();
-    let entry = EntryContext::new(root.path().join("dir-link"), 0, true, physical, logical);
+    let entry = EntryContext::new(root.path().join("dir-link"), 0, true);
     let expr = RuntimeExpr::Predicate(RuntimePredicate::XType(FileTypeFilter::Symlink));
     let mut sink = RecordingSink::default();
 

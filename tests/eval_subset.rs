@@ -59,11 +59,5 @@ fn type_predicate_filters_by_entry_kind() {
 }
 
 fn entry_for(path: &Path, depth: usize) -> EntryContext {
-    EntryContext::new(
-        PathBuf::from(path),
-        depth,
-        true,
-        fs::symlink_metadata(path).unwrap(),
-        fs::metadata(path).ok(),
-    )
+    EntryContext::new(PathBuf::from(path), depth, true)
 }

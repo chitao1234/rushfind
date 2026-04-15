@@ -77,20 +77,24 @@ fn h_root_symlink_is_logical_but_non_root_symlink_is_physical() {
     });
     let mut sink = RecordingSink::default();
 
-    assert!(!evaluate(
-        &root_expr,
-        &entry_for(&root.path().join("root-link"), 0, true),
-        FollowMode::CommandLineOnly,
-        &mut sink,
-    )
-    .unwrap());
-    assert!(evaluate(
-        &child_expr,
-        &entry_for(&root.path().join("child-link"), 1, false),
-        FollowMode::CommandLineOnly,
-        &mut sink,
-    )
-    .unwrap());
+    assert!(
+        !evaluate(
+            &root_expr,
+            &entry_for(&root.path().join("root-link"), 0, true),
+            FollowMode::CommandLineOnly,
+            &mut sink,
+        )
+        .unwrap()
+    );
+    assert!(
+        evaluate(
+            &child_expr,
+            &entry_for(&root.path().join("child-link"), 1, false),
+            FollowMode::CommandLineOnly,
+            &mut sink,
+        )
+        .unwrap()
+    );
 }
 
 #[test]
@@ -124,11 +128,5 @@ fn ilname_is_case_insensitive() {
 }
 
 fn entry_for(path: &Path, depth: usize, is_command_line_root: bool) -> EntryContext {
-    EntryContext::new(
-        PathBuf::from(path),
-        depth,
-        is_command_line_root,
-        fs::symlink_metadata(path).unwrap(),
-        fs::metadata(path).ok(),
-    )
+    EntryContext::new(PathBuf::from(path), depth, is_command_line_root)
 }
