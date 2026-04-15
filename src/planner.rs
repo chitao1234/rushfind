@@ -178,6 +178,14 @@ fn lower_predicate(
             pattern,
             case_insensitive,
         })),
+        Predicate::Uid(_)
+        | Predicate::Gid(_)
+        | Predicate::User(_)
+        | Predicate::Group(_)
+        | Predicate::NoUser
+        | Predicate::NoGroup => Err(Diagnostic::unsupported(
+            "ownership/account predicates are not lowered yet",
+        )),
         Predicate::Type(kind) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Type(kind))),
         Predicate::XType(kind) => Ok(RuntimeExpr::Predicate(RuntimePredicate::XType(kind))),
         Predicate::True => Ok(RuntimeExpr::Predicate(RuntimePredicate::True)),

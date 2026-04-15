@@ -210,6 +210,22 @@ impl<'a> Parser<'a> {
                 pattern: self.take_os_string("-ilname")?,
                 case_insensitive: true,
             })
+        } else if token.matches("-uid") {
+            let raw = self.take_os_string("-uid")?;
+            validate_numeric_argument("-uid", raw.as_os_str())?;
+            Expr::Predicate(Predicate::Uid(raw))
+        } else if token.matches("-gid") {
+            let raw = self.take_os_string("-gid")?;
+            validate_numeric_argument("-gid", raw.as_os_str())?;
+            Expr::Predicate(Predicate::Gid(raw))
+        } else if token.matches("-user") {
+            Expr::Predicate(Predicate::User(self.take_os_string("-user")?))
+        } else if token.matches("-group") {
+            Expr::Predicate(Predicate::Group(self.take_os_string("-group")?))
+        } else if token.matches("-nouser") {
+            Expr::Predicate(Predicate::NoUser)
+        } else if token.matches("-nogroup") {
+            Expr::Predicate(Predicate::NoGroup)
         } else if token.matches("-inum") {
             let raw = self.take_os_string("-inum")?;
             validate_numeric_argument("-inum", raw.as_os_str())?;
