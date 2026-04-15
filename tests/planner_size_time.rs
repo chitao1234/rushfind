@@ -2,13 +2,16 @@ mod support;
 
 use findoxide::numeric::NumericComparison;
 use findoxide::parser::parse_command;
-use findoxide::planner::{RuntimeExpr, RuntimePredicate, plan_command, plan_command_with_now};
+use findoxide::planner::{plan_command, plan_command_with_now, RuntimeExpr, RuntimePredicate};
 use findoxide::size::{SizeMatcher, SizeUnit};
 use findoxide::time::{
-    RelativeTimeMatcher, RelativeTimeUnit, TimeComparison, Timestamp, TimestampKind,
-    local_day_start,
+    local_day_start, NewerMatcher, RelativeTimeMatcher, RelativeTimeUnit, TimeComparison,
+    Timestamp, TimestampKind,
 };
+use std::fs;
+use std::os::unix::fs::MetadataExt;
 use support::argv;
+use tempfile::tempdir;
 
 #[test]
 fn lowers_gnu_size_units_into_runtime_matchers() {
@@ -138,6 +141,96 @@ fn daystart_affects_only_later_relative_time_predicates() {
     assert_eq!(matchers[1].baseline, daystart);
 }
 
+#[test]
+fn lowers_newer_shorthands_and_supported_newerxy_forms() {
+    let root = tempdir().unwrap();
+    let reference = root.path().join("reference.txt");
+    fs::write(&reference, "reference\n").unwrap();
+    let metadata = fs::metadata(&reference).unwrap();
+
+    for suffix in ["aa", "ac", "am", "ca", "cc", "cm", "ma", "mc", "mm"] {
+        let flag = format!("-newer{suffix}");
+        let plan = plan_command(
+            parse_command(&[
+                ".".into(),
+                flag.into(),
+                reference.as_os_str().to_os_string(),
+            ])
+            .unwrap(),
+            1,
+        )
+        .unwrap();
+        assert!(predicate_items(&plan.expr)
+            .into_iter()
+            .any(|predicate| matches!(predicate, RuntimePredicate::Newer(_))));
+    }
+
+    let plan = plan_command(
+        parse_command(&[
+            ".".into(),
+            "-newer".into(),
+            reference.as_os_str().to_os_string(),
+            "-anewer".into(),
+            reference.as_os_str().to_os_string(),
+            "-cnewer".into(),
+            reference.as_os_str().to_os_string(),
+            "-newerac".into(),
+            reference.as_os_str().to_os_string(),
+            "-newercm".into(),
+            reference.as_os_str().to_os_string(),
+        ])
+        .unwrap(),
+        1,
+    )
+    .unwrap();
+    let predicates = predicate_items(&plan.expr);
+
+    assert!(predicates.iter().any(|predicate| matches!(
+        predicate,
+        RuntimePredicate::Newer(NewerMatcher {
+            current: TimestampKind::Modification,
+            reference,
+        }) if *reference == Timestamp::new(metadata.mtime(), metadata.mtime_nsec() as i32)
+    )));
+    assert!(predicates.iter().any(|predicate| matches!(
+        predicate,
+        RuntimePredicate::Newer(NewerMatcher {
+            current: TimestampKind::Access,
+            reference,
+        }) if *reference == Timestamp::new(metadata.mtime(), metadata.mtime_nsec() as i32)
+    )));
+    assert!(predicates.iter().any(|predicate| matches!(
+        predicate,
+        RuntimePredicate::Newer(NewerMatcher {
+            current: TimestampKind::Change,
+            reference,
+        }) if *reference == Timestamp::new(metadata.ctime(), metadata.ctime_nsec() as i32)
+    )));
+}
+
+#[test]
+fn rejects_unsupported_birth_and_literal_reference_forms() {
+    for flag in ["-newerBm", "-newermB", "-newermt", "-newerta"] {
+        let error =
+            plan_command(parse_command(&argv(&[".", flag, "reference"])).unwrap(), 1).unwrap_err();
+        assert!(
+            error.message.contains("unsupported in stage 8")
+                || error.message.contains("birth time")
+                || error.message.contains("literal time")
+        );
+    }
+}
+
+#[test]
+fn rejects_missing_reference_files() {
+    let error = plan_command(
+        parse_command(&argv(&[".", "-newer", "missing-reference"])).unwrap(),
+        1,
+    )
+    .unwrap_err();
+    assert!(error.message.contains("missing-reference"));
+}
+
 fn predicate_items(expr: &RuntimeExpr) -> Vec<RuntimePredicate> {
     let mut predicates = Vec::new();
     collect_predicates(expr, &mut predicates);
@@ -183,6 +276,11 @@ fn linear_labels(expr: &RuntimeExpr) -> Vec<&'static str> {
                 (TimestampKind::Modification, RelativeTimeUnit::Minutes) => vec!["mmin"],
             }
         }
+        RuntimeExpr::Predicate(RuntimePredicate::Newer(matcher)) => match matcher.current {
+            TimestampKind::Access => vec!["anewer"],
+            TimestampKind::Change => vec!["cnewer"],
+            TimestampKind::Modification => vec!["newer"],
+        },
         RuntimeExpr::Predicate(_) => vec!["predicate"],
         RuntimeExpr::Action(_) => vec!["print"],
         RuntimeExpr::Barrier => vec!["barrier"],

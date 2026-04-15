@@ -1,6 +1,9 @@
 use crate::diagnostics::Diagnostic;
+use crate::follow::FollowMode;
 use std::ffi::OsStr;
+use std::fs::{self, Metadata};
 use std::mem::MaybeUninit;
+use std::path::Path;
 use std::str;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -95,6 +98,18 @@ impl RelativeTimeMatcher {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NewerMatcher {
+    pub current: TimestampKind,
+    pub reference: Timestamp,
+}
+
+impl NewerMatcher {
+    pub fn matches_timestamp(self, actual: Timestamp) -> bool {
+        actual > self.reference
+    }
+}
+
 pub fn parse_relative_time_argument(
     flag: &str,
     value: &OsStr,
@@ -135,6 +150,23 @@ pub fn local_day_start(now: Timestamp) -> Result<Timestamp, Diagnostic> {
     Ok(Timestamp::new(day_start as i64, 0))
 }
 
+pub fn resolve_reference_matcher(
+    flag: &str,
+    current: char,
+    reference: char,
+    reference_path: &Path,
+    follow_mode: FollowMode,
+) -> Result<NewerMatcher, Diagnostic> {
+    let current = parse_current_timestamp_kind(flag, current)?;
+    let reference = parse_reference_timestamp_kind(flag, reference)?;
+    let metadata = reference_metadata(reference_path, follow_mode)?;
+
+    Ok(NewerMatcher {
+        current,
+        reference: timestamp_from_metadata(reference, &metadata),
+    })
+}
+
 fn parse_time_comparison(flag: &str, value: &OsStr) -> Result<TimeComparison, Diagnostic> {
     let bytes = value.as_encoded_bytes();
     let (kind, digits) = match bytes {
@@ -164,6 +196,64 @@ fn invalid_numeric_argument(flag: &str, value: &OsStr) -> Diagnostic {
         "invalid numeric argument for `{flag}`: `{}`",
         value.to_string_lossy()
     ))
+}
+
+fn parse_current_timestamp_kind(flag: &str, value: char) -> Result<TimestampKind, Diagnostic> {
+    match value {
+        'a' => Ok(TimestampKind::Access),
+        'c' => Ok(TimestampKind::Change),
+        'm' => Ok(TimestampKind::Modification),
+        'B' => Err(Diagnostic::unsupported(format!(
+            "unsupported in stage 8: `{flag}` forms involving birth time"
+        ))),
+        't' => Err(Diagnostic::unsupported(format!(
+            "unsupported in stage 8: `{flag}` forms involving literal time"
+        ))),
+        other => Err(Diagnostic::new(
+            format!("invalid `-newerXY` current timestamp kind `{other}`"),
+            1,
+        )),
+    }
+}
+
+fn parse_reference_timestamp_kind(flag: &str, value: char) -> Result<TimestampKind, Diagnostic> {
+    match value {
+        'a' => Ok(TimestampKind::Access),
+        'c' => Ok(TimestampKind::Change),
+        'm' => Ok(TimestampKind::Modification),
+        'B' => Err(Diagnostic::unsupported(format!(
+            "unsupported in stage 8: `{flag}` forms involving birth time"
+        ))),
+        't' => Err(Diagnostic::unsupported(format!(
+            "unsupported in stage 8: `{flag}` forms involving literal time"
+        ))),
+        other => Err(Diagnostic::new(
+            format!("invalid `-newerXY` reference timestamp kind `{other}`"),
+            1,
+        )),
+    }
+}
+
+fn reference_metadata(path: &Path, follow_mode: FollowMode) -> Result<Metadata, Diagnostic> {
+    match follow_mode {
+        FollowMode::Physical => fs::symlink_metadata(path),
+        FollowMode::CommandLineOnly | FollowMode::Logical => {
+            fs::metadata(path).or_else(|_| fs::symlink_metadata(path))
+        }
+    }
+    .map_err(|error| Diagnostic::new(format!("{}: {error}", path.display()), 1))
+}
+
+fn timestamp_from_metadata(kind: TimestampKind, metadata: &Metadata) -> Timestamp {
+    use std::os::unix::fs::MetadataExt;
+
+    match kind {
+        TimestampKind::Access => Timestamp::new(metadata.atime(), metadata.atime_nsec() as i32),
+        TimestampKind::Change => Timestamp::new(metadata.ctime(), metadata.ctime_nsec() as i32),
+        TimestampKind::Modification => {
+            Timestamp::new(metadata.mtime(), metadata.mtime_nsec() as i32)
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

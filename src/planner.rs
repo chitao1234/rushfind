@@ -3,13 +3,13 @@ use crate::ast::{Action, CommandAst, Expr, FileTypeFilter, GlobalOption, Predica
 use crate::diagnostics::Diagnostic;
 use crate::follow::FollowMode;
 use crate::identity::FileIdentity;
-use crate::numeric::{NumericComparison, parse_numeric_argument};
+use crate::numeric::{parse_numeric_argument, NumericComparison};
 use crate::optimizer::optimize_read_only_and_chains;
-use crate::perm::{PermMatcher, parse_perm_argument};
-use crate::size::{SizeMatcher, parse_size_argument};
+use crate::perm::{parse_perm_argument, PermMatcher};
+use crate::size::{parse_size_argument, SizeMatcher};
 use crate::time::{
-    RelativeTimeMatcher, RelativeTimeUnit, Timestamp, TimestampKind, local_day_start,
-    parse_relative_time_argument,
+    local_day_start, parse_relative_time_argument, resolve_reference_matcher, NewerMatcher,
+    RelativeTimeMatcher, RelativeTimeUnit, Timestamp, TimestampKind,
 };
 use std::ffi::OsString;
 use std::fs;
@@ -73,6 +73,7 @@ pub enum RuntimePredicate {
     Perm(PermMatcher),
     Size(SizeMatcher),
     RelativeTime(RelativeTimeMatcher),
+    Newer(NewerMatcher),
     Type(FileTypeFilter),
     XType(FileTypeFilter),
     True,
@@ -317,10 +318,28 @@ fn lower_predicate(
                 temporal.relative_baseline()?,
             )?,
         ))),
-        Predicate::Newer(_) => Err(stage8_planner_unimplemented("-newer")),
-        Predicate::ANewer(_) => Err(stage8_planner_unimplemented("-anewer")),
-        Predicate::CNewer(_) => Err(stage8_planner_unimplemented("-cnewer")),
-        Predicate::NewerXY { .. } => Err(stage8_planner_unimplemented("-newerXY")),
+        Predicate::Newer(path) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Newer(
+            resolve_reference_matcher("-newer", 'm', 'm', &path, follow_mode)?,
+        ))),
+        Predicate::ANewer(path) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Newer(
+            resolve_reference_matcher("-anewer", 'a', 'm', &path, follow_mode)?,
+        ))),
+        Predicate::CNewer(path) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Newer(
+            resolve_reference_matcher("-cnewer", 'c', 'm', &path, follow_mode)?,
+        ))),
+        Predicate::NewerXY {
+            current,
+            reference,
+            reference_path,
+        } => Ok(RuntimeExpr::Predicate(RuntimePredicate::Newer(
+            resolve_reference_matcher(
+                "-newerXY",
+                current,
+                reference,
+                &reference_path,
+                follow_mode,
+            )?,
+        ))),
         Predicate::DayStart => {
             temporal.daystart_active = true;
             Ok(RuntimeExpr::Barrier)
@@ -330,12 +349,6 @@ fn lower_predicate(
         Predicate::True => Ok(RuntimeExpr::Predicate(RuntimePredicate::True)),
         Predicate::False => Ok(RuntimeExpr::Predicate(RuntimePredicate::False)),
     }
-}
-
-fn stage8_planner_unimplemented(flag: &str) -> Diagnostic {
-    Diagnostic::unsupported(format!(
-        "unsupported until stage 8 planner implementation: {flag}"
-    ))
 }
 
 #[derive(Debug, Clone, Copy)]

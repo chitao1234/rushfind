@@ -5,7 +5,7 @@ use findoxide::output::RecordingSink;
 use findoxide::planner::{RuntimeExpr, RuntimePredicate};
 use findoxide::size::parse_size_argument;
 use findoxide::time::{
-    RelativeTimeMatcher, RelativeTimeUnit, TimeComparison, Timestamp, TimestampKind,
+    NewerMatcher, RelativeTimeMatcher, RelativeTimeUnit, TimeComparison, Timestamp, TimestampKind,
 };
 use std::ffi::OsStr;
 use std::fs;
@@ -101,6 +101,38 @@ fn relative_time_evaluation_reads_the_active_follow_mode_timestamp() {
 
     assert!(!evaluate(&expr, &entry, FollowMode::Physical, &mut sink).unwrap());
     assert!(evaluate(&expr, &entry, FollowMode::Logical, &mut sink).unwrap());
+}
+
+#[test]
+fn newer_matcher_compares_full_timestamp_precision() {
+    let root = tempdir().unwrap();
+    let older = root.path().join("older.txt");
+    let newer = root.path().join("newer.txt");
+    fs::write(&older, "older\n").unwrap();
+    fs::write(&newer, "newer\n").unwrap();
+    set_file_times(&older, Timestamp::new(100, 10), Timestamp::new(100, 10));
+    set_file_times(&newer, Timestamp::new(100, 20), Timestamp::new(100, 20));
+
+    let expr = RuntimeExpr::Predicate(RuntimePredicate::Newer(NewerMatcher {
+        current: TimestampKind::Modification,
+        reference: Timestamp::new(100, 10),
+    }));
+    let mut sink = RecordingSink::default();
+
+    assert!(!evaluate(
+        &expr,
+        &EntryContext::new(older, 0, true),
+        FollowMode::Physical,
+        &mut sink,
+    )
+    .unwrap());
+    assert!(evaluate(
+        &expr,
+        &EntryContext::new(newer, 0, true),
+        FollowMode::Physical,
+        &mut sink,
+    )
+    .unwrap());
 }
 
 fn evaluate_size(path: &Path, raw: &str, follow_mode: FollowMode) -> bool {

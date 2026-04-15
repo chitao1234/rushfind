@@ -1,7 +1,7 @@
 mod support;
 
 use findoxide::parser::parse_command;
-use findoxide::planner::{OutputAction, RuntimeExpr, RuntimePredicate, plan_command};
+use findoxide::planner::{plan_command, OutputAction, RuntimeExpr, RuntimePredicate};
 use support::argv;
 
 #[test]
@@ -187,6 +187,7 @@ fn predicate_label(predicate: &RuntimePredicate) -> &'static str {
         RuntimePredicate::NoGroup => "nogroup",
         RuntimePredicate::Perm(_) => "perm",
         RuntimePredicate::Size(_) => "size",
+        RuntimePredicate::Newer(_) => "newer",
         RuntimePredicate::RelativeTime(matcher) => match (matcher.kind, matcher.unit) {
             (findoxide::time::TimestampKind::Access, findoxide::time::RelativeTimeUnit::Days) => {
                 "atime"

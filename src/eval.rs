@@ -99,6 +99,9 @@ fn evaluate_predicate(
         RuntimePredicate::RelativeTime(matcher) => {
             Ok(matcher.matches_timestamp(entry_timestamp(entry, follow_mode, matcher.kind)?))
         }
+        RuntimePredicate::Newer(matcher) => {
+            Ok(matcher.matches_timestamp(entry_timestamp(entry, follow_mode, matcher.current)?))
+        }
         RuntimePredicate::Type(expected) => {
             Ok(matches_type(*expected, entry.active_kind(follow_mode)?))
         }
@@ -142,7 +145,7 @@ mod tests {
     use crate::follow::FollowMode;
     use crate::output::RecordingSink;
     use crate::parser::parse_command;
-    use crate::planner::{ExecutionPlan, plan_command};
+    use crate::planner::{plan_command, ExecutionPlan};
     use std::ffi::OsString;
     use std::fs;
     use std::os::unix::fs as unix_fs;
