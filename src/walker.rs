@@ -1,5 +1,5 @@
 use crate::diagnostics::Diagnostic;
-use crate::entry::{EntryContext, EntryKind};
+use crate::entry::EntryContext;
 use crate::follow::FollowMode;
 use crate::identity::FileIdentity;
 use crate::planner::TraversalOptions;
@@ -98,13 +98,20 @@ pub fn walk_parallel(
     options: TraversalOptions,
     workers: usize,
 ) -> Receiver<WalkEvent> {
-    let (work_tx, work_rx) = unbounded::<(PathBuf, usize, bool)>();
+    let (work_tx, work_rx) = unbounded::<PendingPath>();
     let (event_tx, event_rx) = unbounded::<WalkEvent>();
     let inflight = Arc::new(AtomicUsize::new(0));
 
     for path in start_paths {
         inflight.fetch_add(1, Ordering::SeqCst);
-        work_tx.send((path.clone(), 0, true)).unwrap();
+        work_tx
+            .send(PendingPath {
+                path: path.clone(),
+                depth: 0,
+                is_command_line_root: true,
+                ancestry: Vec::new(),
+            })
+            .unwrap();
     }
 
     for _ in 0..workers {
@@ -116,8 +123,12 @@ pub fn walk_parallel(
         thread::spawn(move || {
             loop {
                 match work_rx.recv_timeout(Duration::from_millis(25)) {
-                    Ok((path, depth, is_command_line_root)) => {
-                        let entry = match load_entry(&path, depth, is_command_line_root) {
+                    Ok(pending) => {
+                        let entry = match load_entry(
+                            &pending.path,
+                            pending.depth,
+                            pending.is_command_line_root,
+                        ) {
                             Ok(entry) => entry,
                             Err(error) => {
                                 let _ = event_tx.send(WalkEvent::Error(error));
@@ -128,28 +139,42 @@ pub fn walk_parallel(
 
                         let _ = event_tx.send(WalkEvent::Entry(entry.clone()));
 
-                        if should_descend_with_follow_mode(&entry, follow_mode, options.max_depth) {
-                            match fs::read_dir(&path) {
-                                Ok(read_dir) => {
-                                    for child in read_dir {
-                                        match child {
-                                            Ok(child) => {
-                                                inflight.fetch_add(1, Ordering::SeqCst);
-                                                let _ =
-                                                    work_tx.send((child.path(), depth + 1, false));
-                                            }
-                                            Err(error) => {
-                                                let _ = event_tx.send(WalkEvent::Error(
-                                                    path_error(&path, error),
-                                                ));
-                                            }
-                                        }
-                                    }
+                        let child_ancestry = match child_ancestry_for(
+                            &pending,
+                            &entry,
+                            follow_mode,
+                            options.max_depth,
+                        ) {
+                            Ok(Some(ancestry)) => ancestry,
+                            Ok(None) => {
+                                inflight.fetch_sub(1, Ordering::SeqCst);
+                                continue;
+                            }
+                            Err(error) => {
+                                let _ = event_tx.send(WalkEvent::Error(error));
+                                inflight.fetch_sub(1, Ordering::SeqCst);
+                                continue;
+                            }
+                        };
+
+                        match read_children(&pending.path) {
+                            Ok((children, diagnostics)) => {
+                                for error in diagnostics {
+                                    let _ = event_tx.send(WalkEvent::Error(error));
                                 }
-                                Err(error) => {
-                                    let _ =
-                                        event_tx.send(WalkEvent::Error(path_error(&path, error)));
+
+                                for child in children {
+                                    inflight.fetch_add(1, Ordering::SeqCst);
+                                    let _ = work_tx.send(PendingPath {
+                                        path: child,
+                                        depth: pending.depth + 1,
+                                        is_command_line_root: false,
+                                        ancestry: child_ancestry.clone(),
+                                    });
                                 }
+                            }
+                            Err(error) => {
+                                let _ = event_tx.send(WalkEvent::Error(error));
                             }
                         }
 
@@ -220,14 +245,6 @@ fn read_children(path: &Path) -> Result<(Vec<PathBuf>, Vec<Diagnostic>), Diagnos
     }
 
     Ok((children, diagnostics))
-}
-
-fn should_descend_with_follow_mode(
-    entry: &EntryContext,
-    follow_mode: FollowMode,
-    max_depth: Option<usize>,
-) -> bool {
-    should_descend(entry.depth, max_depth) && entry.active_kind(follow_mode) == EntryKind::Directory
 }
 
 fn should_descend(depth: usize, max_depth: Option<usize>) -> bool {
