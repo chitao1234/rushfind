@@ -211,7 +211,7 @@ mod tests {
     use crate::follow::FollowMode;
     use crate::planner::{
         ExecutionMode, ExecutionPlan, OutputAction, RuntimeAction, RuntimeExpr,
-        RuntimeRequirements, TraversalOptions,
+        RuntimeRequirements, TraversalOptions, TraversalOrder,
     };
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -224,6 +224,7 @@ mod tests {
                 min_depth: 0,
                 max_depth: None,
                 same_file_system: false,
+                order: TraversalOrder::PreOrder,
             },
             runtime: RuntimeRequirements { mount_snapshot },
             expr: RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)),

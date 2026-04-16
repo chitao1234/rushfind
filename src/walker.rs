@@ -408,7 +408,7 @@ mod tests {
     use crate::entry::EntryContext;
     use crate::follow::FollowMode;
     use crate::identity::FileIdentity;
-    use crate::planner::TraversalOptions;
+    use crate::planner::{TraversalOptions, TraversalOrder};
     use crate::traversal_control::TraversalControl;
     use crossbeam_channel::Receiver;
     use std::collections::BTreeMap;
@@ -435,6 +435,7 @@ mod tests {
                 min_depth: 0,
                 max_depth: None,
                 same_file_system: false,
+                order: TraversalOrder::PreOrder,
             },
             |entry| {
                 let prune = entry.path.file_name().is_some_and(|name| name == "skip");
@@ -490,6 +491,7 @@ mod tests {
                 min_depth: 0,
                 max_depth: None,
                 same_file_system: true,
+                order: TraversalOrder::PreOrder,
             },
             4,
             |_entry| {

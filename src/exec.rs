@@ -216,6 +216,10 @@ impl<W: std::io::Write, E: std::io::Write> ActionSink for OrderedActionSink<'_, 
                 self.enqueue(spec, path)?;
                 Ok(true)
             }
+            RuntimeAction::Delete => Err(Diagnostic::new(
+                "internal error: delete reached ordered action sink before runtime support landed",
+                1,
+            )),
         }
     }
 }
@@ -340,6 +344,10 @@ impl ActionSink for ParallelActionSink {
                 self.enqueue(spec, path)?;
                 Ok(true)
             }
+            RuntimeAction::Delete => Err(Diagnostic::new(
+                "internal error: delete reached parallel action sink before runtime support landed",
+                1,
+            )),
         }
     }
 }

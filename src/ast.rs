@@ -27,6 +27,7 @@ pub enum Expr {
 pub enum Predicate {
     MaxDepth(u32),
     MinDepth(u32),
+    Depth,
     Prune,
     XDev,
     Readable,

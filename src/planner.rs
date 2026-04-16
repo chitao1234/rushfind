@@ -41,6 +41,13 @@ pub struct TraversalOptions {
     pub min_depth: usize,
     pub max_depth: Option<usize>,
     pub same_file_system: bool,
+    pub order: TraversalOrder,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TraversalOrder {
+    PreOrder,
+    DepthFirstPostOrder,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,6 +117,7 @@ pub enum RuntimeAction {
     Output(OutputAction),
     ExecImmediate(ImmediateExecAction),
     ExecBatched(BatchedExecAction),
+    Delete,
 }
 
 pub fn plan_command(ast: CommandAst, workers: usize) -> Result<ExecutionPlan, Diagnostic> {
@@ -133,6 +141,7 @@ pub fn plan_command_with_now(
         min_depth: 0,
         max_depth: None,
         same_file_system: false,
+        order: TraversalOrder::PreOrder,
     };
     let mut runtime = RuntimeRequirements::default();
     let mut state = PlanningState {
@@ -141,10 +150,15 @@ pub fn plan_command_with_now(
             daystart_active: false,
         },
         saw_action: false,
+        saw_delete: false,
         next_exec_batch_id: 0,
     };
     let lowered = lower_expr(expr, &mut traversal, &mut runtime, &mut state, follow_mode)?;
     let lowered = optimize_read_only_and_chains(lowered);
+
+    if state.saw_delete {
+        traversal.order = TraversalOrder::DepthFirstPostOrder;
+    }
 
     let expr = if state.saw_action {
         lowered
@@ -230,6 +244,10 @@ fn lower_predicate(
         }
         Predicate::MinDepth(value) => {
             traversal.min_depth = value as usize;
+            Ok(RuntimeExpr::Barrier)
+        }
+        Predicate::Depth => {
+            traversal.order = TraversalOrder::DepthFirstPostOrder;
             Ok(RuntimeExpr::Barrier)
         }
         Predicate::Prune => Ok(RuntimeExpr::Predicate(RuntimePredicate::Prune)),
@@ -403,6 +421,7 @@ struct TemporalPlanningState {
 struct PlanningState {
     temporal: TemporalPlanningState,
     saw_action: bool,
+    saw_delete: bool,
     next_exec_batch_id: ExecBatchId,
 }
 
@@ -454,6 +473,9 @@ fn lower_action(action: Action, state: &mut PlanningState) -> Result<RuntimeExpr
         Action::ExecDir { .. } => Err(Diagnostic::unsupported("unsupported in stage13: -execdir")),
         Action::Ok { .. } => Err(Diagnostic::unsupported("unsupported in stage13: -ok")),
         Action::OkDir { .. } => Err(Diagnostic::unsupported("unsupported in stage13: -okdir")),
-        Action::Delete => Err(Diagnostic::unsupported("unsupported in stage13: -delete")),
+        Action::Delete => {
+            state.saw_delete = true;
+            Ok(RuntimeExpr::Action(RuntimeAction::Delete))
+        }
     }
 }
