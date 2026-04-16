@@ -1,7 +1,7 @@
 use crate::account::{group_exists, user_exists};
 use crate::ast::FileTypeFilter;
 use crate::diagnostics::Diagnostic;
-use crate::entry::{EntryContext, EntryKind};
+use crate::entry::{AccessMode, EntryContext, EntryKind};
 use crate::follow::FollowMode;
 use crate::mounts::MountSnapshot;
 use crate::output::OutputSink;
@@ -103,9 +103,9 @@ pub(crate) fn evaluate_predicate(
                 .type_for_mount_id(mount_id)
                 .is_some_and(|actual| actual == type_name.as_os_str()))
         }
-        RuntimePredicate::Readable
-        | RuntimePredicate::Writable
-        | RuntimePredicate::Executable => Ok(false),
+        RuntimePredicate::Readable => entry.access(AccessMode::Read),
+        RuntimePredicate::Writable => entry.access(AccessMode::Write),
+        RuntimePredicate::Executable => entry.access(AccessMode::Execute),
         RuntimePredicate::Name {
             pattern,
             case_insensitive,
@@ -218,7 +218,7 @@ fn matches_newer(
 #[cfg(test)]
 mod tests {
     use super::{EvalContext, evaluate, evaluate_with_context};
-    use crate::entry::EntryContext;
+    use crate::entry::{AccessMode, EntryContext, EntryReader};
     use crate::entry::test_support::CountingReader;
     use crate::follow::FollowMode;
     use crate::mounts::MountSnapshot;
@@ -297,6 +297,67 @@ mod tests {
     }
 
     #[test]
+    fn planned_name_mismatch_skips_later_access_probe() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("file.txt");
+        fs::write(&path, "hello\n").unwrap();
+        let reader = CountingReader::default();
+        let entry = reader.entry(path, 0, true);
+        let plan = plan_for(&[".", "-readable", "-name", "does-not-match"]);
+        let mut sink = RecordingSink::default();
+
+        assert!(!evaluate(&plan.expr, &entry, FollowMode::Physical, &mut sink).unwrap());
+        assert_eq!(reader.read_access_calls(), 0);
+        assert_eq!(sink.into_utf8(), "");
+    }
+
+    #[test]
+    fn runtime_access_predicates_dispatch_by_mode() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("file.txt");
+        fs::write(&path, "hello\n").unwrap();
+        let entry = EntryContext::new_with_reader(
+            path,
+            0,
+            true,
+            std::sync::Arc::new(AccessResultReader {
+                readable: true,
+                writable: false,
+                executable: true,
+            }),
+        );
+        let mut sink = RecordingSink::default();
+
+        assert!(
+            evaluate(
+                &RuntimeExpr::Predicate(RuntimePredicate::Readable),
+                &entry,
+                FollowMode::Physical,
+                &mut sink,
+            )
+            .unwrap()
+        );
+        assert!(
+            !evaluate(
+                &RuntimeExpr::Predicate(RuntimePredicate::Writable),
+                &entry,
+                FollowMode::Physical,
+                &mut sink,
+            )
+            .unwrap()
+        );
+        assert!(
+            evaluate(
+                &RuntimeExpr::Predicate(RuntimePredicate::Executable),
+                &entry,
+                FollowMode::Physical,
+                &mut sink,
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
     fn fstype_matches_mount_snapshot_type() {
         let root = tempdir().unwrap();
         let path = root.path().join("file.txt");
@@ -349,6 +410,48 @@ mod tests {
         .unwrap_err();
 
         assert!(error.message.contains("mount snapshot"));
+    }
+
+    #[derive(Clone)]
+    struct AccessResultReader {
+        readable: bool,
+        writable: bool,
+        executable: bool,
+    }
+
+    impl EntryReader for AccessResultReader {
+        fn symlink_metadata(&self, path: &std::path::Path) -> std::io::Result<std::fs::Metadata> {
+            std::fs::symlink_metadata(path)
+        }
+
+        fn metadata(&self, path: &std::path::Path) -> std::io::Result<std::fs::Metadata> {
+            std::fs::metadata(path)
+        }
+
+        fn read_link(&self, path: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
+            std::fs::read_link(path)
+        }
+
+        fn directory_is_empty(&self, path: &std::path::Path) -> std::io::Result<bool> {
+            let mut entries = std::fs::read_dir(path)?;
+            match entries.next() {
+                None => Ok(true),
+                Some(result) => result.map(|_| false),
+            }
+        }
+
+        fn mount_id(&self, path: &std::path::Path, follow: bool) -> std::io::Result<u64> {
+            let _ = (path, follow);
+            Ok(0)
+        }
+
+        fn access(&self, _path: &std::path::Path, mode: AccessMode) -> std::io::Result<bool> {
+            Ok(match mode {
+                AccessMode::Read => self.readable,
+                AccessMode::Write => self.writable,
+                AccessMode::Execute => self.executable,
+            })
+        }
     }
 
     fn plan_for(args: &[&str]) -> ExecutionPlan {
