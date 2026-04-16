@@ -137,6 +137,15 @@ fn birth_time_predicates_stay_after_ordinary_active_metadata_checks() {
     assert_eq!(predicate_labels(&plan.expr), vec!["name", "size", "newer"]);
 }
 
+#[test]
+fn fstype_is_reorderable_inside_read_only_and_segments() {
+    let ast = parse_command(&argv(&[".", "-uid", "0", "-fstype", "tmpfs", "-name", "*.rs"]))
+        .unwrap();
+    let plan = plan_command(ast, 1).unwrap();
+
+    assert_eq!(predicate_labels(&plan.expr), vec!["name", "uid", "fstype"]);
+}
+
 fn predicate_labels(expr: &RuntimeExpr) -> Vec<&'static str> {
     let mut labels = Vec::new();
     collect_predicate_labels(expr, &mut labels);
@@ -209,6 +218,7 @@ fn expr_label(expr: &RuntimeExpr) -> &'static str {
 
 fn predicate_label(predicate: &RuntimePredicate) -> &'static str {
     match predicate {
+        RuntimePredicate::FsType(_) => "fstype",
         RuntimePredicate::Prune => "prune",
         RuntimePredicate::Name { .. } => "name",
         RuntimePredicate::Path { .. } => "path",

@@ -48,6 +48,10 @@ pub(crate) fn evaluate_predicate(
 ) -> Result<bool, Diagnostic> {
     match predicate {
         RuntimePredicate::Prune => Ok(true),
+        RuntimePredicate::FsType(_) => Err(Diagnostic::new(
+            "internal error: -fstype evaluated before mount runtime was initialized",
+            1,
+        )),
         RuntimePredicate::Name {
             pattern,
             case_insensitive,

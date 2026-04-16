@@ -6,6 +6,7 @@ pub(crate) enum Requirement {
     FullPath,
     FileType,
     ActiveMetadata,
+    FilesystemInfo,
     BirthTime,
     DirectoryRead,
     LinkTarget,
@@ -35,6 +36,7 @@ const BASENAME: &[Requirement] = &[Requirement::Basename];
 const FULL_PATH: &[Requirement] = &[Requirement::FullPath];
 const FILE_TYPE: &[Requirement] = &[Requirement::FileType];
 const ACTIVE_METADATA: &[Requirement] = &[Requirement::ActiveMetadata];
+const FILESYSTEM_INFO: &[Requirement] = &[Requirement::FilesystemInfo];
 const BIRTH_TIME: &[Requirement] = &[Requirement::BirthTime];
 const DIRECTORY_READ: &[Requirement] = &[Requirement::ActiveMetadata, Requirement::DirectoryRead];
 const LINK_TARGET: &[Requirement] = &[Requirement::LinkTarget];
@@ -99,6 +101,7 @@ pub(crate) fn predicate_profile(predicate: &RuntimePredicate) -> PredicateProfil
             requirements: NONE,
             cost: CostTier::Constant,
         },
+        RuntimePredicate::FsType(_) => profile(FILESYSTEM_INFO, CostTier::ActiveMetadata),
         RuntimePredicate::True | RuntimePredicate::False => profile(NONE, CostTier::Constant),
         RuntimePredicate::Name { .. } => profile(BASENAME, CostTier::StringOnly),
         RuntimePredicate::Path { .. } => profile(FULL_PATH, CostTier::StringOnly),

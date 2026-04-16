@@ -22,8 +22,14 @@ pub struct ExecutionPlan {
     pub start_paths: Vec<PathBuf>,
     pub follow_mode: FollowMode,
     pub traversal: TraversalOptions,
+    pub runtime: RuntimeRequirements,
     pub expr: RuntimeExpr,
     pub mode: ExecutionMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RuntimeRequirements {
+    pub mount_snapshot: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +58,7 @@ pub enum RuntimeExpr {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimePredicate {
     Prune,
+    FsType(OsString),
     Name {
         pattern: OsString,
         case_insensitive: bool,
@@ -113,6 +120,7 @@ pub fn plan_command_with_now(
         max_depth: None,
         same_file_system: false,
     };
+    let mut runtime = RuntimeRequirements::default();
     let mut temporal = TemporalPlanningState {
         now,
         daystart_active: false,
@@ -121,6 +129,7 @@ pub fn plan_command_with_now(
     let lowered = lower_expr(
         expr,
         &mut traversal,
+        &mut runtime,
         &mut temporal,
         &mut saw_output,
         follow_mode,
@@ -143,6 +152,7 @@ pub fn plan_command_with_now(
         start_paths,
         follow_mode,
         traversal,
+        runtime,
         expr,
         mode,
     })
@@ -159,6 +169,7 @@ fn resolve_follow_mode(global_options: &[GlobalOption]) -> FollowMode {
 fn lower_expr(
     expr: Expr,
     traversal: &mut TraversalOptions,
+    runtime: &mut RuntimeRequirements,
     temporal: &mut TemporalPlanningState,
     saw_output: &mut bool,
     follow_mode: FollowMode,
@@ -170,6 +181,7 @@ fn lower_expr(
                 lowered.push(lower_expr(
                     item,
                     traversal,
+                    runtime,
                     temporal,
                     saw_output,
                     follow_mode,
@@ -181,6 +193,7 @@ fn lower_expr(
             Box::new(lower_expr(
                 *left,
                 traversal,
+                runtime,
                 temporal,
                 saw_output,
                 follow_mode,
@@ -188,6 +201,7 @@ fn lower_expr(
             Box::new(lower_expr(
                 *right,
                 traversal,
+                runtime,
                 temporal,
                 saw_output,
                 follow_mode,
@@ -196,11 +210,14 @@ fn lower_expr(
         Expr::Not(inner) => Ok(RuntimeExpr::Not(Box::new(lower_expr(
             *inner,
             traversal,
+            runtime,
             temporal,
             saw_output,
             follow_mode,
         )?))),
-        Expr::Predicate(predicate) => lower_predicate(predicate, traversal, temporal, follow_mode),
+        Expr::Predicate(predicate) => {
+            lower_predicate(predicate, traversal, runtime, temporal, follow_mode)
+        }
         Expr::Action(action) => lower_action(action, saw_output),
     }
 }
@@ -208,6 +225,7 @@ fn lower_expr(
 fn lower_predicate(
     predicate: Predicate,
     traversal: &mut TraversalOptions,
+    runtime: &mut RuntimeRequirements,
     temporal: &mut TemporalPlanningState,
     follow_mode: FollowMode,
 ) -> Result<RuntimeExpr, Diagnostic> {
@@ -239,6 +257,10 @@ fn lower_predicate(
             pattern,
             case_insensitive,
         })),
+        Predicate::FsType(type_name) => {
+            runtime.mount_snapshot = true;
+            Ok(RuntimeExpr::Predicate(RuntimePredicate::FsType(type_name)))
+        }
         Predicate::Inum(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Inum(
             parse_numeric_argument("-inum", raw.as_os_str())?,
         ))),

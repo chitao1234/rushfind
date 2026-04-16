@@ -37,6 +37,7 @@ pub enum Predicate {
         pattern: OsString,
         case_insensitive: bool,
     },
+    FsType(OsString),
     Inum(OsString),
     Links(OsString),
     SameFile(PathBuf),

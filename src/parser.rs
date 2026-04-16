@@ -206,6 +206,8 @@ impl<'a> Parser<'a> {
                 pattern: self.take_os_string("-ipath")?,
                 case_insensitive: true,
             })
+        } else if token.matches("-fstype") {
+            Expr::Predicate(Predicate::FsType(self.take_os_string("-fstype")?))
         } else if token.matches("-lname") {
             Expr::Predicate(Predicate::LName {
                 pattern: self.take_os_string("-lname")?,
