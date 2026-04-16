@@ -1,0 +1,79 @@
+mod support;
+
+use std::fs;
+use std::time::Duration;
+use support::{cargo_bin_output_with_timeout, path_arg};
+use tempfile::tempdir;
+
+#[test]
+fn ordered_delete_removes_entries_reached_by_the_expression() {
+    let root = tempdir().unwrap();
+    let tree = root.path().join("tree");
+    fs::create_dir(&tree).unwrap();
+    fs::create_dir(tree.join("empty-dir")).unwrap();
+    fs::write(tree.join("leaf.txt"), "leaf\n").unwrap();
+
+    let output = cargo_bin_output_with_timeout(
+        &[path_arg(&tree), "-mindepth".into(), "1".into(), "-delete".into()],
+        1,
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stdout.is_empty());
+    assert!(fs::read_dir(&tree).unwrap().next().is_none());
+}
+
+#[test]
+fn ordered_print_then_delete_emits_paths_before_removal() {
+    let root = tempdir().unwrap();
+    let tree = root.path().join("tree");
+    fs::create_dir(&tree).unwrap();
+    fs::write(tree.join("alpha.txt"), "alpha\n").unwrap();
+
+    let output = cargo_bin_output_with_timeout(
+        &[
+            path_arg(&tree),
+            "-mindepth".into(),
+            "1".into(),
+            "-print".into(),
+            "-delete".into(),
+        ],
+        1,
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(String::from_utf8(output.stdout).unwrap().contains("alpha.txt"));
+    assert!(fs::read_dir(&tree).unwrap().next().is_none());
+}
+
+#[test]
+fn ordered_delete_failure_falls_through_or_branch_and_sets_exit_one() {
+    let root = tempdir().unwrap();
+    let tree = root.path().join("tree");
+    fs::create_dir(&tree).unwrap();
+    fs::create_dir(tree.join("dir")).unwrap();
+    fs::write(tree.join("dir/child.txt"), "child\n").unwrap();
+
+    let output = cargo_bin_output_with_timeout(
+        &[
+            path_arg(&tree),
+            "-mindepth".into(),
+            "1".into(),
+            "-type".into(),
+            "d".into(),
+            "-delete".into(),
+            "-o".into(),
+            "-print".into(),
+        ],
+        1,
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("dir"));
+    assert!(stdout.contains("child.txt"));
+    assert!(String::from_utf8(output.stderr).unwrap().contains("Directory not empty"));
+}

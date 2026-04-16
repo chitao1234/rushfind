@@ -6,6 +6,7 @@ use crossbeam_channel::Sender;
 use libc::_SC_ARG_MAX;
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
+use std::fs;
 use std::io::{self, Read, Seek, Write};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
@@ -125,7 +126,7 @@ pub struct OrderedActionSink<'a, W: std::io::Write, E: std::io::Write> {
     stderr: &'a mut E,
     pending: BTreeMap<ExecBatchId, PendingBatch>,
     batch_limit: BatchLimit,
-    had_batch_failures: bool,
+    had_action_failures: bool,
 }
 
 impl<'a, W: std::io::Write, E: std::io::Write> OrderedActionSink<'a, W, E> {
@@ -135,7 +136,7 @@ impl<'a, W: std::io::Write, E: std::io::Write> OrderedActionSink<'a, W, E> {
             stderr,
             pending: BTreeMap::new(),
             batch_limit: BatchLimit::detect(),
-            had_batch_failures: false,
+            had_action_failures: false,
         }
     }
 
@@ -154,7 +155,7 @@ impl<'a, W: std::io::Write, E: std::io::Write> OrderedActionSink<'a, W, E> {
 
         if let Some(ready) = ready {
             if !run_ready_batch(&ready, self.stderr)? {
-                self.had_batch_failures = true;
+                self.had_action_failures = true;
             }
         }
 
@@ -169,13 +170,13 @@ impl<'a, W: std::io::Write, E: std::io::Write> OrderedActionSink<'a, W, E> {
         match push_result {
             Ok(Some(ready)) => {
                 if !run_ready_batch(&ready, self.stderr)? {
-                    self.had_batch_failures = true;
+                    self.had_action_failures = true;
                 }
             }
             Ok(None) => {}
             Err(error) => {
                 self.write_diagnostic(&format!("findoxide: {error}"))?;
-                self.had_batch_failures = true;
+                self.had_action_failures = true;
             }
         }
 
@@ -199,11 +200,11 @@ impl<'a, W: std::io::Write, E: std::io::Write> OrderedActionSink<'a, W, E> {
                 paths: batch.paths,
             };
             if !run_ready_batch(&ready, self.stderr)? {
-                self.had_batch_failures = true;
+                self.had_action_failures = true;
             }
         }
 
-        Ok(self.had_batch_failures)
+        Ok(self.had_action_failures)
     }
 }
 
@@ -216,10 +217,14 @@ impl<W: std::io::Write, E: std::io::Write> ActionSink for OrderedActionSink<'_, 
                 self.enqueue(spec, path)?;
                 Ok(true)
             }
-            RuntimeAction::Delete => Err(Diagnostic::new(
-                "internal error: delete reached ordered action sink before runtime support landed",
-                1,
-            )),
+            RuntimeAction::Delete => match delete_path(path) {
+                Ok(result) => Ok(result),
+                Err(error) => {
+                    self.write_diagnostic(&format!("findoxide: {}", error.message))?;
+                    self.had_action_failures = true;
+                    Ok(false)
+                }
+            },
         }
     }
 }
@@ -233,7 +238,7 @@ pub struct ParallelActionSink {
 struct ParallelExecShared {
     pending: Mutex<BTreeMap<ExecBatchId, PendingBatch>>,
     batch_limit: BatchLimit,
-    had_batch_failures: AtomicBool,
+    had_action_failures: AtomicBool,
     spill_threshold: usize,
 }
 
@@ -244,7 +249,7 @@ impl ParallelActionSink {
             shared: Arc::new(ParallelExecShared {
                 pending: Mutex::new(BTreeMap::new()),
                 batch_limit: BatchLimit::detect(),
-                had_batch_failures: AtomicBool::new(false),
+                had_action_failures: AtomicBool::new(false),
                 spill_threshold: DEFAULT_SPILL_THRESHOLD,
             }),
         })
@@ -268,11 +273,11 @@ impl ParallelActionSink {
                 paths: batch.paths,
             };
             if !run_parallel_ready_batch(&ready, &self.broker, self.shared.spill_threshold)? {
-                self.mark_batch_failure();
+                self.mark_action_failure();
             }
         }
 
-        Ok(self.shared.had_batch_failures.load(Ordering::SeqCst))
+        Ok(self.shared.had_action_failures.load(Ordering::SeqCst))
     }
 
     fn enqueue(&self, spec: &BatchedExecAction, path: &Path) -> Result<(), Diagnostic> {
@@ -299,14 +304,14 @@ impl ParallelActionSink {
 
         if let Some(ready) = ready {
             if !run_parallel_ready_batch(&ready, &self.broker, self.shared.spill_threshold)? {
-                self.mark_batch_failure();
+                self.mark_action_failure();
             }
         }
 
         match push_result {
             Ok(Some(ready)) => {
                 if !run_parallel_ready_batch(&ready, &self.broker, self.shared.spill_threshold)? {
-                    self.mark_batch_failure();
+                    self.mark_action_failure();
                 }
             }
             Ok(None) => {}
@@ -315,15 +320,15 @@ impl ParallelActionSink {
                     &self.broker,
                     BrokerMessage::Stderr(format!("findoxide: {error}\n").into_bytes()),
                 )?;
-                self.mark_batch_failure();
+                self.mark_action_failure();
             }
         }
 
         Ok(())
     }
 
-    fn mark_batch_failure(&self) {
-        self.shared.had_batch_failures.store(true, Ordering::SeqCst);
+    fn mark_action_failure(&self) {
+        self.shared.had_action_failures.store(true, Ordering::SeqCst);
     }
 }
 
@@ -489,6 +494,23 @@ fn run_immediate_ordered<E: std::io::Write>(
             )?;
             Ok(false)
         }
+    }
+}
+
+fn delete_path(path: &Path) -> Result<bool, Diagnostic> {
+    let file_type = fs::symlink_metadata(path)
+        .map_err(|error| Diagnostic::new(format!("{}: {error}", path.display()), 1))?
+        .file_type();
+
+    let result = if file_type.is_dir() {
+        fs::remove_dir(path)
+    } else {
+        fs::remove_file(path)
+    };
+
+    match result {
+        Ok(()) => Ok(true),
+        Err(error) => Err(Diagnostic::new(format!("{}: {error}", path.display()), 1)),
     }
 }
 
@@ -721,8 +743,12 @@ fn os_bytes_len(value: &OsStr) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{BatchLimit, PendingBatch, SpillBuffer, build_batched_argv, compile_batched_exec};
+    use super::{
+        BatchLimit, PendingBatch, SpillBuffer, build_batched_argv, compile_batched_exec,
+        delete_path,
+    };
     use std::io::Write;
+    use std::os::unix::fs as unix_fs;
     use std::path::PathBuf;
 
     #[test]
@@ -761,5 +787,16 @@ mod tests {
 
         assert!(buffer.spilled_path().is_some());
         assert_eq!(buffer.into_bytes().unwrap(), b"12345678abcdef");
+    }
+
+    #[test]
+    fn delete_path_unlinks_symlinks_without_touching_targets() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("target.txt"), "target\n").unwrap();
+        unix_fs::symlink("target.txt", root.path().join("link.txt")).unwrap();
+
+        assert!(delete_path(root.path().join("link.txt").as_path()).unwrap());
+        assert!(root.path().join("target.txt").exists());
+        assert!(!root.path().join("link.txt").exists());
     }
 }

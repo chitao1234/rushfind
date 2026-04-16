@@ -17,7 +17,7 @@ where
         .and_then(|plan| run_plan(&plan, &mut stdout, &mut stderr))
     {
         Ok(summary) => {
-            if summary.had_runtime_errors || summary.had_exec_batch_failures {
+            if summary.had_runtime_errors || summary.had_action_failures {
                 1
             } else {
                 0

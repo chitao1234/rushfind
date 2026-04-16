@@ -11,7 +11,7 @@ use std::io::Write;
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct RunSummary {
     pub had_runtime_errors: bool,
-    pub had_exec_batch_failures: bool,
+    pub had_action_failures: bool,
 }
 
 pub fn run_plan<W, E>(
@@ -77,11 +77,11 @@ where
         },
     )?;
 
-    let had_exec_batch_failures = sink.flush()?;
+    let had_action_failures = sink.flush()?;
 
     Ok(RunSummary {
         had_runtime_errors,
-        had_exec_batch_failures,
+        had_action_failures,
     })
 }
 
@@ -101,7 +101,7 @@ where
         .filter(|value| *value > 0)
         .unwrap_or(1);
     let mut had_runtime_errors = false;
-    let mut had_exec_batch_failures = false;
+    let mut had_action_failures = false;
 
     std::thread::scope(|scope| -> Result<(), Diagnostic> {
         let (broker, broker_handle) = spawn_broker(scope, stdout, stderr);
@@ -180,7 +180,7 @@ where
                 .map_err(|_| Diagnostic::new("parallel evaluator thread panicked", 1))??;
         }
 
-        had_exec_batch_failures = sink.flush_all()?;
+        had_action_failures = sink.flush_all()?;
         drop(sink);
         drop(broker);
         broker_handle
@@ -191,7 +191,7 @@ where
 
     Ok(RunSummary {
         had_runtime_errors,
-        had_exec_batch_failures,
+        had_action_failures,
     })
 }
 
