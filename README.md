@@ -2,7 +2,7 @@
 
 `findoxide` is a fresh Rust implementation of Unix `find` that targets GNU `find` syntax while adding a parallel traversal engine.
 
-## v0 and stage-12 scope
+## v0 and stage-13 scope
 
 - GNU-style argv parsing
 - Global follow-mode options: `-P`, `-H`, `-L`
@@ -17,10 +17,12 @@
   and `-0.75`
 - Symlink-content predicates: `-lname`, `-ilname`
 - Traversal controls: `-mindepth`, `-maxdepth`, `-prune`, `-xdev`, `-mount`
-- Output actions: `-print`, `-print0`
+- Output actions: `-print`, `-print0`, `-exec ... ;`, `-exec ... +`
 - Ordered single-worker mode stays GNU-oriented for supported structural traversal controls
 - Relaxed-order parallel mode guarantees prune subtree boundaries but does not promise GNU sibling
   ordering
+- Ordered single-worker mode inherits child stdio for `-exec`
+- Relaxed-order parallel mode buffers child stdout/stderr for atomic replay
 - `-fstype` is Linux-first in this stage
 - `-fstype` type names come from `/proc/self/mountinfo`
 - Requested filesystem types are resolved against the set known at command startup
@@ -53,6 +55,8 @@ Use the `FINDOXIDE_WORKERS` environment variable to control execution mode:
 - `-L` follows symlinks logically during traversal
 - Followed-directory traversal is loop-safe and reports a runtime error instead of recursing forever
 
-## Unsupported in read-only v0
+## Unsupported in stage 13
 
-The parser accepts side-effecting actions such as `-exec`, `-execdir`, `-ok`, `-okdir`, and `-delete`, but planning rejects them with explicit `unsupported in read-only v0` diagnostics.
+Stage 13 supports `-exec ... ;` and `-exec ... +`.
+
+`-execdir`, `-ok`, `-okdir`, and `-delete` remain unsupported.

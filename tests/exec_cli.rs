@@ -143,6 +143,36 @@ fn ordered_exec_plus_false_short_circuits_or_branch_like_gnu() {
 }
 
 #[test]
+fn ordered_exec_missing_command_plus_exits_one_after_printing_matches_stage_contract() {
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("a.txt"), "a\n").unwrap();
+    let missing = root.path().join("definitely-missing-cmd");
+
+    let output = cargo_bin_output_with_timeout(
+        &[
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-exec".into(),
+            missing.as_os_str().to_os_string(),
+            "{}".into(),
+            "+".into(),
+            "-print".into(),
+        ],
+        1,
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8(output.stdout).unwrap().contains("a.txt"));
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("No such file or directory")
+    );
+}
+
+#[test]
 fn parallel_exec_child_output_is_replayed_in_atomic_chunks() {
     let root = tempdir().unwrap();
     fs::write(root.path().join("alpha.txt"), "a\n").unwrap();

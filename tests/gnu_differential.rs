@@ -187,6 +187,13 @@ fn build_read_only_tail_tree() -> tempfile::TempDir {
     root
 }
 
+fn build_exec_tree() -> tempfile::TempDir {
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("alpha.txt"), "alpha\n").unwrap();
+    fs::write(root.path().join("beta.txt"), "beta\n").unwrap();
+    root
+}
+
 fn touch_time(path: &Path, args: &[&str]) {
     let status = Command::new("touch").args(args).arg(path).status().unwrap();
     assert!(status.success(), "touch failed for {}", path.display());
@@ -331,21 +338,44 @@ fn readme_documents_stage12_access_surface() {
 }
 
 #[test]
-fn reports_unsupported_exec_during_planning() {
-    let root = build_tree();
-    let output = Command::cargo_bin("findoxide")
-        .unwrap()
-        .arg(root.path())
-        .args(["-exec", "echo", "{}", ";"])
-        .output()
-        .unwrap();
+fn ordered_exec_semicolon_matches_gnu_find_exactly() {
+    let root = build_exec_tree();
+    assert_matches_gnu_exact(&[
+        path_arg(root.path()),
+        "-type".into(),
+        "f".into(),
+        "-exec".into(),
+        "false".into(),
+        "{}".into(),
+        ";".into(),
+        "-o".into(),
+        "-print".into(),
+    ]);
+}
 
-    assert_ne!(output.status.code(), Some(0));
-    assert!(
-        String::from_utf8(output.stderr)
-            .unwrap()
-            .contains("unsupported in read-only v0")
-    );
+#[test]
+fn ordered_exec_plus_matches_gnu_find_exactly() {
+    let root = build_exec_tree();
+    assert_matches_gnu_exact(&[
+        path_arg(root.path()),
+        "-type".into(),
+        "f".into(),
+        "-exec".into(),
+        "false".into(),
+        "{}".into(),
+        "+".into(),
+        "-print".into(),
+    ]);
+}
+
+#[test]
+fn readme_documents_stage13_exec_surface() {
+    let readme = fs::read_to_string("README.md").unwrap();
+
+    assert!(readme.contains("`-exec ... ;`"));
+    assert!(readme.contains("`-exec ... +`"));
+    assert!(readme.contains("parallel mode buffers child stdout/stderr"));
+    assert!(readme.contains("`-execdir`, `-ok`, `-okdir`, and `-delete` remain unsupported"));
 }
 
 #[test]
