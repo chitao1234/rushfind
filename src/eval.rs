@@ -4,11 +4,11 @@ use crate::diagnostics::Diagnostic;
 use crate::entry::{AccessMode, EntryContext, EntryKind};
 use crate::follow::FollowMode;
 use crate::mounts::MountSnapshot;
-use crate::output::OutputSink;
 use crate::pattern::matches_pattern;
 use crate::planner::{RuntimeAction, RuntimeExpr, RuntimePredicate};
 use crate::time::{NewerMatcher, Timestamp, TimestampKind};
 use std::ffi::OsStr;
+use std::path::Path;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Default)]
@@ -37,10 +37,14 @@ pub fn evaluate(
     expr: &RuntimeExpr,
     entry: &EntryContext,
     follow_mode: FollowMode,
-    sink: &mut dyn OutputSink,
+    sink: &mut dyn ActionSink,
 ) -> Result<bool, Diagnostic> {
     let context = EvalContext::default();
     evaluate_with_context(expr, entry, follow_mode, &context, sink)
+}
+
+pub trait ActionSink {
+    fn dispatch(&mut self, action: &RuntimeAction, path: &Path) -> Result<bool, Diagnostic>;
 }
 
 pub(crate) fn evaluate_with_context(
@@ -48,7 +52,7 @@ pub(crate) fn evaluate_with_context(
     entry: &EntryContext,
     follow_mode: FollowMode,
     context: &EvalContext,
-    sink: &mut dyn OutputSink,
+    sink: &mut dyn ActionSink,
 ) -> Result<bool, Diagnostic> {
     match expr {
         RuntimeExpr::And(items) => {
@@ -76,25 +80,8 @@ pub(crate) fn evaluate_with_context(
         RuntimeExpr::Predicate(predicate) => {
             evaluate_predicate(predicate, entry, follow_mode, context)
         }
-        RuntimeExpr::Action(action) => evaluate_action(action, entry, sink),
+        RuntimeExpr::Action(action) => sink.dispatch(action, &entry.path),
         RuntimeExpr::Barrier => Ok(true),
-    }
-}
-
-fn evaluate_action(
-    action: &RuntimeAction,
-    entry: &EntryContext,
-    sink: &mut dyn OutputSink,
-) -> Result<bool, Diagnostic> {
-    match action {
-        RuntimeAction::Output(output) => {
-            sink.emit(*output, &entry.path)?;
-            Ok(true)
-        }
-        RuntimeAction::ExecImmediate(_) | RuntimeAction::ExecBatched(_) => Err(Diagnostic::new(
-            "internal error: exec actions require an execution-aware action sink",
-            1,
-        )),
     }
 }
 

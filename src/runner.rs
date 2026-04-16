@@ -37,7 +37,7 @@ where
     E: Write,
 {
     let eval_context = build_eval_context(plan)?;
-    let mut sink = StdoutSink::new(stdout);
+    let mut sink = crate::exec::OrderedActionSink::new(stdout, stderr);
     let mut had_runtime_errors = false;
 
     walk_ordered(
@@ -62,9 +62,7 @@ where
                 }
                 WalkEvent::Error(error) => {
                     had_runtime_errors = true;
-                    writeln!(stderr, "findoxide: {}", error).map_err(|io_error| {
-                        Diagnostic::new(format!("failed to write stderr: {io_error}"), 1)
-                    })?;
+                    sink.write_diagnostic(&format!("findoxide: {error}"))?;
                 }
             }
             Ok(())

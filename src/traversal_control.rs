@@ -83,6 +83,7 @@ mod tests {
     use super::{TraversalControl, evaluate_for_traversal, evaluate_for_traversal_with_context};
     use crate::entry::EntryContext;
     use crate::eval::EvalContext;
+    use crate::exec::compile_immediate_exec;
     use crate::follow::FollowMode;
     use crate::mounts::MountSnapshot;
     use crate::planner::{OutputAction, RuntimeAction, RuntimeExpr, RuntimePredicate};
@@ -176,5 +177,25 @@ mod tests {
                 prune: true,
             }
         );
+    }
+
+    #[test]
+    fn exec_actions_remain_truth_neutral_during_traversal_prepass() {
+        let root = tempdir().unwrap();
+        let dir = root.path().join("vendor");
+        fs::create_dir(&dir).unwrap();
+        let entry = EntryContext::new(dir, 0, true);
+
+        let expr = RuntimeExpr::And(vec![
+            RuntimeExpr::Action(RuntimeAction::ExecImmediate(compile_immediate_exec(&[
+                "echo".into(),
+                "{}".into(),
+            ]))),
+            RuntimeExpr::Predicate(RuntimePredicate::Prune),
+        ]);
+
+        let verdict = evaluate_for_traversal(&expr, &entry, FollowMode::Physical).unwrap();
+        assert!(verdict.prune);
+        assert!(verdict.matched);
     }
 }

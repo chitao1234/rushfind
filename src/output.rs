@@ -1,10 +1,19 @@
 use crate::diagnostics::Diagnostic;
-use crate::planner::OutputAction;
+use crate::eval::ActionSink;
+use crate::planner::{OutputAction, RuntimeAction};
 use std::io::Write;
 use std::path::Path;
 
-pub trait OutputSink {
-    fn emit(&mut self, action: OutputAction, path: &Path) -> Result<(), Diagnostic>;
+pub fn render_output_bytes(action: OutputAction, path: &Path) -> Vec<u8> {
+    let rendered = path.to_string_lossy();
+    match action {
+        OutputAction::Print => format!("{rendered}\n").into_bytes(),
+        OutputAction::Print0 => {
+            let mut bytes = rendered.as_bytes().to_vec();
+            bytes.push(0);
+            bytes
+        }
+    }
 }
 
 pub struct StdoutSink<'a, W: Write> {
@@ -17,21 +26,19 @@ impl<'a, W: Write> StdoutSink<'a, W> {
     }
 }
 
-impl<'a, W: Write> OutputSink for StdoutSink<'a, W> {
-    fn emit(&mut self, action: OutputAction, path: &Path) -> Result<(), Diagnostic> {
-        let rendered = path.to_string_lossy();
-        let bytes = match action {
-            OutputAction::Print => format!("{rendered}\n").into_bytes(),
-            OutputAction::Print0 => {
-                let mut bytes = rendered.as_bytes().to_vec();
-                bytes.push(0);
-                bytes
-            }
+impl<'a, W: Write> ActionSink for StdoutSink<'a, W> {
+    fn dispatch(&mut self, action: &RuntimeAction, path: &Path) -> Result<bool, Diagnostic> {
+        let RuntimeAction::Output(output) = action else {
+            return Err(Diagnostic::new(
+                "internal error: plain stdout sink cannot execute runtime actions",
+                1,
+            ));
         };
 
         self.writer
-            .write_all(&bytes)
-            .map_err(|error| Diagnostic::new(format!("failed to write stdout: {error}"), 1))
+            .write_all(&render_output_bytes(*output, path))
+            .map_err(|error| Diagnostic::new(format!("failed to write stdout: {error}"), 1))?;
+        Ok(true)
     }
 }
 
@@ -46,18 +53,17 @@ impl RecordingSink {
     }
 }
 
-impl OutputSink for RecordingSink {
-    fn emit(&mut self, action: OutputAction, path: &Path) -> Result<(), Diagnostic> {
-        let rendered = path.to_string_lossy();
-        match action {
-            OutputAction::Print => self
-                .bytes
-                .extend_from_slice(format!("{rendered}\n").as_bytes()),
-            OutputAction::Print0 => {
-                self.bytes.extend_from_slice(rendered.as_bytes());
-                self.bytes.push(0);
-            }
-        }
-        Ok(())
+impl ActionSink for RecordingSink {
+    fn dispatch(&mut self, action: &RuntimeAction, path: &Path) -> Result<bool, Diagnostic> {
+        let RuntimeAction::Output(output) = action else {
+            return Err(Diagnostic::new(
+                "internal error: recording sink cannot execute runtime actions",
+                1,
+            ));
+        };
+
+        self.bytes
+            .extend_from_slice(&render_output_bytes(*output, path));
+        Ok(true)
     }
 }
