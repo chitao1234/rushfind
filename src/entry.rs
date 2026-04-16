@@ -3,7 +3,7 @@ use crate::diagnostics::Diagnostic;
 use crate::follow::FollowMode;
 use crate::identity::FileIdentity;
 use crate::time::Timestamp;
-use std::ffi::OsString;
+use std::ffi::{CString, OsString};
 use std::fmt;
 use std::fs::{FileType, Metadata};
 use std::io;
@@ -25,12 +25,30 @@ pub enum EntryKind {
     Unknown,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccessMode {
+    Read,
+    Write,
+    Execute,
+}
+
+impl AccessMode {
+    fn as_flag(self) -> libc::c_int {
+        match self {
+            Self::Read => libc::R_OK,
+            Self::Write => libc::W_OK,
+            Self::Execute => libc::X_OK,
+        }
+    }
+}
+
 pub(crate) trait EntryReader: Send + Sync {
     fn symlink_metadata(&self, path: &Path) -> io::Result<Metadata>;
     fn metadata(&self, path: &Path) -> io::Result<Metadata>;
     fn read_link(&self, path: &Path) -> io::Result<PathBuf>;
     fn directory_is_empty(&self, path: &Path) -> io::Result<bool>;
     fn mount_id(&self, path: &Path, follow: bool) -> io::Result<u64>;
+    fn access(&self, path: &Path, mode: AccessMode) -> io::Result<bool>;
 }
 
 #[derive(Debug)]
@@ -60,6 +78,10 @@ impl EntryReader for FsEntryReader {
     fn mount_id(&self, path: &Path, follow: bool) -> io::Result<u64> {
         read_mount_id(path, follow)
     }
+
+    fn access(&self, path: &Path, mode: AccessMode) -> io::Result<bool> {
+        read_access(path, mode)
+    }
 }
 
 #[derive(Clone)]
@@ -79,6 +101,9 @@ struct EntryData {
     logical_identity: OnceLock<Option<FileIdentity>>,
     physical_link_target: OnceLock<Result<Option<OsString>, Diagnostic>>,
     active_directory_empty: OnceLock<Result<bool, Diagnostic>>,
+    readable: OnceLock<bool>,
+    writable: OnceLock<bool>,
+    executable: OnceLock<bool>,
     physical_mount_id: OnceLock<Result<u64, Diagnostic>>,
     logical_mount_id: OnceLock<Result<u64, Diagnostic>>,
     physical_birth_time: OnceLock<Result<Option<Timestamp>, Diagnostic>>,
@@ -152,6 +177,9 @@ impl EntryContext {
                 logical_identity: OnceLock::new(),
                 physical_link_target: OnceLock::new(),
                 active_directory_empty: OnceLock::new(),
+                readable: OnceLock::new(),
+                writable: OnceLock::new(),
+                executable: OnceLock::new(),
                 physical_mount_id: OnceLock::new(),
                 logical_mount_id: OnceLock::new(),
                 physical_birth_time: OnceLock::new(),
@@ -271,6 +299,16 @@ impl EntryContext {
 
     pub fn active_link_count(&self, follow_mode: FollowMode) -> Result<u64, Diagnostic> {
         Ok(self.active_metadata(follow_mode)?.nlink())
+    }
+
+    pub fn access(&self, mode: AccessMode) -> Result<bool, Diagnostic> {
+        let cache = match mode {
+            AccessMode::Read => &self.data.readable,
+            AccessMode::Write => &self.data.writable,
+            AccessMode::Execute => &self.data.executable,
+        };
+
+        Ok(*cache.get_or_init(|| self.data.reader.access(&self.path, mode).unwrap_or(false)))
     }
 
     pub fn active_mount_id(&self, follow_mode: FollowMode) -> Result<u64, Diagnostic> {
@@ -486,7 +524,7 @@ fn path_error(path: &Path, error: io::Error) -> Diagnostic {
 }
 
 fn read_mount_id(path: &Path, follow: bool) -> io::Result<u64> {
-    let c_path = std::ffi::CString::new(path.as_os_str().as_bytes())
+    let c_path = CString::new(path.as_os_str().as_bytes())
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid path"))?;
     let mut statx = MaybeUninit::<libc::statx>::zeroed();
     let flags = if follow {
@@ -516,9 +554,47 @@ fn read_mount_id(path: &Path, follow: bool) -> io::Result<u64> {
     Ok(statx.stx_mnt_id)
 }
 
+fn read_access(path: &Path, mode: AccessMode) -> io::Result<bool> {
+    let c_path = CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid path"))?;
+
+    read_access_with(c_path.as_ptr(), mode, faccessat_access, access_access)
+}
+
+fn read_access_with(
+    path: *const libc::c_char,
+    mode: AccessMode,
+    primary: impl FnOnce(*const libc::c_char, AccessMode) -> io::Result<bool>,
+    fallback: impl FnOnce(*const libc::c_char, AccessMode) -> io::Result<bool>,
+) -> io::Result<bool> {
+    match primary(path, mode) {
+        Ok(result) => Ok(result),
+        Err(error) if error.raw_os_error() == Some(libc::ENOSYS) => fallback(path, mode),
+        Err(error) => Err(error),
+    }
+}
+
+fn faccessat_access(path: *const libc::c_char, mode: AccessMode) -> io::Result<bool> {
+    let rc = unsafe { libc::faccessat(libc::AT_FDCWD, path, mode.as_flag(), 0) };
+    if rc == 0 {
+        Ok(true)
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+fn access_access(path: *const libc::c_char, mode: AccessMode) -> io::Result<bool> {
+    let rc = unsafe { libc::access(path, mode.as_flag()) };
+    if rc == 0 {
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod test_support {
-    use super::{EntryContext, EntryReader};
+    use super::{AccessMode, EntryContext, EntryReader};
     use std::fs::Metadata;
     use std::io;
     use std::path::{Path, PathBuf};
@@ -531,6 +607,9 @@ pub(crate) mod test_support {
         metadata_calls: Arc<AtomicUsize>,
         read_link_calls: Arc<AtomicUsize>,
         directory_probe_calls: Arc<AtomicUsize>,
+        read_access_calls: Arc<AtomicUsize>,
+        write_access_calls: Arc<AtomicUsize>,
+        execute_access_calls: Arc<AtomicUsize>,
     }
 
     impl CountingReader {
@@ -557,6 +636,18 @@ pub(crate) mod test_support {
 
         pub(crate) fn directory_probe_calls(&self) -> usize {
             self.directory_probe_calls.load(Ordering::SeqCst)
+        }
+
+        pub(crate) fn read_access_calls(&self) -> usize {
+            self.read_access_calls.load(Ordering::SeqCst)
+        }
+
+        pub(crate) fn write_access_calls(&self) -> usize {
+            self.write_access_calls.load(Ordering::SeqCst)
+        }
+
+        pub(crate) fn execute_access_calls(&self) -> usize {
+            self.execute_access_calls.load(Ordering::SeqCst)
         }
     }
 
@@ -588,6 +679,15 @@ pub(crate) mod test_support {
         fn mount_id(&self, path: &Path, follow: bool) -> io::Result<u64> {
             super::read_mount_id(path, follow)
         }
+
+        fn access(&self, path: &Path, mode: AccessMode) -> io::Result<bool> {
+            match mode {
+                AccessMode::Read => self.read_access_calls.fetch_add(1, Ordering::SeqCst),
+                AccessMode::Write => self.write_access_calls.fetch_add(1, Ordering::SeqCst),
+                AccessMode::Execute => self.execute_access_calls.fetch_add(1, Ordering::SeqCst),
+            };
+            super::read_access(path, mode)
+        }
     }
 }
 
@@ -595,12 +695,13 @@ pub(crate) mod test_support {
 mod tests {
     use super::EntryContext;
     use super::test_support::CountingReader;
-    use super::{EntryKind, EntryReader};
+    use super::{AccessMode, EntryKind, EntryReader};
     use crate::follow::FollowMode;
     use std::ffi::OsString;
     use std::fs;
     use std::fs::Metadata;
     use std::io;
+    use std::os::unix::ffi::OsStrExt;
     use std::os::unix::fs as unix_fs;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
@@ -701,6 +802,61 @@ mod tests {
     }
 
     #[test]
+    fn access_results_are_cached_per_mode_and_shared_by_clones() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("file.txt");
+        fs::write(&path, "hello\n").unwrap();
+        let reader = CountingReader::default();
+        let entry = reader.entry(path, 0, true);
+        let clone = entry.clone();
+
+        assert!(entry.access(AccessMode::Read).unwrap());
+        assert!(clone.access(AccessMode::Read).unwrap());
+        assert_eq!(reader.read_access_calls(), 1);
+
+        assert!(entry.access(AccessMode::Write).unwrap());
+        assert!(clone.access(AccessMode::Write).unwrap());
+        assert_eq!(reader.write_access_calls(), 1);
+        assert_eq!(reader.execute_access_calls(), 0);
+    }
+
+    #[test]
+    fn access_failures_collapse_to_false() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("file.txt");
+        fs::write(&path, "hello\n").unwrap();
+
+        let reader = Arc::new(AccessOverrideReader {
+            readable: Err(libc::ENOENT),
+            writable: Ok(true),
+            executable: Ok(false),
+        });
+        let entry = EntryContext::new_with_reader(path, 0, true, reader);
+
+        assert!(!entry.access(AccessMode::Read).unwrap());
+        assert!(entry.access(AccessMode::Write).unwrap());
+        assert!(!entry.access(AccessMode::Execute).unwrap());
+    }
+
+    #[test]
+    fn enosys_primary_access_path_falls_back_to_plain_access() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("file.txt");
+        fs::write(&path, "hello\n").unwrap();
+        let c_path = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+
+        let result = super::read_access_with(
+            c_path.as_ptr(),
+            AccessMode::Read,
+            |_path, _mode| Err(io::Error::from_raw_os_error(libc::ENOSYS)),
+            |_path, _mode| Ok(true),
+        )
+        .unwrap();
+
+        assert!(result);
+    }
+
+    #[test]
     fn active_mount_id_uses_logical_root_view_only_for_command_line_only_mode() {
         let root = tempdir().unwrap();
         fs::create_dir(root.path().join("real")).unwrap();
@@ -788,6 +944,63 @@ mod tests {
             match (follow, self.logical_mount_id) {
                 (true, Some(mount_id)) => Ok(mount_id),
                 _ => Ok(self.physical_mount_id),
+            }
+        }
+
+        fn access(&self, path: &Path, mode: AccessMode) -> io::Result<bool> {
+            super::read_access(path, mode)
+        }
+    }
+
+    #[derive(Clone)]
+    struct AccessOverrideReader {
+        readable: Result<bool, i32>,
+        writable: Result<bool, i32>,
+        executable: Result<bool, i32>,
+    }
+
+    impl EntryReader for AccessOverrideReader {
+        fn symlink_metadata(&self, path: &Path) -> io::Result<Metadata> {
+            std::fs::symlink_metadata(path)
+        }
+
+        fn metadata(&self, path: &Path) -> io::Result<Metadata> {
+            std::fs::metadata(path)
+        }
+
+        fn read_link(&self, path: &Path) -> io::Result<PathBuf> {
+            std::fs::read_link(path)
+        }
+
+        fn directory_is_empty(&self, path: &Path) -> io::Result<bool> {
+            let mut entries = std::fs::read_dir(path)?;
+            match entries.next() {
+                None => Ok(true),
+                Some(result) => result.map(|_| false),
+            }
+        }
+
+        fn mount_id(&self, path: &Path, follow: bool) -> io::Result<u64> {
+            super::read_mount_id(path, follow)
+        }
+
+        fn access(&self, _path: &Path, mode: AccessMode) -> io::Result<bool> {
+            match mode {
+                AccessMode::Read => self
+                    .readable
+                    .as_ref()
+                    .copied()
+                    .map_err(|errno| io::Error::from_raw_os_error(*errno)),
+                AccessMode::Write => self
+                    .writable
+                    .as_ref()
+                    .copied()
+                    .map_err(|errno| io::Error::from_raw_os_error(*errno)),
+                AccessMode::Execute => self
+                    .executable
+                    .as_ref()
+                    .copied()
+                    .map_err(|errno| io::Error::from_raw_os_error(*errno)),
             }
         }
     }
