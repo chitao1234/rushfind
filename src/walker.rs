@@ -2,7 +2,7 @@ use crate::diagnostics::Diagnostic;
 use crate::entry::EntryContext;
 use crate::follow::FollowMode;
 use crate::identity::FileIdentity;
-use crate::planner::TraversalOptions;
+use crate::planner::{TraversalOptions, TraversalOrder};
 use crate::traversal_control::TraversalControl;
 use crossbeam_channel::{Receiver, unbounded};
 use std::fs::{self, FileType};
@@ -15,6 +15,7 @@ use std::time::Duration;
 #[derive(Debug, Clone)]
 pub enum WalkEvent {
     Entry(EntryContext),
+    DirectoryComplete(EntryContext),
     Error(Diagnostic),
 }
 
@@ -26,6 +27,12 @@ struct PendingPath {
     physical_file_type_hint: Option<FileType>,
     ancestry: Vec<FileIdentity>,
     root_device: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+enum OrderedFrame {
+    Visit(PendingPath),
+    Complete(EntryContext),
 }
 
 #[derive(Debug, Clone)]
@@ -103,21 +110,29 @@ where
     F: FnMut(WalkEvent) -> Result<(), Diagnostic>,
     C: Fn(&EntryContext) -> Result<TraversalControl, Diagnostic>,
 {
-    let mut stack: Vec<PendingPath> = start_paths
+    let mut stack: Vec<OrderedFrame> = start_paths
         .iter()
         .rev()
         .cloned()
-        .map(|path| PendingPath {
+        .map(|path| OrderedFrame::Visit(PendingPath {
             path,
             depth: 0,
             is_command_line_root: true,
             physical_file_type_hint: None,
             ancestry: Vec::new(),
             root_device: None,
-        })
+        }))
         .collect();
 
-    while let Some(pending) = stack.pop() {
+    while let Some(frame) = stack.pop() {
+        let pending = match frame {
+            OrderedFrame::Visit(pending) => pending,
+            OrderedFrame::Complete(entry) => {
+                emit(WalkEvent::DirectoryComplete(entry))?;
+                continue;
+            }
+        };
+
         let entry = match backend.load_entry(&pending) {
             Ok(entry) => entry,
             Err(error) => {
@@ -134,7 +149,21 @@ where
             }
         };
 
-        emit(WalkEvent::Entry(entry.clone()))?;
+        let is_directory = match backend.active_directory_identity(&entry, follow_mode) {
+            Ok(identity) => identity.is_some(),
+            Err(error) => {
+                emit(WalkEvent::Error(error))?;
+                continue;
+            }
+        };
+
+        match options.order {
+            TraversalOrder::PreOrder => emit(WalkEvent::Entry(entry.clone()))?,
+            TraversalOrder::DepthFirstPostOrder if !is_directory => {
+                emit(WalkEvent::Entry(entry.clone()))?
+            }
+            TraversalOrder::DepthFirstPostOrder => {}
+        }
 
         let (child_ancestry, root_device) = match should_descend_directory(
             &pending,
@@ -145,7 +174,12 @@ where
             backend.as_ref(),
         ) {
             Ok(Some(result)) => result,
-            Ok(None) => continue,
+            Ok(None) => {
+                if options.order == TraversalOrder::DepthFirstPostOrder && is_directory {
+                    emit(WalkEvent::DirectoryComplete(entry.clone()))?;
+                }
+                continue;
+            }
             Err(error) => {
                 emit(WalkEvent::Error(error))?;
                 continue;
@@ -156,6 +190,9 @@ where
             Ok(result) => result,
             Err(error) => {
                 emit(WalkEvent::Error(error))?;
+                if options.order == TraversalOrder::DepthFirstPostOrder && is_directory {
+                    emit(WalkEvent::DirectoryComplete(entry.clone()))?;
+                }
                 continue;
             }
         };
@@ -164,15 +201,19 @@ where
             emit(WalkEvent::Error(error))?;
         }
 
+        if options.order == TraversalOrder::DepthFirstPostOrder && is_directory {
+            stack.push(OrderedFrame::Complete(entry.clone()));
+        }
+
         for child in children.into_iter().rev() {
-            stack.push(PendingPath {
+            stack.push(OrderedFrame::Visit(PendingPath {
                 path: child.path,
                 depth: pending.depth + 1,
                 is_command_line_root: false,
                 physical_file_type_hint: child.physical_file_type_hint,
                 ancestry: child_ancestry.clone(),
                 root_device,
-            });
+            }));
         }
     }
 
@@ -522,6 +563,56 @@ mod tests {
         assert!(
             seen.iter()
                 .any(|path| path.ends_with("right/local/keep.txt"))
+        );
+    }
+
+    #[test]
+    fn ordered_depth_mode_emits_directory_completion_after_descendants() {
+        let root = tempdir().unwrap();
+        fs::create_dir(root.path().join("dir")).unwrap();
+        fs::write(root.path().join("dir/file.txt"), "child\n").unwrap();
+
+        let mut seen = Vec::new();
+        walk_ordered_with_backend(
+            Arc::new(TestBackend::default()),
+            &[root.path().to_path_buf()],
+            FollowMode::Physical,
+            TraversalOptions {
+                min_depth: 0,
+                max_depth: None,
+                same_file_system: false,
+                order: TraversalOrder::DepthFirstPostOrder,
+            },
+            |_entry| {
+                Ok(TraversalControl {
+                    matched: true,
+                    prune: false,
+                })
+            },
+            |event| {
+                match event {
+                    WalkEvent::Entry(entry) => {
+                        let rel = entry.path.strip_prefix(root.path()).unwrap();
+                        seen.push(format!("entry:{}", rel.display()));
+                    }
+                    WalkEvent::DirectoryComplete(entry) => {
+                        let rel = entry.path.strip_prefix(root.path()).unwrap();
+                        seen.push(format!("done:{}", rel.display()));
+                    }
+                    WalkEvent::Error(error) => panic!("unexpected walk error: {error:?}"),
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            seen,
+            vec![
+                "entry:dir/file.txt".to_string(),
+                "done:dir".to_string(),
+                "done:".to_string(),
+            ]
         );
     }
 

@@ -47,11 +47,17 @@ where
         plan.follow_mode,
         plan.traversal,
         |entry| {
-            evaluate_for_traversal_with_context(&plan.expr, entry, plan.follow_mode, &eval_context)
+            evaluate_for_traversal_with_context(
+                &plan.expr,
+                entry,
+                plan.follow_mode,
+                plan.traversal.order,
+                &eval_context,
+            )
         },
         |event| {
             match event {
-                WalkEvent::Entry(entry) => {
+                WalkEvent::Entry(entry) | WalkEvent::DirectoryComplete(entry) => {
                     if entry.depth >= plan.traversal.min_depth {
                         let _ = evaluate_with_context(
                             &plan.expr,
@@ -127,6 +133,7 @@ where
         let control_expr = plan.expr.clone();
         let control_context = eval_context.clone();
         let follow_mode = plan.follow_mode;
+        let traversal_order = plan.traversal.order;
         for event in walk_parallel(
             &plan.start_paths,
             plan.follow_mode,
@@ -137,12 +144,13 @@ where
                     &control_expr,
                     entry,
                     follow_mode,
+                    traversal_order,
                     &control_context,
                 )
             },
         ) {
             match event {
-                WalkEvent::Entry(entry) => {
+                WalkEvent::Entry(entry) | WalkEvent::DirectoryComplete(entry) => {
                     if entry.depth >= plan.traversal.min_depth {
                         entry_tx.send(entry).map_err(|_| {
                             Diagnostic::new(

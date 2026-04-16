@@ -2,7 +2,7 @@ use crate::diagnostics::Diagnostic;
 use crate::entry::{EntryContext, EntryKind};
 use crate::eval::EvalContext;
 use crate::follow::FollowMode;
-use crate::planner::{RuntimeExpr, RuntimePredicate};
+use crate::planner::{RuntimeExpr, RuntimePredicate, TraversalOrder};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) struct TraversalControl {
@@ -17,13 +17,14 @@ pub(crate) fn evaluate_for_traversal(
     follow_mode: FollowMode,
 ) -> Result<TraversalControl, Diagnostic> {
     let context = EvalContext::default();
-    evaluate_for_traversal_with_context(expr, entry, follow_mode, &context)
+    evaluate_for_traversal_with_context(expr, entry, follow_mode, TraversalOrder::PreOrder, &context)
 }
 
 pub(crate) fn evaluate_for_traversal_with_context(
     expr: &RuntimeExpr,
     entry: &EntryContext,
     follow_mode: FollowMode,
+    order: TraversalOrder,
     context: &EvalContext,
 ) -> Result<TraversalControl, Diagnostic> {
     match expr {
@@ -34,7 +35,8 @@ pub(crate) fn evaluate_for_traversal_with_context(
             };
 
             for item in items {
-                let next = evaluate_for_traversal_with_context(item, entry, follow_mode, context)?;
+                let next =
+                    evaluate_for_traversal_with_context(item, entry, follow_mode, order, context)?;
                 verdict.prune |= next.prune;
                 if !next.matched {
                     verdict.matched = false;
@@ -45,19 +47,22 @@ pub(crate) fn evaluate_for_traversal_with_context(
             Ok(verdict)
         }
         RuntimeExpr::Or(left, right) => {
-            let left = evaluate_for_traversal_with_context(left, entry, follow_mode, context)?;
+            let left =
+                evaluate_for_traversal_with_context(left, entry, follow_mode, order, context)?;
             if left.matched {
                 return Ok(left);
             }
 
-            let right = evaluate_for_traversal_with_context(right, entry, follow_mode, context)?;
+            let right =
+                evaluate_for_traversal_with_context(right, entry, follow_mode, order, context)?;
             Ok(TraversalControl {
                 matched: right.matched,
                 prune: left.prune || right.prune,
             })
         }
         RuntimeExpr::Not(inner) => {
-            let inner = evaluate_for_traversal_with_context(inner, entry, follow_mode, context)?;
+            let inner =
+                evaluate_for_traversal_with_context(inner, entry, follow_mode, order, context)?;
             Ok(TraversalControl {
                 matched: !inner.matched,
                 prune: inner.prune,
@@ -65,7 +70,8 @@ pub(crate) fn evaluate_for_traversal_with_context(
         }
         RuntimeExpr::Predicate(RuntimePredicate::Prune) => Ok(TraversalControl {
             matched: true,
-            prune: entry.active_kind(follow_mode)? == EntryKind::Directory,
+            prune: order == TraversalOrder::PreOrder
+                && entry.active_kind(follow_mode)? == EntryKind::Directory,
         }),
         RuntimeExpr::Predicate(predicate) => Ok(TraversalControl {
             matched: crate::eval::evaluate_predicate(predicate, entry, follow_mode, context)?,
@@ -86,7 +92,7 @@ mod tests {
     use crate::exec::compile_immediate_exec;
     use crate::follow::FollowMode;
     use crate::mounts::MountSnapshot;
-    use crate::planner::{OutputAction, RuntimeAction, RuntimeExpr, RuntimePredicate};
+    use crate::planner::{OutputAction, RuntimeAction, RuntimeExpr, RuntimePredicate, TraversalOrder};
     use std::fs;
     use tempfile::tempdir;
 
@@ -168,8 +174,14 @@ mod tests {
         ]);
 
         let verdict =
-            evaluate_for_traversal_with_context(&expr, &entry, FollowMode::Physical, &context)
-                .unwrap();
+            evaluate_for_traversal_with_context(
+                &expr,
+                &entry,
+                FollowMode::Physical,
+                TraversalOrder::PreOrder,
+                &context,
+            )
+            .unwrap();
         assert_eq!(
             verdict,
             TraversalControl {
@@ -197,5 +209,30 @@ mod tests {
         let verdict = evaluate_for_traversal(&expr, &entry, FollowMode::Physical).unwrap();
         assert!(verdict.prune);
         assert!(verdict.matched);
+    }
+
+    #[test]
+    fn prune_is_traversal_ineffective_in_depth_mode() {
+        let root = tempdir().unwrap();
+        let dir = root.path().join("vendor");
+        fs::create_dir(&dir).unwrap();
+        let entry = EntryContext::new(dir, 0, true);
+
+        let verdict = evaluate_for_traversal_with_context(
+            &RuntimeExpr::Predicate(RuntimePredicate::Prune),
+            &entry,
+            FollowMode::Physical,
+            TraversalOrder::DepthFirstPostOrder,
+            &EvalContext::default(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            verdict,
+            TraversalControl {
+                matched: true,
+                prune: false,
+            }
+        );
     }
 }
