@@ -77,3 +77,21 @@ fn ordered_delete_failure_falls_through_or_branch_and_sets_exit_one() {
     assert!(stdout.contains("child.txt"));
     assert!(String::from_utf8(output.stderr).unwrap().contains("Directory not empty"));
 }
+
+#[test]
+fn parallel_delete_removes_the_same_tree_shape_with_relaxed_ordering() {
+    let root = tempdir().unwrap();
+    let tree = root.path().join("tree");
+    fs::create_dir(&tree).unwrap();
+    fs::create_dir(tree.join("nested")).unwrap();
+    fs::write(tree.join("nested/file.txt"), "child\n").unwrap();
+
+    let output = cargo_bin_output_with_timeout(
+        &[path_arg(&tree), "-mindepth".into(), "1".into(), "-delete".into()],
+        4,
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(fs::read_dir(&tree).unwrap().next().is_none());
+}

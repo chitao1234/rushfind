@@ -169,10 +169,10 @@ pub fn plan_command_with_now(
         ])
     };
 
-    let mode = match (workers, traversal.order) {
-        (_, TraversalOrder::DepthFirstPostOrder) if workers > 1 => ExecutionMode::OrderedSingle,
-        (0 | 1, _) => ExecutionMode::OrderedSingle,
-        _ => ExecutionMode::ParallelRelaxed,
+    let mode = if workers <= 1 {
+        ExecutionMode::OrderedSingle
+    } else {
+        ExecutionMode::ParallelRelaxed
     };
 
     Ok(ExecutionPlan {

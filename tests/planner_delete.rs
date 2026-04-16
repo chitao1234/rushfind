@@ -2,7 +2,7 @@ mod support;
 
 use findoxide::parser::parse_command;
 use findoxide::planner::{
-    RuntimeAction, RuntimeExpr, RuntimePredicate, TraversalOrder, plan_command,
+    ExecutionMode, RuntimeAction, RuntimeExpr, RuntimePredicate, TraversalOrder, plan_command,
 };
 use support::argv;
 
@@ -32,6 +32,13 @@ fn prune_stays_in_expression_when_delete_forces_depth_mode() {
 
     assert_eq!(plan.traversal.order, TraversalOrder::DepthFirstPostOrder);
     assert!(contains_prune(&plan.expr));
+}
+
+#[test]
+fn delete_keeps_parallel_mode_available_when_workers_are_greater_than_one() {
+    let plan = plan_command(parse_command(&argv(&[".", "-delete"])).unwrap(), 4).unwrap();
+
+    assert_eq!(plan.mode, ExecutionMode::ParallelRelaxed);
 }
 
 fn action_labels(expr: &RuntimeExpr) -> Vec<&'static str> {

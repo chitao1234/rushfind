@@ -100,6 +100,11 @@ where
         .and_then(|value| value.parse::<usize>().ok())
         .filter(|value| *value > 0)
         .unwrap_or(1);
+    let evaluator_count = if plan.traversal.order == crate::planner::TraversalOrder::DepthFirstPostOrder {
+        1
+    } else {
+        worker_count
+    };
     let mut had_runtime_errors = false;
     let mut had_action_failures = false;
 
@@ -109,7 +114,7 @@ where
         let sink = crate::exec::ParallelActionSink::new(broker.clone(), worker_count)?;
 
         let mut evaluators = Vec::new();
-        for _ in 0..worker_count {
+        for _ in 0..evaluator_count {
             let entry_rx = entry_rx.clone();
             let expr = plan.expr.clone();
             let eval_context = eval_context.clone();

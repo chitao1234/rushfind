@@ -349,10 +349,17 @@ impl ActionSink for ParallelActionSink {
                 self.enqueue(spec, path)?;
                 Ok(true)
             }
-            RuntimeAction::Delete => Err(Diagnostic::new(
-                "internal error: delete reached parallel action sink before runtime support landed",
-                1,
-            )),
+            RuntimeAction::Delete => match delete_path(path) {
+                Ok(result) => Ok(result),
+                Err(error) => {
+                    send_broker_message(
+                        &self.broker,
+                        BrokerMessage::Stderr(format!("findoxide: {}\n", error.message).into_bytes()),
+                    )?;
+                    self.mark_action_failure();
+                    Ok(false)
+                }
+            },
         }
     }
 }
