@@ -30,5 +30,9 @@ fn parses_access_predicates_as_argumentless_booleans() {
 fn access_predicates_do_not_consume_following_tokens_as_arguments() {
     let error = parse_command(&argv(&[".", "-readable", "stray-token"])).unwrap_err();
 
-    assert!(error.message.contains("unsupported token in parser subset `stray-token`"));
+    assert!(
+        error
+            .message
+            .contains("unsupported token in parser subset `stray-token`")
+    );
 }

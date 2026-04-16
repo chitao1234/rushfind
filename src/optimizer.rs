@@ -105,9 +105,9 @@ pub(crate) fn predicate_profile(predicate: &RuntimePredicate) -> PredicateProfil
             cost: CostTier::Constant,
         },
         RuntimePredicate::FsType(_) => profile(FILESYSTEM_INFO, CostTier::ActiveMetadata),
-        RuntimePredicate::Readable
-        | RuntimePredicate::Writable
-        | RuntimePredicate::Executable => profile(PATH_ACCESS, CostTier::PathAccess),
+        RuntimePredicate::Readable | RuntimePredicate::Writable | RuntimePredicate::Executable => {
+            profile(PATH_ACCESS, CostTier::PathAccess)
+        }
         RuntimePredicate::True | RuntimePredicate::False => profile(NONE, CostTier::Constant),
         RuntimePredicate::Name { .. } => profile(BASENAME, CostTier::StringOnly),
         RuntimePredicate::Path { .. } => profile(FULL_PATH, CostTier::StringOnly),

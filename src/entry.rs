@@ -585,11 +585,7 @@ fn faccessat_access(path: *const libc::c_char, mode: AccessMode) -> io::Result<b
 
 fn access_access(path: *const libc::c_char, mode: AccessMode) -> io::Result<bool> {
     let rc = unsafe { libc::access(path, mode.as_flag()) };
-    if rc == 0 {
-        Ok(true)
-    } else {
-        Ok(false)
-    }
+    if rc == 0 { Ok(true) } else { Ok(false) }
 }
 
 #[cfg(test)]

@@ -10,6 +10,7 @@ use std::io::Write;
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct RunSummary {
     pub had_runtime_errors: bool,
+    pub had_exec_batch_failures: bool,
 }
 
 pub fn run_plan<W, E>(
@@ -69,7 +70,12 @@ where
         },
     )?;
 
-    Ok(RunSummary { had_runtime_errors })
+    let had_exec_batch_failures = sink.flush()?;
+
+    Ok(RunSummary {
+        had_runtime_errors,
+        had_exec_batch_failures,
+    })
 }
 
 fn run_parallel<W, E>(
@@ -123,7 +129,10 @@ where
         }
     }
 
-    Ok(RunSummary { had_runtime_errors })
+    Ok(RunSummary {
+        had_runtime_errors,
+        had_exec_batch_failures: false,
+    })
 }
 
 fn build_eval_context(plan: &ExecutionPlan) -> Result<EvalContext, Diagnostic> {
