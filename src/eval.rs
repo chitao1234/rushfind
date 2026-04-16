@@ -6,7 +6,7 @@ use crate::follow::FollowMode;
 use crate::mounts::MountSnapshot;
 use crate::output::OutputSink;
 use crate::pattern::matches_pattern;
-use crate::planner::{RuntimeExpr, RuntimePredicate};
+use crate::planner::{RuntimeAction, RuntimeExpr, RuntimePredicate};
 use crate::time::{NewerMatcher, Timestamp, TimestampKind};
 use std::ffi::OsStr;
 use std::sync::Arc;
@@ -76,11 +76,25 @@ pub(crate) fn evaluate_with_context(
         RuntimeExpr::Predicate(predicate) => {
             evaluate_predicate(predicate, entry, follow_mode, context)
         }
-        RuntimeExpr::Action(action) => {
-            sink.emit(*action, &entry.path)?;
+        RuntimeExpr::Action(action) => evaluate_action(action, entry, sink),
+        RuntimeExpr::Barrier => Ok(true),
+    }
+}
+
+fn evaluate_action(
+    action: &RuntimeAction,
+    entry: &EntryContext,
+    sink: &mut dyn OutputSink,
+) -> Result<bool, Diagnostic> {
+    match action {
+        RuntimeAction::Output(output) => {
+            sink.emit(*output, &entry.path)?;
             Ok(true)
         }
-        RuntimeExpr::Barrier => Ok(true),
+        RuntimeAction::ExecImmediate(_) | RuntimeAction::ExecBatched(_) => Err(Diagnostic::new(
+            "internal error: exec actions require an execution-aware action sink",
+            1,
+        )),
     }
 }
 
@@ -218,8 +232,8 @@ fn matches_newer(
 #[cfg(test)]
 mod tests {
     use super::{EvalContext, evaluate, evaluate_with_context};
-    use crate::entry::{AccessMode, EntryContext, EntryReader};
     use crate::entry::test_support::CountingReader;
+    use crate::entry::{AccessMode, EntryContext, EntryReader};
     use crate::follow::FollowMode;
     use crate::mounts::MountSnapshot;
     use crate::output::RecordingSink;

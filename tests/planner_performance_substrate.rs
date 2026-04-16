@@ -1,7 +1,9 @@
 mod support;
 
 use findoxide::parser::parse_command;
-use findoxide::planner::{OutputAction, RuntimeExpr, RuntimePredicate, plan_command};
+use findoxide::planner::{
+    OutputAction, RuntimeAction, RuntimeExpr, RuntimePredicate, plan_command,
+};
 use support::argv;
 
 #[test]
@@ -153,7 +155,24 @@ fn access_predicates_are_reorderable_inside_read_only_and_segments() {
     let ast = parse_command(&argv(&[".", "-uid", "0", "-readable", "-name", "*.rs"])).unwrap();
     let plan = plan_command(ast, 1).unwrap();
 
-    assert_eq!(predicate_labels(&plan.expr), vec!["name", "uid", "readable"]);
+    assert_eq!(
+        predicate_labels(&plan.expr),
+        vec!["name", "uid", "readable"]
+    );
+}
+
+#[test]
+fn exec_actions_are_optimizer_barriers() {
+    let ast = parse_command(&argv(&[
+        ".", "-name", "*.rs", "-exec", "echo", "{}", ";", "-uid", "0",
+    ]))
+    .unwrap();
+    let plan = plan_command(ast, 1).unwrap();
+
+    assert_eq!(
+        linear_labels(&plan.expr),
+        vec!["name", "exec:semicolon", "uid"]
+    );
 }
 
 fn predicate_labels(expr: &RuntimeExpr) -> Vec<&'static str> {
@@ -217,8 +236,10 @@ fn find_not_inner(expr: &RuntimeExpr) -> Option<&Box<RuntimeExpr>> {
 fn expr_label(expr: &RuntimeExpr) -> &'static str {
     match expr {
         RuntimeExpr::Predicate(predicate) => predicate_label(predicate),
-        RuntimeExpr::Action(OutputAction::Print) => "print",
-        RuntimeExpr::Action(OutputAction::Print0) => "print0",
+        RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)) => "print",
+        RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print0)) => "print0",
+        RuntimeExpr::Action(RuntimeAction::ExecImmediate(_)) => "exec:semicolon",
+        RuntimeExpr::Action(RuntimeAction::ExecBatched(_)) => "exec:batch",
         RuntimeExpr::And(_) => "and",
         RuntimeExpr::Or(_, _) => "or",
         RuntimeExpr::Not(_) => "not",

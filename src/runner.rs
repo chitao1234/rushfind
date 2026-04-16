@@ -151,8 +151,8 @@ mod tests {
     use super::build_eval_context_with_loader;
     use crate::follow::FollowMode;
     use crate::planner::{
-        ExecutionMode, ExecutionPlan, OutputAction, RuntimeExpr, RuntimeRequirements,
-        TraversalOptions,
+        ExecutionMode, ExecutionPlan, OutputAction, RuntimeAction, RuntimeExpr,
+        RuntimeRequirements, TraversalOptions,
     };
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -167,7 +167,7 @@ mod tests {
                 same_file_system: false,
             },
             runtime: RuntimeRequirements { mount_snapshot },
-            expr: RuntimeExpr::Action(OutputAction::Print),
+            expr: RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)),
             mode: ExecutionMode::OrderedSingle,
         }
     }

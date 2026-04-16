@@ -85,7 +85,7 @@ mod tests {
     use crate::eval::EvalContext;
     use crate::follow::FollowMode;
     use crate::mounts::MountSnapshot;
-    use crate::planner::{OutputAction, RuntimeExpr, RuntimePredicate};
+    use crate::planner::{OutputAction, RuntimeAction, RuntimeExpr, RuntimePredicate};
     use std::fs;
     use tempfile::tempdir;
 
@@ -137,7 +137,7 @@ mod tests {
 
         let expr = RuntimeExpr::And(vec![
             RuntimeExpr::Not(Box::new(RuntimeExpr::Predicate(RuntimePredicate::Prune))),
-            RuntimeExpr::Action(OutputAction::Print0),
+            RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print0)),
         ]);
 
         let verdict = evaluate_for_traversal(&expr, &entry, FollowMode::Physical).unwrap();

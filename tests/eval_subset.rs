@@ -2,7 +2,7 @@ use findoxide::entry::EntryContext;
 use findoxide::eval::evaluate;
 use findoxide::follow::FollowMode;
 use findoxide::output::RecordingSink;
-use findoxide::planner::{OutputAction, RuntimeExpr, RuntimePredicate};
+use findoxide::planner::{OutputAction, RuntimeAction, RuntimeExpr, RuntimePredicate};
 use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::tempdir;
@@ -19,7 +19,7 @@ fn matching_name_predicate_prints_the_entry_path() {
             pattern: "*.rs".into(),
             case_insensitive: false,
         }),
-        RuntimeExpr::Action(OutputAction::Print),
+        RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)),
     ]);
     let mut sink = RecordingSink::default();
 

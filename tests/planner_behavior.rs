@@ -1,7 +1,7 @@
 mod support;
 
 use findoxide::parser::parse_command;
-use findoxide::planner::{ExecutionMode, OutputAction, RuntimeExpr, plan_command};
+use findoxide::planner::{ExecutionMode, OutputAction, RuntimeAction, RuntimeExpr, plan_command};
 use support::argv;
 
 #[test]
@@ -11,11 +11,10 @@ fn injects_implicit_print_when_no_action_is_present() {
 
     match plan.expr {
         RuntimeExpr::And(ref items) => {
-            assert!(
-                items
-                    .iter()
-                    .any(|item| matches!(item, RuntimeExpr::Action(OutputAction::Print)))
-            );
+            assert!(items.iter().any(|item| matches!(
+                item,
+                RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print))
+            )));
         }
         ref other => panic!("expected implicit print conjunction, got {other:?}"),
     }
@@ -40,12 +39,14 @@ fn hoists_depth_controls_into_traversal_options() {
 }
 
 #[test]
-fn rejects_exec_in_read_only_v0() {
+fn explicit_exec_actions_count_as_actions_for_implicit_print_suppression() {
     let ast = parse_command(&argv(&[".", "-exec", "echo", "{}", ";"])).unwrap();
-    let error = plan_command(ast, 1).unwrap_err();
+    let plan = plan_command(ast, 1).unwrap();
 
-    assert!(error.message.contains("unsupported in read-only v0"));
-    assert!(error.message.contains("-exec"));
+    assert!(!matches!(plan.expr, RuntimeExpr::And(ref items)
+        if items
+            .iter()
+            .any(|item| matches!(item, RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print))))));
 }
 
 #[test]

@@ -1,6 +1,10 @@
 use crate::account::{resolve_group_id, resolve_user_id};
 use crate::ast::{Action, CommandAst, Expr, FileTypeFilter, GlobalOption, Predicate};
 use crate::diagnostics::Diagnostic;
+use crate::exec::{
+    BatchedExecAction, ExecBatchId, ImmediateExecAction, compile_batched_exec,
+    compile_immediate_exec,
+};
 use crate::follow::FollowMode;
 use crate::identity::FileIdentity;
 use crate::numeric::{NumericComparison, parse_numeric_argument};
@@ -51,7 +55,7 @@ pub enum RuntimeExpr {
     Or(Box<RuntimeExpr>, Box<RuntimeExpr>),
     Not(Box<RuntimeExpr>),
     Predicate(RuntimePredicate),
-    Action(OutputAction),
+    Action(RuntimeAction),
     Barrier,
 }
 
@@ -101,6 +105,13 @@ pub enum OutputAction {
     Print0,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuntimeAction {
+    Output(OutputAction),
+    ExecImmediate(ImmediateExecAction),
+    ExecBatched(BatchedExecAction),
+}
+
 pub fn plan_command(ast: CommandAst, workers: usize) -> Result<ExecutionPlan, Diagnostic> {
     plan_command_with_now(
         ast,
@@ -124,25 +135,24 @@ pub fn plan_command_with_now(
         same_file_system: false,
     };
     let mut runtime = RuntimeRequirements::default();
-    let mut temporal = TemporalPlanningState {
-        now,
-        daystart_active: false,
+    let mut state = PlanningState {
+        temporal: TemporalPlanningState {
+            now,
+            daystart_active: false,
+        },
+        saw_action: false,
+        next_exec_batch_id: 0,
     };
-    let mut saw_output = false;
-    let lowered = lower_expr(
-        expr,
-        &mut traversal,
-        &mut runtime,
-        &mut temporal,
-        &mut saw_output,
-        follow_mode,
-    )?;
+    let lowered = lower_expr(expr, &mut traversal, &mut runtime, &mut state, follow_mode)?;
     let lowered = optimize_read_only_and_chains(lowered);
 
-    let expr = if saw_output {
+    let expr = if state.saw_action {
         lowered
     } else {
-        RuntimeExpr::And(vec![lowered, RuntimeExpr::Action(OutputAction::Print)])
+        RuntimeExpr::And(vec![
+            lowered,
+            RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)),
+        ])
     };
 
     let mode = if workers <= 1 {
@@ -173,55 +183,36 @@ fn lower_expr(
     expr: Expr,
     traversal: &mut TraversalOptions,
     runtime: &mut RuntimeRequirements,
-    temporal: &mut TemporalPlanningState,
-    saw_output: &mut bool,
+    state: &mut PlanningState,
     follow_mode: FollowMode,
 ) -> Result<RuntimeExpr, Diagnostic> {
     match expr {
         Expr::And(items) => {
             let mut lowered = Vec::with_capacity(items.len());
             for item in items {
-                lowered.push(lower_expr(
-                    item,
-                    traversal,
-                    runtime,
-                    temporal,
-                    saw_output,
-                    follow_mode,
-                )?);
+                lowered.push(lower_expr(item, traversal, runtime, state, follow_mode)?);
             }
             Ok(RuntimeExpr::And(lowered))
         }
         Expr::Or(left, right) => Ok(RuntimeExpr::Or(
-            Box::new(lower_expr(
-                *left,
-                traversal,
-                runtime,
-                temporal,
-                saw_output,
-                follow_mode,
-            )?),
-            Box::new(lower_expr(
-                *right,
-                traversal,
-                runtime,
-                temporal,
-                saw_output,
-                follow_mode,
-            )?),
+            Box::new(lower_expr(*left, traversal, runtime, state, follow_mode)?),
+            Box::new(lower_expr(*right, traversal, runtime, state, follow_mode)?),
         )),
         Expr::Not(inner) => Ok(RuntimeExpr::Not(Box::new(lower_expr(
             *inner,
             traversal,
             runtime,
-            temporal,
-            saw_output,
+            state,
             follow_mode,
         )?))),
-        Expr::Predicate(predicate) => {
-            lower_predicate(predicate, traversal, runtime, temporal, follow_mode)
-        }
-        Expr::Action(action) => lower_action(action, saw_output),
+        Expr::Predicate(predicate) => lower_predicate(
+            predicate,
+            traversal,
+            runtime,
+            &mut state.temporal,
+            follow_mode,
+        ),
+        Expr::Action(action) => lower_action(action, state),
     }
 }
 
@@ -408,6 +399,13 @@ struct TemporalPlanningState {
     daystart_active: bool,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct PlanningState {
+    temporal: TemporalPlanningState,
+    saw_action: bool,
+    next_exec_batch_id: ExecBatchId,
+}
+
 impl TemporalPlanningState {
     fn relative_baseline(&self) -> Result<Timestamp, Diagnostic> {
         if self.daystart_active {
@@ -433,28 +431,29 @@ fn resolve_samefile_reference(
     Ok(FileIdentity::from_metadata(&metadata))
 }
 
-fn lower_action(action: Action, saw_output: &mut bool) -> Result<RuntimeExpr, Diagnostic> {
+fn lower_action(action: Action, state: &mut PlanningState) -> Result<RuntimeExpr, Diagnostic> {
+    state.saw_action = true;
+
     match action {
-        Action::Print => {
-            *saw_output = true;
-            Ok(RuntimeExpr::Action(OutputAction::Print))
+        Action::Print => Ok(RuntimeExpr::Action(RuntimeAction::Output(
+            OutputAction::Print,
+        ))),
+        Action::Print0 => Ok(RuntimeExpr::Action(RuntimeAction::Output(
+            OutputAction::Print0,
+        ))),
+        Action::Exec { argv, batch: false } => Ok(RuntimeExpr::Action(
+            RuntimeAction::ExecImmediate(compile_immediate_exec(&argv)),
+        )),
+        Action::Exec { argv, batch: true } => {
+            let id = state.next_exec_batch_id;
+            state.next_exec_batch_id += 1;
+            Ok(RuntimeExpr::Action(RuntimeAction::ExecBatched(
+                compile_batched_exec(id, &argv)?,
+            )))
         }
-        Action::Print0 => {
-            *saw_output = true;
-            Ok(RuntimeExpr::Action(OutputAction::Print0))
-        }
-        Action::Exec { .. } => Err(Diagnostic::unsupported(
-            "unsupported in read-only v0: -exec",
-        )),
-        Action::ExecDir { .. } => Err(Diagnostic::unsupported(
-            "unsupported in read-only v0: -execdir",
-        )),
-        Action::Ok { .. } => Err(Diagnostic::unsupported("unsupported in read-only v0: -ok")),
-        Action::OkDir { .. } => Err(Diagnostic::unsupported(
-            "unsupported in read-only v0: -okdir",
-        )),
-        Action::Delete => Err(Diagnostic::unsupported(
-            "unsupported in read-only v0: -delete",
-        )),
+        Action::ExecDir { .. } => Err(Diagnostic::unsupported("unsupported in stage13: -execdir")),
+        Action::Ok { .. } => Err(Diagnostic::unsupported("unsupported in stage13: -ok")),
+        Action::OkDir { .. } => Err(Diagnostic::unsupported("unsupported in stage13: -okdir")),
+        Action::Delete => Err(Diagnostic::unsupported("unsupported in stage13: -delete")),
     }
 }
