@@ -158,10 +158,8 @@ mod tests {
         let entry = EntryContext::new(dir, 0, true);
         let mount_id = entry.active_mount_id(FollowMode::Physical).unwrap();
         let context = EvalContext::with_mount_snapshot(
-            MountSnapshot::from_mountinfo(&format!(
-                "{mount_id} 1 8:1 / / rw - tmpfs tmpfs rw\n"
-            ))
-            .unwrap(),
+            MountSnapshot::from_mountinfo(&format!("{mount_id} 1 8:1 / / rw - tmpfs tmpfs rw\n"))
+                .unwrap(),
         );
         let expr = RuntimeExpr::And(vec![
             RuntimeExpr::Predicate(RuntimePredicate::FsType("tmpfs".into())),

@@ -594,8 +594,8 @@ pub(crate) mod test_support {
 #[cfg(test)]
 mod tests {
     use super::EntryContext;
-    use super::{EntryKind, EntryReader};
     use super::test_support::CountingReader;
+    use super::{EntryKind, EntryReader};
     use crate::follow::FollowMode;
     use std::ffi::OsString;
     use std::fs;
@@ -716,9 +716,14 @@ mod tests {
         let child_entry =
             EntryContext::new_with_reader(root.path().join("dir-link"), 1, false, reader);
 
-        assert_eq!(root_entry.active_mount_id(FollowMode::Physical).unwrap(), 10);
         assert_eq!(
-            root_entry.active_mount_id(FollowMode::CommandLineOnly).unwrap(),
+            root_entry.active_mount_id(FollowMode::Physical).unwrap(),
+            10
+        );
+        assert_eq!(
+            root_entry
+                .active_mount_id(FollowMode::CommandLineOnly)
+                .unwrap(),
             20
         );
         assert_eq!(root_entry.active_mount_id(FollowMode::Logical).unwrap(), 20);

@@ -139,8 +139,10 @@ fn birth_time_predicates_stay_after_ordinary_active_metadata_checks() {
 
 #[test]
 fn fstype_is_reorderable_inside_read_only_and_segments() {
-    let ast = parse_command(&argv(&[".", "-uid", "0", "-fstype", "tmpfs", "-name", "*.rs"]))
-        .unwrap();
+    let ast = parse_command(&argv(&[
+        ".", "-uid", "0", "-fstype", "tmpfs", "-name", "*.rs",
+    ]))
+    .unwrap();
     let plan = plan_command(ast, 1).unwrap();
 
     assert_eq!(predicate_labels(&plan.expr), vec!["name", "uid", "fstype"]);

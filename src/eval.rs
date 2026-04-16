@@ -215,8 +215,8 @@ fn matches_newer(
 #[cfg(test)]
 mod tests {
     use super::{EvalContext, evaluate, evaluate_with_context};
-    use crate::entry::test_support::CountingReader;
     use crate::entry::EntryContext;
+    use crate::entry::test_support::CountingReader;
     use crate::follow::FollowMode;
     use crate::mounts::MountSnapshot;
     use crate::output::RecordingSink;
@@ -301,10 +301,8 @@ mod tests {
         let entry = EntryContext::new(path, 0, true);
         let mount_id = entry.active_mount_id(FollowMode::Physical).unwrap();
         let context = EvalContext::with_mount_snapshot(
-            MountSnapshot::from_mountinfo(&format!(
-                "{mount_id} 1 8:1 / / rw - tmpfs tmpfs rw\n"
-            ))
-            .unwrap(),
+            MountSnapshot::from_mountinfo(&format!("{mount_id} 1 8:1 / / rw - tmpfs tmpfs rw\n"))
+                .unwrap(),
         );
         let mut sink = RecordingSink::default();
 

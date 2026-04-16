@@ -101,12 +101,7 @@ where
         plan.traversal,
         worker_count,
         move |entry| {
-            evaluate_for_traversal_with_context(
-                &control_expr,
-                entry,
-                follow_mode,
-                &control_context,
-            )
+            evaluate_for_traversal_with_context(&control_expr, entry, follow_mode, &control_context)
         },
     ) {
         match event {

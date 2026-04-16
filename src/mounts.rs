@@ -69,7 +69,10 @@ mod tests {
 
         assert_eq!(snapshot.type_for_mount_id(23), Some(OsStr::new("ext4")));
         assert_eq!(snapshot.type_for_mount_id(24), Some(OsStr::new("tmpfs")));
-        assert_eq!(snapshot.type_for_mount_id(25), Some(OsStr::new("fuse.sshfs")));
+        assert_eq!(
+            snapshot.type_for_mount_id(25),
+            Some(OsStr::new("fuse.sshfs"))
+        );
         assert!(snapshot.knows_type(OsStr::new("tmpfs")));
         assert!(!snapshot.knows_type(OsStr::new("btrfs")));
     }

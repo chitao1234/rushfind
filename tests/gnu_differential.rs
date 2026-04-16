@@ -189,6 +189,17 @@ fn current_id_output(flag: &str) -> String {
     String::from_utf8(output.stdout).unwrap().trim().to_owned()
 }
 
+fn current_fstype(path: &Path) -> OsString {
+    let output = Command::new("find")
+        .arg(path)
+        .args(["-maxdepth", "0", "-printf", "%F"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    OsString::from(String::from_utf8(output.stdout).unwrap().trim().to_owned())
+}
+
 fn assert_matches_gnu_exact(args: &[OsString]) {
     let expected = Command::new("find").args(args).output().unwrap();
     let actual = Command::cargo_bin("findoxide")
@@ -272,6 +283,15 @@ fn readme_documents_stage10_structural_traversal_surface() {
     assert!(readme.contains("`-xdev`"));
     assert!(readme.contains("`-mount`"));
     assert!(readme.contains("traversal-wide structural limits"));
+}
+
+#[test]
+fn readme_documents_stage11_fstype_surface() {
+    let readme = fs::read_to_string("README.md").unwrap();
+
+    assert!(readme.contains("`-fstype`"));
+    assert!(readme.contains("/proc/self/mountinfo"));
+    assert!(readme.contains("known at command startup"));
 }
 
 #[test]
@@ -363,6 +383,30 @@ fn ordered_structural_traversal_controls_match_gnu_find_exactly() {
 }
 
 #[test]
+fn ordered_fstype_matches_gnu_find_exactly() {
+    let root = build_tree();
+    let host_type = current_fstype(root.path());
+    let args_sets = vec![
+        vec![
+            path_arg(root.path()),
+            "-fstype".into(),
+            host_type.clone(),
+            "-print".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-fstype".into(),
+            "definitely-not-a-real-fstype".into(),
+            "-print".into(),
+        ],
+    ];
+
+    for args in args_sets {
+        assert_matches_gnu_exact(&args);
+    }
+}
+
+#[test]
 fn parallel_mode_matches_gnu_find_as_a_set() {
     let root = build_tree();
     let args = vec![
@@ -399,6 +443,20 @@ fn parallel_prune_matches_gnu_as_a_set() {
         "vendor".into(),
         "-prune".into(),
         "-o".into(),
+        "-print".into(),
+    ];
+
+    assert_matches_gnu_as_sets(&args);
+}
+
+#[test]
+fn parallel_fstype_matches_gnu_as_a_set() {
+    let root = build_tree();
+    let host_type = current_fstype(root.path());
+    let args = vec![
+        path_arg(root.path()),
+        "-fstype".into(),
+        host_type,
         "-print".into(),
     ];
 
