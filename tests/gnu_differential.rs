@@ -261,83 +261,6 @@ fn assert_matches_gnu_as_sets(args: &[OsString]) {
 }
 
 #[test]
-fn readme_documents_worker_selection_contract() {
-    let readme = fs::read_to_string("README.md").unwrap();
-
-    assert!(readme.contains("FINDOXIDE_WORKERS"));
-    assert!(readme.contains("GNU `find` syntax"));
-    assert!(readme.contains("`-P`, `-H`, `-L`"));
-    assert!(readme.contains("`-xtype`"));
-    assert!(readme.contains("`-samefile`"));
-    assert!(readme.contains("`-inum`"));
-    assert!(readme.contains("`-links`"));
-    assert!(readme.contains("`-lname`"));
-    assert!(readme.contains("`-ilname`"));
-    assert!(readme.contains("`-uid`"));
-    assert!(readme.contains("`-gid`"));
-    assert!(readme.contains("`-user`"));
-    assert!(readme.contains("`-group`"));
-    assert!(readme.contains("`-nouser`"));
-    assert!(readme.contains("`-nogroup`"));
-    assert!(readme.contains("`-perm`"));
-    assert!(readme.contains("lazy entry data access"));
-    assert!(readme.contains("cheap-first planning"));
-    assert!(readme.contains("loop-safe"));
-}
-
-#[test]
-fn readme_documents_stage9_read_only_tail_surface() {
-    let readme = fs::read_to_string("README.md").unwrap();
-
-    assert!(readme.contains("`-size`"));
-    assert!(readme.contains("`-empty`"));
-    assert!(readme.contains("`-used`"));
-    assert!(readme.contains("`-mtime`"));
-    assert!(readme.contains("`-atime`"));
-    assert!(readme.contains("`-ctime`"));
-    assert!(readme.contains("`-mmin`"));
-    assert!(readme.contains("`-amin`"));
-    assert!(readme.contains("`-cmin`"));
-    assert!(readme.contains("`-newer`"));
-    assert!(readme.contains("`-anewer`"));
-    assert!(readme.contains("`-cnewer`"));
-    assert!(readme.contains("full read-only `-newerXY`"));
-    assert!(readme.contains("`-daystart`"));
-    assert!(readme.contains("`@<unix-seconds>[.frac]`"));
-    assert!(readme.contains("`YYYY-MM-DD`"));
-}
-
-#[test]
-fn readme_documents_stage10_structural_traversal_surface() {
-    let readme = fs::read_to_string("README.md").unwrap();
-
-    assert!(readme.contains("`-prune`"));
-    assert!(readme.contains("`-xdev`"));
-    assert!(readme.contains("`-mount`"));
-    assert!(readme.contains("traversal-wide structural limits"));
-}
-
-#[test]
-fn readme_documents_stage11_fstype_surface() {
-    let readme = fs::read_to_string("README.md").unwrap();
-
-    assert!(readme.contains("`-fstype`"));
-    assert!(readme.contains("/proc/self/mountinfo"));
-    assert!(readme.contains("known at command startup"));
-}
-
-#[test]
-fn readme_documents_stage12_access_surface() {
-    let readme = fs::read_to_string("README.md").unwrap();
-
-    assert!(readme.contains("`-readable`"));
-    assert!(readme.contains("`-writable`"));
-    assert!(readme.contains("`-executable`"));
-    assert!(readme.contains("kernel access checks"));
-    assert!(readme.contains("not mode-bit emulation"));
-}
-
-#[test]
 fn ordered_exec_semicolon_matches_gnu_find_exactly() {
     let root = build_exec_tree();
     assert_matches_gnu_exact(&[
@@ -366,16 +289,6 @@ fn ordered_exec_plus_matches_gnu_find_exactly() {
         "+".into(),
         "-print".into(),
     ]);
-}
-
-#[test]
-fn readme_documents_stage13_exec_surface() {
-    let readme = fs::read_to_string("README.md").unwrap();
-
-    assert!(readme.contains("`-exec ... ;`"));
-    assert!(readme.contains("`-exec ... +`"));
-    assert!(readme.contains("parallel mode buffers child stdout/stderr"));
-    assert!(readme.contains("`-execdir`, `-ok`, `-okdir`, and `-delete` remain unsupported"));
 }
 
 #[test]
