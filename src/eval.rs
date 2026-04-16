@@ -103,6 +103,9 @@ pub(crate) fn evaluate_predicate(
                 .type_for_mount_id(mount_id)
                 .is_some_and(|actual| actual == type_name.as_os_str()))
         }
+        RuntimePredicate::Readable
+        | RuntimePredicate::Writable
+        | RuntimePredicate::Executable => Ok(false),
         RuntimePredicate::Name {
             pattern,
             case_insensitive,

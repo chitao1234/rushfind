@@ -7,6 +7,7 @@ pub(crate) enum Requirement {
     FileType,
     ActiveMetadata,
     FilesystemInfo,
+    PathAccess,
     BirthTime,
     DirectoryRead,
     LinkTarget,
@@ -19,6 +20,7 @@ enum CostTier {
     StringOnly,
     FileType,
     ActiveMetadata,
+    PathAccess,
     BirthTime,
     DirectoryRead,
     Expensive,
@@ -37,6 +39,7 @@ const FULL_PATH: &[Requirement] = &[Requirement::FullPath];
 const FILE_TYPE: &[Requirement] = &[Requirement::FileType];
 const ACTIVE_METADATA: &[Requirement] = &[Requirement::ActiveMetadata];
 const FILESYSTEM_INFO: &[Requirement] = &[Requirement::FilesystemInfo];
+const PATH_ACCESS: &[Requirement] = &[Requirement::PathAccess];
 const BIRTH_TIME: &[Requirement] = &[Requirement::BirthTime];
 const DIRECTORY_READ: &[Requirement] = &[Requirement::ActiveMetadata, Requirement::DirectoryRead];
 const LINK_TARGET: &[Requirement] = &[Requirement::LinkTarget];
@@ -102,6 +105,9 @@ pub(crate) fn predicate_profile(predicate: &RuntimePredicate) -> PredicateProfil
             cost: CostTier::Constant,
         },
         RuntimePredicate::FsType(_) => profile(FILESYSTEM_INFO, CostTier::ActiveMetadata),
+        RuntimePredicate::Readable
+        | RuntimePredicate::Writable
+        | RuntimePredicate::Executable => profile(PATH_ACCESS, CostTier::PathAccess),
         RuntimePredicate::True | RuntimePredicate::False => profile(NONE, CostTier::Constant),
         RuntimePredicate::Name { .. } => profile(BASENAME, CostTier::StringOnly),
         RuntimePredicate::Path { .. } => profile(FULL_PATH, CostTier::StringOnly),

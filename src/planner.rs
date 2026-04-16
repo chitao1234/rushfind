@@ -59,6 +59,9 @@ pub enum RuntimeExpr {
 pub enum RuntimePredicate {
     Prune,
     FsType(OsString),
+    Readable,
+    Writable,
+    Executable,
     Name {
         pattern: OsString,
         case_insensitive: bool,
@@ -243,6 +246,9 @@ fn lower_predicate(
             traversal.same_file_system = true;
             Ok(RuntimeExpr::Barrier)
         }
+        Predicate::Readable => Ok(RuntimeExpr::Predicate(RuntimePredicate::Readable)),
+        Predicate::Writable => Ok(RuntimeExpr::Predicate(RuntimePredicate::Writable)),
+        Predicate::Executable => Ok(RuntimeExpr::Predicate(RuntimePredicate::Executable)),
         Predicate::Name {
             pattern,
             case_insensitive,

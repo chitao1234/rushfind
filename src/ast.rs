@@ -29,6 +29,9 @@ pub enum Predicate {
     MinDepth(u32),
     Prune,
     XDev,
+    Readable,
+    Writable,
+    Executable,
     Name {
         pattern: OsString,
         case_insensitive: bool,

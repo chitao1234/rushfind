@@ -186,6 +186,12 @@ impl<'a> Parser<'a> {
             Expr::Predicate(Predicate::Prune)
         } else if token.matches("-xdev") || token.matches("-mount") {
             Expr::Predicate(Predicate::XDev)
+        } else if token.matches("-readable") {
+            Expr::Predicate(Predicate::Readable)
+        } else if token.matches("-writable") {
+            Expr::Predicate(Predicate::Writable)
+        } else if token.matches("-executable") {
+            Expr::Predicate(Predicate::Executable)
         } else if token.matches("-name") {
             Expr::Predicate(Predicate::Name {
                 pattern: self.take_os_string("-name")?,
