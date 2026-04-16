@@ -1,8 +1,52 @@
 use crate::diagnostics::Diagnostic;
 use crate::eval::ActionSink;
 use crate::planner::{OutputAction, RuntimeAction};
+use crossbeam_channel::{Receiver, Sender, unbounded};
 use std::io::Write;
 use std::path::Path;
+use std::thread::{Scope, ScopedJoinHandle};
+
+#[derive(Debug)]
+pub enum BrokerMessage {
+    Stdout(Vec<u8>),
+    Stderr(Vec<u8>),
+}
+
+pub fn spawn_broker<'scope, 'env, W, E>(
+    scope: &'scope Scope<'scope, 'env>,
+    stdout: &'scope mut W,
+    stderr: &'scope mut E,
+) -> (
+    Sender<BrokerMessage>,
+    ScopedJoinHandle<'scope, Result<(), Diagnostic>>,
+)
+where
+    W: Write + Send,
+    E: Write + Send,
+{
+    let (tx, rx): (Sender<BrokerMessage>, Receiver<BrokerMessage>) = unbounded();
+    let handle = scope.spawn(move || broker_loop(rx, stdout, stderr));
+    (tx, handle)
+}
+
+fn broker_loop<W: Write, E: Write>(
+    rx: Receiver<BrokerMessage>,
+    stdout: &mut W,
+    stderr: &mut E,
+) -> Result<(), Diagnostic> {
+    while let Ok(message) = rx.recv() {
+        match message {
+            BrokerMessage::Stdout(bytes) => stdout
+                .write_all(&bytes)
+                .map_err(|error| Diagnostic::new(format!("failed to write stdout: {error}"), 1))?,
+            BrokerMessage::Stderr(bytes) => stderr
+                .write_all(&bytes)
+                .map_err(|error| Diagnostic::new(format!("failed to write stderr: {error}"), 1))?,
+        }
+    }
+
+    Ok(())
+}
 
 pub fn render_output_bytes(action: OutputAction, path: &Path) -> Vec<u8> {
     let rendered = path.to_string_lossy();

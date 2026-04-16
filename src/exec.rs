@@ -1,15 +1,20 @@
 use crate::diagnostics::Diagnostic;
 use crate::eval::ActionSink;
-use crate::output::StdoutSink;
+use crate::output::{BrokerMessage, StdoutSink, render_output_bytes};
 use crate::planner::RuntimeAction;
+use crossbeam_channel::Sender;
 use libc::_SC_ARG_MAX;
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
+use std::io::{self, Read, Seek, Write};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 pub type ExecBatchId = u32;
+const DEFAULT_SPILL_THRESHOLD: usize = 64 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExecTemplateSegment {
@@ -215,6 +220,130 @@ impl<W: std::io::Write, E: std::io::Write> ActionSink for OrderedActionSink<'_, 
     }
 }
 
+#[derive(Clone)]
+pub struct ParallelActionSink {
+    broker: Sender<BrokerMessage>,
+    shared: Arc<ParallelExecShared>,
+}
+
+struct ParallelExecShared {
+    pending: Mutex<BTreeMap<ExecBatchId, PendingBatch>>,
+    batch_limit: BatchLimit,
+    had_batch_failures: AtomicBool,
+    spill_threshold: usize,
+}
+
+impl ParallelActionSink {
+    pub fn new(broker: Sender<BrokerMessage>, _workers: usize) -> Result<Self, Diagnostic> {
+        Ok(Self {
+            broker,
+            shared: Arc::new(ParallelExecShared {
+                pending: Mutex::new(BTreeMap::new()),
+                batch_limit: BatchLimit::detect(),
+                had_batch_failures: AtomicBool::new(false),
+                spill_threshold: DEFAULT_SPILL_THRESHOLD,
+            }),
+        })
+    }
+
+    pub fn flush_all(&self) -> Result<bool, Diagnostic> {
+        let pending = {
+            let mut pending = self.shared.pending.lock().map_err(|_| {
+                Diagnostic::new("internal error: parallel exec batch state was poisoned", 1)
+            })?;
+            std::mem::take(&mut *pending)
+        };
+
+        for (_, batch) in pending {
+            if batch.paths.is_empty() {
+                continue;
+            }
+
+            let ready = ReadyBatch {
+                spec: batch.spec,
+                paths: batch.paths,
+            };
+            if !run_parallel_ready_batch(&ready, &self.broker, self.shared.spill_threshold)? {
+                self.mark_batch_failure();
+            }
+        }
+
+        Ok(self.shared.had_batch_failures.load(Ordering::SeqCst))
+    }
+
+    fn enqueue(&self, spec: &BatchedExecAction, path: &Path) -> Result<(), Diagnostic> {
+        let (ready, push_result) = {
+            let mut pending = self.shared.pending.lock().map_err(|_| {
+                Diagnostic::new("internal error: parallel exec batch state was poisoned", 1)
+            })?;
+            let batch = pending.entry(spec.id).or_insert_with(|| {
+                PendingBatch::new(
+                    spec.clone(),
+                    self.shared.batch_limit,
+                    fixed_batch_cost(spec),
+                )
+            });
+
+            let ready = if !batch.paths.is_empty() && batch.would_overflow(path) {
+                Some(batch.take_ready())
+            } else {
+                None
+            };
+            let push_result = batch.push(path);
+            (ready, push_result)
+        };
+
+        if let Some(ready) = ready {
+            if !run_parallel_ready_batch(&ready, &self.broker, self.shared.spill_threshold)? {
+                self.mark_batch_failure();
+            }
+        }
+
+        match push_result {
+            Ok(Some(ready)) => {
+                if !run_parallel_ready_batch(&ready, &self.broker, self.shared.spill_threshold)? {
+                    self.mark_batch_failure();
+                }
+            }
+            Ok(None) => {}
+            Err(error) => {
+                send_broker_message(
+                    &self.broker,
+                    BrokerMessage::Stderr(format!("findoxide: {error}\n").into_bytes()),
+                )?;
+                self.mark_batch_failure();
+            }
+        }
+
+        Ok(())
+    }
+
+    fn mark_batch_failure(&self) {
+        self.shared.had_batch_failures.store(true, Ordering::SeqCst);
+    }
+}
+
+impl ActionSink for ParallelActionSink {
+    fn dispatch(&mut self, action: &RuntimeAction, path: &Path) -> Result<bool, Diagnostic> {
+        match action {
+            RuntimeAction::Output(output) => {
+                send_broker_message(
+                    &self.broker,
+                    BrokerMessage::Stdout(render_output_bytes(*output, path)),
+                )?;
+                Ok(true)
+            }
+            RuntimeAction::ExecImmediate(spec) => {
+                run_immediate_parallel(spec, path, &self.broker, self.shared.spill_threshold)
+            }
+            RuntimeAction::ExecBatched(spec) => {
+                self.enqueue(spec, path)?;
+                Ok(true)
+            }
+        }
+    }
+}
+
 pub fn compile_immediate_exec(argv: &[OsString]) -> ImmediateExecAction {
     ImmediateExecAction {
         argv: argv
@@ -390,6 +519,183 @@ fn run_ordered_batch<E: std::io::Write>(
     }
 }
 
+fn run_immediate_parallel(
+    spec: &ImmediateExecAction,
+    path: &Path,
+    broker: &Sender<BrokerMessage>,
+    spill_threshold: usize,
+) -> Result<bool, Diagnostic> {
+    run_parallel_command(render_immediate_argv(spec, path), broker, spill_threshold)
+}
+
+fn run_parallel_ready_batch(
+    ready: &ReadyBatch,
+    broker: &Sender<BrokerMessage>,
+    spill_threshold: usize,
+) -> Result<bool, Diagnostic> {
+    run_parallel_command(
+        build_batched_argv(&ready.spec, &ready.paths),
+        broker,
+        spill_threshold,
+    )
+}
+
+fn run_parallel_command(
+    argv: Vec<OsString>,
+    broker: &Sender<BrokerMessage>,
+    spill_threshold: usize,
+) -> Result<bool, Diagnostic> {
+    let Some(program) = argv.first() else {
+        return Err(Diagnostic::new(
+            "internal error: exec action missing command",
+            1,
+        ));
+    };
+
+    let mut command = Command::new(program);
+    command.args(&argv[1..]);
+    command.stdin(Stdio::null());
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::piped());
+
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            send_broker_message(
+                broker,
+                BrokerMessage::Stderr(
+                    format!("findoxide: {}: {error}\n", program.to_string_lossy()).into_bytes(),
+                ),
+            )?;
+            return Ok(false);
+        }
+    };
+
+    let stdout = child
+        .stdout
+        .take()
+        .expect("stdout is piped for parallel exec children");
+    let stderr = child
+        .stderr
+        .take()
+        .expect("stderr is piped for parallel exec children");
+
+    let stdout_thread = std::thread::spawn(move || read_child_pipe(stdout, spill_threshold));
+    let stderr_thread = std::thread::spawn(move || read_child_pipe(stderr, spill_threshold));
+    let status = child
+        .wait()
+        .map_err(|error| Diagnostic::new(format!("failed to wait for exec child: {error}"), 1))?;
+
+    let stdout = join_child_reader(stdout_thread)?;
+    let stderr = join_child_reader(stderr_thread)?;
+
+    if !stdout.is_empty() {
+        send_broker_message(broker, BrokerMessage::Stdout(stdout))?;
+    }
+    if !stderr.is_empty() {
+        send_broker_message(broker, BrokerMessage::Stderr(stderr))?;
+    }
+
+    Ok(status.success())
+}
+
+fn read_child_pipe<R: Read>(mut reader: R, threshold: usize) -> io::Result<Vec<u8>> {
+    let mut buffer = SpillBuffer::new(threshold)?;
+    let mut chunk = [0_u8; 8192];
+
+    loop {
+        let read = reader.read(&mut chunk)?;
+        if read == 0 {
+            break;
+        }
+        buffer.write_all(&chunk[..read])?;
+    }
+
+    buffer.into_bytes()
+}
+
+fn join_child_reader(
+    handle: std::thread::JoinHandle<io::Result<Vec<u8>>>,
+) -> Result<Vec<u8>, Diagnostic> {
+    handle
+        .join()
+        .map_err(|_| Diagnostic::new("internal error: exec output reader thread panicked", 1))?
+        .map_err(|error| Diagnostic::new(format!("failed to read exec child output: {error}"), 1))
+}
+
+fn send_broker_message(
+    broker: &Sender<BrokerMessage>,
+    message: BrokerMessage,
+) -> Result<(), Diagnostic> {
+    broker
+        .send(message)
+        .map_err(|_| Diagnostic::new("internal error: output broker is unavailable", 1))
+}
+
+pub struct SpillBuffer {
+    threshold: usize,
+    memory: Vec<u8>,
+    spill: Option<tempfile::NamedTempFile>,
+}
+
+impl SpillBuffer {
+    pub fn new(threshold: usize) -> io::Result<Self> {
+        Ok(Self {
+            threshold,
+            memory: Vec::new(),
+            spill: None,
+        })
+    }
+
+    pub fn spilled_path(&self) -> Option<&Path> {
+        self.spill.as_ref().map(tempfile::NamedTempFile::path)
+    }
+
+    pub fn into_bytes(mut self) -> io::Result<Vec<u8>> {
+        if let Some(mut spill) = self.spill.take() {
+            let mut bytes = Vec::new();
+            spill.rewind()?;
+            spill.read_to_end(&mut bytes)?;
+            return Ok(bytes);
+        }
+
+        Ok(self.memory)
+    }
+}
+
+impl Write for SpillBuffer {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.write_all(bytes)?;
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        if let Some(spill) = self.spill.as_mut() {
+            spill.flush()?;
+        }
+        Ok(())
+    }
+
+    fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
+        if self.spill.is_none() && self.memory.len() + bytes.len() <= self.threshold {
+            self.memory.extend_from_slice(bytes);
+            return Ok(());
+        }
+
+        if self.spill.is_none() {
+            let mut file = tempfile::NamedTempFile::new()?;
+            file.write_all(&self.memory)?;
+            self.memory.clear();
+            self.spill = Some(file);
+        }
+
+        self.spill
+            .as_mut()
+            .expect("spill exists after initialization")
+            .write_all(bytes)
+    }
+}
+
 fn fixed_batch_cost(spec: &BatchedExecAction) -> usize {
     spec.argv_prefix
         .iter()
@@ -407,7 +713,8 @@ fn os_bytes_len(value: &OsStr) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{BatchLimit, PendingBatch, build_batched_argv, compile_batched_exec};
+    use super::{BatchLimit, PendingBatch, SpillBuffer, build_batched_argv, compile_batched_exec};
+    use std::io::Write;
     use std::path::PathBuf;
 
     #[test]
@@ -436,5 +743,15 @@ mod tests {
         let argv = build_batched_argv(&spec, &[PathBuf::from("a"), PathBuf::from("b")]);
 
         assert_eq!(argv, vec!["printf", "%s\\n", "a", "b"]);
+    }
+
+    #[test]
+    fn spill_buffer_moves_large_output_to_a_tempfile() {
+        let mut buffer = SpillBuffer::new(8).unwrap();
+        buffer.write_all(b"12345678").unwrap();
+        buffer.write_all(b"abcdef").unwrap();
+
+        assert!(buffer.spilled_path().is_some());
+        assert_eq!(buffer.into_bytes().unwrap(), b"12345678abcdef");
     }
 }

@@ -1,10 +1,11 @@
 use crate::diagnostics::Diagnostic;
 use crate::eval::{EvalContext, evaluate_with_context};
 use crate::mounts::MountSnapshot;
-use crate::output::StdoutSink;
+use crate::output::{BrokerMessage, spawn_broker};
 use crate::planner::{ExecutionMode, ExecutionPlan};
 use crate::traversal_control::evaluate_for_traversal_with_context;
 use crate::walker::{WalkEvent, walk_ordered, walk_parallel};
+use crossbeam_channel::unbounded;
 use std::io::Write;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -19,8 +20,8 @@ pub fn run_plan<W, E>(
     stderr: &mut E,
 ) -> Result<RunSummary, Diagnostic>
 where
-    W: Write,
-    E: Write,
+    W: Write + Send,
+    E: Write + Send,
 {
     match plan.mode {
         ExecutionMode::OrderedSingle => run_ordered(plan, stdout, stderr),
@@ -84,54 +85,105 @@ fn run_parallel<W, E>(
     stderr: &mut E,
 ) -> Result<RunSummary, Diagnostic>
 where
-    W: Write,
-    E: Write,
+    W: Write + Send,
+    E: Write + Send,
 {
     let eval_context = build_eval_context(plan)?;
-    let mut sink = StdoutSink::new(stdout);
-    let mut had_runtime_errors = false;
-    let control_expr = plan.expr.clone();
-    let control_context = eval_context.clone();
-    let follow_mode = plan.follow_mode;
     let worker_count = std::env::var("FINDOXIDE_WORKERS")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .filter(|value| *value > 0)
         .unwrap_or(1);
+    let mut had_runtime_errors = false;
+    let mut had_exec_batch_failures = false;
 
-    for event in walk_parallel(
-        &plan.start_paths,
-        plan.follow_mode,
-        plan.traversal,
-        worker_count,
-        move |entry| {
-            evaluate_for_traversal_with_context(&control_expr, entry, follow_mode, &control_context)
-        },
-    ) {
-        match event {
-            WalkEvent::Entry(entry) => {
-                if entry.depth >= plan.traversal.min_depth {
+    std::thread::scope(|scope| -> Result<(), Diagnostic> {
+        let (broker, broker_handle) = spawn_broker(scope, stdout, stderr);
+        let (entry_tx, entry_rx) = unbounded();
+        let sink = crate::exec::ParallelActionSink::new(broker.clone(), worker_count)?;
+
+        let mut evaluators = Vec::new();
+        for _ in 0..worker_count {
+            let entry_rx = entry_rx.clone();
+            let expr = plan.expr.clone();
+            let eval_context = eval_context.clone();
+            let mut sink = sink.clone();
+            let follow_mode = plan.follow_mode;
+            evaluators.push(scope.spawn(move || -> Result<(), Diagnostic> {
+                while let Ok(entry) = entry_rx.recv() {
                     let _ = evaluate_with_context(
-                        &plan.expr,
+                        &expr,
                         &entry,
-                        plan.follow_mode,
+                        follow_mode,
                         &eval_context,
                         &mut sink,
                     )?;
                 }
-            }
-            WalkEvent::Error(error) => {
-                had_runtime_errors = true;
-                writeln!(stderr, "findoxide: {}", error).map_err(|io_error| {
-                    Diagnostic::new(format!("failed to write stderr: {io_error}"), 1)
-                })?;
+                Ok(())
+            }));
+        }
+        drop(entry_rx);
+
+        let control_expr = plan.expr.clone();
+        let control_context = eval_context.clone();
+        let follow_mode = plan.follow_mode;
+        for event in walk_parallel(
+            &plan.start_paths,
+            plan.follow_mode,
+            plan.traversal,
+            worker_count,
+            move |entry| {
+                evaluate_for_traversal_with_context(
+                    &control_expr,
+                    entry,
+                    follow_mode,
+                    &control_context,
+                )
+            },
+        ) {
+            match event {
+                WalkEvent::Entry(entry) => {
+                    if entry.depth >= plan.traversal.min_depth {
+                        entry_tx.send(entry).map_err(|_| {
+                            Diagnostic::new(
+                                "internal error: parallel evaluator channel is unavailable",
+                                1,
+                            )
+                        })?;
+                    }
+                }
+                WalkEvent::Error(error) => {
+                    had_runtime_errors = true;
+                    broker
+                        .send(BrokerMessage::Stderr(
+                            format!("findoxide: {error}\n").into_bytes(),
+                        ))
+                        .map_err(|_| {
+                            Diagnostic::new("internal error: output broker is unavailable", 1)
+                        })?;
+                }
             }
         }
-    }
+
+        drop(entry_tx);
+        for handle in evaluators {
+            handle
+                .join()
+                .map_err(|_| Diagnostic::new("parallel evaluator thread panicked", 1))??;
+        }
+
+        had_exec_batch_failures = sink.flush_all()?;
+        drop(sink);
+        drop(broker);
+        broker_handle
+            .join()
+            .map_err(|_| Diagnostic::new("output broker thread panicked", 1))??;
+        Ok(())
+    })?;
 
     Ok(RunSummary {
         had_runtime_errors,
-        had_exec_batch_failures: false,
+        had_exec_batch_failures,
     })
 }
 
