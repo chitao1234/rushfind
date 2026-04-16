@@ -102,6 +102,31 @@ fn build_perm_tree() -> tempfile::TempDir {
     root
 }
 
+fn build_access_tree() -> tempfile::TempDir {
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("readable.txt"), "readable\n").unwrap();
+    fs::write(root.path().join("locked.txt"), "locked\n").unwrap();
+    fs::write(root.path().join("script.sh"), "#!/bin/sh\nexit 0\n").unwrap();
+    fs::create_dir(root.path().join("searchable-dir")).unwrap();
+    fs::write(root.path().join("searchable-dir/child.txt"), "child\n").unwrap();
+    unix_fs::symlink("readable.txt", root.path().join("readable-link")).unwrap();
+    unix_fs::symlink("missing-target", root.path().join("broken-link")).unwrap();
+    unix_fs::symlink("readable.txt", root.path().join("root-link")).unwrap();
+
+    fs::set_permissions(
+        root.path().join("locked.txt"),
+        fs::Permissions::from_mode(0o000),
+    )
+    .unwrap();
+    fs::set_permissions(
+        root.path().join("script.sh"),
+        fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+
+    root
+}
+
 fn build_size_time_tree() -> tempfile::TempDir {
     let root = tempdir().unwrap();
     fs::write(root.path().join("empty.bin"), []).unwrap();
@@ -295,6 +320,17 @@ fn readme_documents_stage11_fstype_surface() {
 }
 
 #[test]
+fn readme_documents_stage12_access_surface() {
+    let readme = fs::read_to_string("README.md").unwrap();
+
+    assert!(readme.contains("`-readable`"));
+    assert!(readme.contains("`-writable`"));
+    assert!(readme.contains("`-executable`"));
+    assert!(readme.contains("kernel access checks"));
+    assert!(readme.contains("not mode-bit emulation"));
+}
+
+#[test]
 fn reports_unsupported_exec_during_planning() {
     let root = build_tree();
     let output = Command::cargo_bin("findoxide")
@@ -461,6 +497,71 @@ fn parallel_fstype_matches_gnu_as_a_set() {
     ];
 
     assert_matches_gnu_as_sets(&args);
+}
+
+#[test]
+fn ordered_access_predicates_match_gnu_find_exactly() {
+    let root = build_access_tree();
+    let args_sets = vec![
+        vec![path_arg(root.path()), "-readable".into(), "-print".into()],
+        vec![path_arg(root.path()), "-writable".into(), "-print".into()],
+        vec![path_arg(root.path()), "-executable".into(), "-print".into()],
+        vec![
+            path_arg(&root.path().join("searchable-dir")),
+            "-maxdepth".into(),
+            "0".into(),
+            "-executable".into(),
+            "-print".into(),
+        ],
+        vec![
+            "-P".into(),
+            path_arg(root.path()),
+            "-type".into(),
+            "l".into(),
+            "-readable".into(),
+            "-print".into(),
+        ],
+        vec![
+            "-H".into(),
+            path_arg(root.path().join("root-link").as_path()),
+            "-maxdepth".into(),
+            "0".into(),
+            "-readable".into(),
+            "-print".into(),
+        ],
+    ];
+
+    for args in args_sets {
+        assert_matches_gnu_exact(&args);
+    }
+}
+
+#[test]
+fn parallel_access_predicates_match_gnu_find_as_sets() {
+    let root = build_access_tree();
+    let args_sets = vec![
+        vec![
+            path_arg(root.path()),
+            "(".into(),
+            "-readable".into(),
+            "-o".into(),
+            "-executable".into(),
+            ")".into(),
+            "-print".into(),
+        ],
+        vec![
+            "-L".into(),
+            path_arg(root.path()),
+            "-name".into(),
+            "*link".into(),
+            "-readable".into(),
+            "-print".into(),
+        ],
+    ];
+
+    for args in args_sets {
+        assert_matches_gnu_as_sets(&args);
+    }
 }
 
 #[test]

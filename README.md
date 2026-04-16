@@ -2,7 +2,7 @@
 
 `findoxide` is a fresh Rust implementation of Unix `find` that targets GNU `find` syntax while adding a parallel traversal engine.
 
-## v0 and stage-11 scope
+## v0 and stage-12 scope
 
 - GNU-style argv parsing
 - Global follow-mode options: `-P`, `-H`, `-L`
@@ -10,7 +10,7 @@
   `-false`, `-fstype`
 - Identity/link predicates: `-samefile`, `-inum`, `-links`
 - Ownership/account predicates: `-uid`, `-gid`, `-user`, `-group`, `-nouser`, `-nogroup`
-- Permission predicate: `-perm`
+- Permission/access predicates: `-perm`, `-readable`, `-writable`, `-executable`
 - Size/time predicates: `-size`, `-empty`, `-used`, `-mtime`, `-atime`, `-ctime`, `-mmin`,
   `-amin`, `-cmin`, `-newer`, `-anewer`, `-cnewer`, full read-only `-newerXY`, `-daystart`
 - Time predicates and `-used` accept GNU-style fractional magnitudes such as `0.5`, `+1.25`,
@@ -25,6 +25,9 @@
 - `-fstype` type names come from `/proc/self/mountinfo`
 - Requested filesystem types are resolved against the set known at command startup
 - Commands that do not use `-fstype` do not read mount-table state
+- Access predicates use kernel access checks and intentionally can differ from `-perm`
+- Access predicates use real-ID GNU `access(2)` semantics and are not mode-bit emulation
+- When available, the access predicate path uses `faccessat`, with `access(2)` as the fallback
 - `-xdev` and `-mount` are normalized as traversal-wide structural limits in this stage rather
   than GNU-style positional controls
 - Internal performance substrate: lazy entry data access and cheap-first planning for pure read-only `-a` chains
