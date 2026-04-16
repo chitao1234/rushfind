@@ -7,6 +7,8 @@ use std::ffi::OsString;
 use std::fmt;
 use std::fs::{FileType, Metadata};
 use std::io;
+use std::mem::MaybeUninit;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -28,6 +30,7 @@ pub(crate) trait EntryReader: Send + Sync {
     fn metadata(&self, path: &Path) -> io::Result<Metadata>;
     fn read_link(&self, path: &Path) -> io::Result<PathBuf>;
     fn directory_is_empty(&self, path: &Path) -> io::Result<bool>;
+    fn mount_id(&self, path: &Path, follow: bool) -> io::Result<u64>;
 }
 
 #[derive(Debug)]
@@ -53,6 +56,10 @@ impl EntryReader for FsEntryReader {
             Some(result) => result.map(|_| false),
         }
     }
+
+    fn mount_id(&self, path: &Path, follow: bool) -> io::Result<u64> {
+        read_mount_id(path, follow)
+    }
 }
 
 #[derive(Clone)]
@@ -72,6 +79,8 @@ struct EntryData {
     logical_identity: OnceLock<Option<FileIdentity>>,
     physical_link_target: OnceLock<Result<Option<OsString>, Diagnostic>>,
     active_directory_empty: OnceLock<Result<bool, Diagnostic>>,
+    physical_mount_id: OnceLock<Result<u64, Diagnostic>>,
+    logical_mount_id: OnceLock<Result<u64, Diagnostic>>,
     physical_birth_time: OnceLock<Result<Option<Timestamp>, Diagnostic>>,
     logical_birth_time: OnceLock<Result<Option<Timestamp>, Diagnostic>>,
 }
@@ -143,6 +152,8 @@ impl EntryContext {
                 logical_identity: OnceLock::new(),
                 physical_link_target: OnceLock::new(),
                 active_directory_empty: OnceLock::new(),
+                physical_mount_id: OnceLock::new(),
+                logical_mount_id: OnceLock::new(),
                 physical_birth_time: OnceLock::new(),
                 logical_birth_time: OnceLock::new(),
             }),
@@ -260,6 +271,17 @@ impl EntryContext {
 
     pub fn active_link_count(&self, follow_mode: FollowMode) -> Result<u64, Diagnostic> {
         Ok(self.active_metadata(follow_mode)?.nlink())
+    }
+
+    pub fn active_mount_id(&self, follow_mode: FollowMode) -> Result<u64, Diagnostic> {
+        if self.uses_logical_view(follow_mode)
+            && self.physical_kind()? == EntryKind::Symlink
+            && self.logical_metadata().is_some()
+        {
+            return self.logical_mount_id();
+        }
+
+        self.physical_mount_id()
     }
 
     pub fn active_birth_time(
@@ -413,6 +435,30 @@ impl EntryContext {
             .get_or_init(|| self.data.reader.metadata(&self.path).ok())
             .as_ref()
     }
+
+    fn physical_mount_id(&self) -> Result<u64, Diagnostic> {
+        match self.data.physical_mount_id.get_or_init(|| {
+            self.data
+                .reader
+                .mount_id(&self.path, false)
+                .map_err(|error| path_error(&self.path, error))
+        }) {
+            Ok(mount_id) => Ok(*mount_id),
+            Err(error) => Err(error.clone()),
+        }
+    }
+
+    fn logical_mount_id(&self) -> Result<u64, Diagnostic> {
+        match self.data.logical_mount_id.get_or_init(|| {
+            self.data
+                .reader
+                .mount_id(&self.path, true)
+                .map_err(|error| path_error(&self.path, error))
+        }) {
+            Ok(mount_id) => Ok(*mount_id),
+            Err(error) => Err(error.clone()),
+        }
+    }
 }
 
 pub fn file_type_to_kind(file_type: FileType) -> EntryKind {
@@ -437,6 +483,37 @@ pub fn file_type_to_kind(file_type: FileType) -> EntryKind {
 
 fn path_error(path: &Path, error: io::Error) -> Diagnostic {
     Diagnostic::new(format!("{}: {error}", path.display()), 1)
+}
+
+fn read_mount_id(path: &Path, follow: bool) -> io::Result<u64> {
+    let c_path = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid path"))?;
+    let mut statx = MaybeUninit::<libc::statx>::zeroed();
+    let flags = if follow {
+        libc::AT_STATX_SYNC_AS_STAT
+    } else {
+        libc::AT_STATX_SYNC_AS_STAT | libc::AT_SYMLINK_NOFOLLOW
+    };
+
+    let rc = unsafe {
+        libc::statx(
+            libc::AT_FDCWD,
+            c_path.as_ptr(),
+            flags,
+            libc::STATX_MNT_ID,
+            statx.as_mut_ptr(),
+        )
+    };
+    if rc != 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    let statx = unsafe { statx.assume_init() };
+    if statx.stx_mask & libc::STATX_MNT_ID == 0 {
+        return Err(io::Error::from_raw_os_error(libc::EOPNOTSUPP));
+    }
+
+    Ok(statx.stx_mnt_id)
 }
 
 #[cfg(test)]
@@ -507,17 +584,26 @@ pub(crate) mod test_support {
                 Some(result) => result.map(|_| false),
             }
         }
+
+        fn mount_id(&self, path: &Path, follow: bool) -> io::Result<u64> {
+            super::read_mount_id(path, follow)
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::EntryKind;
+    use super::EntryContext;
+    use super::{EntryKind, EntryReader};
     use super::test_support::CountingReader;
     use crate::follow::FollowMode;
     use std::ffi::OsString;
     use std::fs;
+    use std::fs::Metadata;
+    use std::io;
     use std::os::unix::fs as unix_fs;
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
     use tempfile::tempdir;
 
     #[test]
@@ -612,5 +698,92 @@ mod tests {
             EntryKind::File
         );
         assert_eq!(reader.metadata_calls(), 0);
+    }
+
+    #[test]
+    fn active_mount_id_uses_logical_root_view_only_for_command_line_only_mode() {
+        let root = tempdir().unwrap();
+        fs::create_dir(root.path().join("real")).unwrap();
+        unix_fs::symlink(root.path().join("real"), root.path().join("dir-link")).unwrap();
+
+        let reader = Arc::new(MountIdOverrideReader {
+            physical_mount_id: 10,
+            logical_mount_id: Some(20),
+            fail_logical_mount_id: false,
+        });
+        let root_entry =
+            EntryContext::new_with_reader(root.path().join("dir-link"), 0, true, reader.clone());
+        let child_entry =
+            EntryContext::new_with_reader(root.path().join("dir-link"), 1, false, reader);
+
+        assert_eq!(root_entry.active_mount_id(FollowMode::Physical).unwrap(), 10);
+        assert_eq!(
+            root_entry.active_mount_id(FollowMode::CommandLineOnly).unwrap(),
+            20
+        );
+        assert_eq!(root_entry.active_mount_id(FollowMode::Logical).unwrap(), 20);
+        assert_eq!(
+            child_entry
+                .active_mount_id(FollowMode::CommandLineOnly)
+                .unwrap(),
+            10
+        );
+    }
+
+    #[test]
+    fn active_mount_id_does_not_swallow_logical_mount_lookup_failures() {
+        let root = tempdir().unwrap();
+        fs::create_dir(root.path().join("real")).unwrap();
+        unix_fs::symlink(root.path().join("real"), root.path().join("dir-link")).unwrap();
+
+        let reader = Arc::new(MountIdOverrideReader {
+            physical_mount_id: 10,
+            logical_mount_id: None,
+            fail_logical_mount_id: true,
+        });
+        let entry = EntryContext::new_with_reader(root.path().join("dir-link"), 0, true, reader);
+
+        let error = entry.active_mount_id(FollowMode::Logical).unwrap_err();
+        assert!(error.message.contains("Operation not supported"));
+    }
+
+    #[derive(Clone)]
+    struct MountIdOverrideReader {
+        physical_mount_id: u64,
+        logical_mount_id: Option<u64>,
+        fail_logical_mount_id: bool,
+    }
+
+    impl EntryReader for MountIdOverrideReader {
+        fn symlink_metadata(&self, path: &Path) -> io::Result<Metadata> {
+            std::fs::symlink_metadata(path)
+        }
+
+        fn metadata(&self, path: &Path) -> io::Result<Metadata> {
+            std::fs::metadata(path)
+        }
+
+        fn read_link(&self, path: &Path) -> io::Result<PathBuf> {
+            std::fs::read_link(path)
+        }
+
+        fn directory_is_empty(&self, path: &Path) -> io::Result<bool> {
+            let mut entries = std::fs::read_dir(path)?;
+            match entries.next() {
+                None => Ok(true),
+                Some(result) => result.map(|_| false),
+            }
+        }
+
+        fn mount_id(&self, _path: &Path, follow: bool) -> io::Result<u64> {
+            if follow && self.fail_logical_mount_id {
+                return Err(io::Error::from_raw_os_error(libc::EOPNOTSUPP));
+            }
+
+            match (follow, self.logical_mount_id) {
+                (true, Some(mount_id)) => Ok(mount_id),
+                _ => Ok(self.physical_mount_id),
+            }
+        }
     }
 }
