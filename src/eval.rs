@@ -3,11 +3,35 @@ use crate::ast::FileTypeFilter;
 use crate::diagnostics::Diagnostic;
 use crate::entry::{EntryContext, EntryKind};
 use crate::follow::FollowMode;
+use crate::mounts::MountSnapshot;
 use crate::output::OutputSink;
 use crate::pattern::matches_pattern;
 use crate::planner::{RuntimeExpr, RuntimePredicate};
 use crate::time::{NewerMatcher, Timestamp, TimestampKind};
 use std::ffi::OsStr;
+use std::sync::Arc;
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct EvalContext {
+    mount_snapshot: Option<Arc<MountSnapshot>>,
+}
+
+impl EvalContext {
+    pub(crate) fn with_mount_snapshot(snapshot: MountSnapshot) -> Self {
+        Self {
+            mount_snapshot: Some(Arc::new(snapshot)),
+        }
+    }
+
+    fn mount_snapshot(&self) -> Result<&MountSnapshot, Diagnostic> {
+        self.mount_snapshot.as_deref().ok_or_else(|| {
+            Diagnostic::new(
+                "internal error: -fstype requires a mount snapshot runtime context",
+                1,
+            )
+        })
+    }
+}
 
 pub fn evaluate(
     expr: &RuntimeExpr,
@@ -15,24 +39,43 @@ pub fn evaluate(
     follow_mode: FollowMode,
     sink: &mut dyn OutputSink,
 ) -> Result<bool, Diagnostic> {
+    let context = EvalContext::default();
+    evaluate_with_context(expr, entry, follow_mode, &context, sink)
+}
+
+pub(crate) fn evaluate_with_context(
+    expr: &RuntimeExpr,
+    entry: &EntryContext,
+    follow_mode: FollowMode,
+    context: &EvalContext,
+    sink: &mut dyn OutputSink,
+) -> Result<bool, Diagnostic> {
     match expr {
         RuntimeExpr::And(items) => {
             for item in items {
-                if !evaluate(item, entry, follow_mode, sink)? {
+                if !evaluate_with_context(item, entry, follow_mode, context, sink)? {
                     return Ok(false);
                 }
             }
             Ok(true)
         }
         RuntimeExpr::Or(left, right) => {
-            if evaluate(left, entry, follow_mode, sink)? {
+            if evaluate_with_context(left, entry, follow_mode, context, sink)? {
                 Ok(true)
             } else {
-                evaluate(right, entry, follow_mode, sink)
+                evaluate_with_context(right, entry, follow_mode, context, sink)
             }
         }
-        RuntimeExpr::Not(inner) => Ok(!evaluate(inner, entry, follow_mode, sink)?),
-        RuntimeExpr::Predicate(predicate) => evaluate_predicate(predicate, entry, follow_mode),
+        RuntimeExpr::Not(inner) => Ok(!evaluate_with_context(
+            inner,
+            entry,
+            follow_mode,
+            context,
+            sink,
+        )?),
+        RuntimeExpr::Predicate(predicate) => {
+            evaluate_predicate(predicate, entry, follow_mode, context)
+        }
         RuntimeExpr::Action(action) => {
             sink.emit(*action, &entry.path)?;
             Ok(true)
@@ -45,13 +88,21 @@ pub(crate) fn evaluate_predicate(
     predicate: &RuntimePredicate,
     entry: &EntryContext,
     follow_mode: FollowMode,
+    context: &EvalContext,
 ) -> Result<bool, Diagnostic> {
     match predicate {
         RuntimePredicate::Prune => Ok(true),
-        RuntimePredicate::FsType(_) => Err(Diagnostic::new(
-            "internal error: -fstype evaluated before mount runtime was initialized",
-            1,
-        )),
+        RuntimePredicate::FsType(type_name) => {
+            let snapshot = context.mount_snapshot()?;
+            if !snapshot.knows_type(type_name.as_os_str()) {
+                return Ok(false);
+            }
+
+            let mount_id = entry.active_mount_id(follow_mode)?;
+            Ok(snapshot
+                .type_for_mount_id(mount_id)
+                .is_some_and(|actual| actual == type_name.as_os_str()))
+        }
         RuntimePredicate::Name {
             pattern,
             case_insensitive,
@@ -163,9 +214,11 @@ fn matches_newer(
 
 #[cfg(test)]
 mod tests {
-    use super::evaluate;
+    use super::{EvalContext, evaluate, evaluate_with_context};
     use crate::entry::test_support::CountingReader;
+    use crate::entry::EntryContext;
     use crate::follow::FollowMode;
+    use crate::mounts::MountSnapshot;
     use crate::output::RecordingSink;
     use crate::parser::parse_command;
     use crate::planner::{ExecutionPlan, RuntimeExpr, RuntimePredicate, plan_command};
@@ -238,6 +291,63 @@ mod tests {
         assert!(evaluate(&expr, &entry, FollowMode::Physical, &mut sink).unwrap());
         assert!(evaluate(&expr, &entry, FollowMode::Physical, &mut sink).unwrap());
         assert_eq!(reader.directory_probe_calls(), 1);
+    }
+
+    #[test]
+    fn fstype_matches_mount_snapshot_type() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("file.txt");
+        fs::write(&path, "hello\n").unwrap();
+        let entry = EntryContext::new(path, 0, true);
+        let mount_id = entry.active_mount_id(FollowMode::Physical).unwrap();
+        let context = EvalContext::with_mount_snapshot(
+            MountSnapshot::from_mountinfo(&format!(
+                "{mount_id} 1 8:1 / / rw - tmpfs tmpfs rw\n"
+            ))
+            .unwrap(),
+        );
+        let mut sink = RecordingSink::default();
+
+        assert!(
+            evaluate_with_context(
+                &RuntimeExpr::Predicate(RuntimePredicate::FsType("tmpfs".into())),
+                &entry,
+                FollowMode::Physical,
+                &context,
+                &mut sink,
+            )
+            .unwrap()
+        );
+        assert!(
+            !evaluate_with_context(
+                &RuntimeExpr::Predicate(RuntimePredicate::FsType("ext4".into())),
+                &entry,
+                FollowMode::Physical,
+                &context,
+                &mut sink,
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn fstype_without_mount_snapshot_context_is_a_runtime_error() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("file.txt");
+        fs::write(&path, "hello\n").unwrap();
+        let entry = EntryContext::new(path, 0, true);
+        let mut sink = RecordingSink::default();
+
+        let error = evaluate_with_context(
+            &RuntimeExpr::Predicate(RuntimePredicate::FsType("tmpfs".into())),
+            &entry,
+            FollowMode::Physical,
+            &EvalContext::default(),
+            &mut sink,
+        )
+        .unwrap_err();
+
+        assert!(error.message.contains("mount snapshot"));
     }
 
     fn plan_for(args: &[&str]) -> ExecutionPlan {

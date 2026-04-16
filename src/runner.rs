@@ -1,8 +1,9 @@
 use crate::diagnostics::Diagnostic;
-use crate::eval::evaluate;
+use crate::eval::{EvalContext, evaluate_with_context};
+use crate::mounts::MountSnapshot;
 use crate::output::StdoutSink;
 use crate::planner::{ExecutionMode, ExecutionPlan};
-use crate::traversal_control::evaluate_for_traversal;
+use crate::traversal_control::evaluate_for_traversal_with_context;
 use crate::walker::{WalkEvent, walk_ordered, walk_parallel};
 use std::io::Write;
 
@@ -35,6 +36,7 @@ where
     W: Write,
     E: Write,
 {
+    let eval_context = build_eval_context(plan)?;
     let mut sink = StdoutSink::new(stdout);
     let mut had_runtime_errors = false;
 
@@ -42,12 +44,20 @@ where
         &plan.start_paths,
         plan.follow_mode,
         plan.traversal,
-        |entry| evaluate_for_traversal(&plan.expr, entry, plan.follow_mode),
+        |entry| {
+            evaluate_for_traversal_with_context(&plan.expr, entry, plan.follow_mode, &eval_context)
+        },
         |event| {
             match event {
                 WalkEvent::Entry(entry) => {
                     if entry.depth >= plan.traversal.min_depth {
-                        let _ = evaluate(&plan.expr, &entry, plan.follow_mode, &mut sink)?;
+                        let _ = evaluate_with_context(
+                            &plan.expr,
+                            &entry,
+                            plan.follow_mode,
+                            &eval_context,
+                            &mut sink,
+                        )?;
                     }
                 }
                 WalkEvent::Error(error) => {
@@ -73,9 +83,11 @@ where
     W: Write,
     E: Write,
 {
+    let eval_context = build_eval_context(plan)?;
     let mut sink = StdoutSink::new(stdout);
     let mut had_runtime_errors = false;
     let control_expr = plan.expr.clone();
+    let control_context = eval_context.clone();
     let follow_mode = plan.follow_mode;
     let worker_count = std::env::var("FINDOXIDE_WORKERS")
         .ok()
@@ -88,12 +100,25 @@ where
         plan.follow_mode,
         plan.traversal,
         worker_count,
-        move |entry| evaluate_for_traversal(&control_expr, entry, follow_mode),
+        move |entry| {
+            evaluate_for_traversal_with_context(
+                &control_expr,
+                entry,
+                follow_mode,
+                &control_context,
+            )
+        },
     ) {
         match event {
             WalkEvent::Entry(entry) => {
                 if entry.depth >= plan.traversal.min_depth {
-                    let _ = evaluate(&plan.expr, &entry, plan.follow_mode, &mut sink)?;
+                    let _ = evaluate_with_context(
+                        &plan.expr,
+                        &entry,
+                        plan.follow_mode,
+                        &eval_context,
+                        &mut sink,
+                    )?;
                 }
             }
             WalkEvent::Error(error) => {
@@ -106,4 +131,75 @@ where
     }
 
     Ok(RunSummary { had_runtime_errors })
+}
+
+fn build_eval_context(plan: &ExecutionPlan) -> Result<EvalContext, Diagnostic> {
+    build_eval_context_with_loader(plan, MountSnapshot::load_proc_self_mountinfo)
+}
+
+fn build_eval_context_with_loader<F>(
+    plan: &ExecutionPlan,
+    load_mount_snapshot: F,
+) -> Result<EvalContext, Diagnostic>
+where
+    F: FnOnce() -> Result<MountSnapshot, Diagnostic>,
+{
+    if !plan.runtime.mount_snapshot {
+        return Ok(EvalContext::default());
+    }
+
+    Ok(EvalContext::with_mount_snapshot(load_mount_snapshot()?))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_eval_context_with_loader;
+    use crate::follow::FollowMode;
+    use crate::planner::{
+        ExecutionMode, ExecutionPlan, OutputAction, RuntimeExpr, RuntimeRequirements,
+        TraversalOptions,
+    };
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn plan_with_runtime(mount_snapshot: bool) -> ExecutionPlan {
+        ExecutionPlan {
+            start_paths: vec![PathBuf::from(".")],
+            follow_mode: FollowMode::Physical,
+            traversal: TraversalOptions {
+                min_depth: 0,
+                max_depth: None,
+                same_file_system: false,
+            },
+            runtime: RuntimeRequirements { mount_snapshot },
+            expr: RuntimeExpr::Action(OutputAction::Print),
+            mode: ExecutionMode::OrderedSingle,
+        }
+    }
+
+    #[test]
+    fn mount_snapshot_loader_is_skipped_when_plan_does_not_require_it() {
+        let calls = AtomicUsize::new(0);
+
+        let _ = build_eval_context_with_loader(&plan_with_runtime(false), || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            panic!("mount snapshot loader should not run");
+        })
+        .unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn mount_snapshot_loader_runs_once_when_plan_requires_it() {
+        let calls = AtomicUsize::new(0);
+
+        let _ = build_eval_context_with_loader(&plan_with_runtime(true), || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            crate::mounts::MountSnapshot::from_mountinfo("1 0 8:1 / / rw - tmpfs tmpfs rw\n")
+        })
+        .unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
 }
