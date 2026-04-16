@@ -17,7 +17,13 @@ pub(crate) fn evaluate_for_traversal(
     follow_mode: FollowMode,
 ) -> Result<TraversalControl, Diagnostic> {
     let context = EvalContext::default();
-    evaluate_for_traversal_with_context(expr, entry, follow_mode, TraversalOrder::PreOrder, &context)
+    evaluate_for_traversal_with_context(
+        expr,
+        entry,
+        follow_mode,
+        TraversalOrder::PreOrder,
+        &context,
+    )
 }
 
 pub(crate) fn evaluate_for_traversal_with_context(
@@ -92,7 +98,9 @@ mod tests {
     use crate::exec::compile_immediate_exec;
     use crate::follow::FollowMode;
     use crate::mounts::MountSnapshot;
-    use crate::planner::{OutputAction, RuntimeAction, RuntimeExpr, RuntimePredicate, TraversalOrder};
+    use crate::planner::{
+        OutputAction, RuntimeAction, RuntimeExpr, RuntimePredicate, TraversalOrder,
+    };
     use std::fs;
     use tempfile::tempdir;
 
@@ -173,15 +181,14 @@ mod tests {
             RuntimeExpr::Predicate(RuntimePredicate::Prune),
         ]);
 
-        let verdict =
-            evaluate_for_traversal_with_context(
-                &expr,
-                &entry,
-                FollowMode::Physical,
-                TraversalOrder::PreOrder,
-                &context,
-            )
-            .unwrap();
+        let verdict = evaluate_for_traversal_with_context(
+            &expr,
+            &entry,
+            FollowMode::Physical,
+            TraversalOrder::PreOrder,
+            &context,
+        )
+        .unwrap();
         assert_eq!(
             verdict,
             TraversalControl {

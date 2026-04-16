@@ -9,8 +9,8 @@ use std::collections::BTreeMap;
 use std::fs::{self, FileType};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -133,15 +133,17 @@ where
         .iter()
         .rev()
         .cloned()
-        .map(|path| OrderedFrame::Visit(PendingPath {
-            path,
-            depth: 0,
-            is_command_line_root: true,
-            physical_file_type_hint: None,
-            ancestry: Vec::new(),
-            root_device: None,
-            parent_completion: None,
-        }))
+        .map(|path| {
+            OrderedFrame::Visit(PendingPath {
+                path,
+                depth: 0,
+                is_command_line_root: true,
+                physical_file_type_hint: None,
+                ancestry: Vec::new(),
+                root_device: None,
+                parent_completion: None,
+            })
+        })
         .collect();
 
     while let Some(frame) = stack.pop() {
@@ -457,15 +459,21 @@ where
                         ) {
                             Ok(Some(result)) => result,
                             Ok(None) => {
-                                let _ =
-                                    mark_directory_ready(completions.as_ref(), completion_id, &event_tx);
+                                let _ = mark_directory_ready(
+                                    completions.as_ref(),
+                                    completion_id,
+                                    &event_tx,
+                                );
                                 inflight.fetch_sub(1, Ordering::SeqCst);
                                 continue;
                             }
                             Err(error) => {
                                 let _ = event_tx.send(WalkEvent::Error(error));
-                                let _ =
-                                    mark_directory_ready(completions.as_ref(), completion_id, &event_tx);
+                                let _ = mark_directory_ready(
+                                    completions.as_ref(),
+                                    completion_id,
+                                    &event_tx,
+                                );
                                 inflight.fetch_sub(1, Ordering::SeqCst);
                                 continue;
                             }
@@ -478,7 +486,8 @@ where
                                 }
 
                                 for child in children {
-                                    let _ = increment_child_count(completions.as_ref(), completion_id);
+                                    let _ =
+                                        increment_child_count(completions.as_ref(), completion_id);
                                     inflight.fetch_add(1, Ordering::SeqCst);
                                     let _ = work_tx.send(PendingPath {
                                         path: child.path,
@@ -496,7 +505,8 @@ where
                             }
                         }
 
-                        let _ = mark_directory_ready(completions.as_ref(), completion_id, &event_tx);
+                        let _ =
+                            mark_directory_ready(completions.as_ref(), completion_id, &event_tx);
                         inflight.fetch_sub(1, Ordering::SeqCst);
                     }
                     Err(_) if inflight.load(Ordering::SeqCst) == 0 => break,

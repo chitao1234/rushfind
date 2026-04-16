@@ -54,15 +54,15 @@ fn batched_exec_requires_one_final_standalone_placeholder() {
 }
 
 #[test]
-fn execdir_ok_okdir_and_delete_remain_unsupported() {
-    for args in [
-        vec![".", "-execdir", "echo", "{}", ";"],
-        vec![".", "-ok", "echo", "{}", ";"],
-        vec![".", "-okdir", "echo", "{}", ";"],
-        vec![".", "-delete"],
+fn execdir_ok_and_okdir_remain_unsupported() {
+    for (args, needle) in [
+        (vec![".", "-execdir", "echo", "{}", ";"], "-execdir"),
+        (vec![".", "-ok", "echo", "{}", ";"], "-ok"),
+        (vec![".", "-okdir", "echo", "{}", ";"], "-okdir"),
     ] {
         let error = plan_command(parse_command(&argv(&args)).unwrap(), 1).unwrap_err();
-        assert!(error.message.contains("unsupported in stage13"));
+        assert!(error.message.contains("unsupported"));
+        assert!(error.message.contains(needle));
     }
 }
 
@@ -88,6 +88,7 @@ fn collect(expr: &RuntimeExpr, labels: &mut Vec<&'static str>) {
             RuntimeAction::Output(_) => "print",
             RuntimeAction::ExecImmediate(_) => "exec:semicolon",
             RuntimeAction::ExecBatched(_) => "exec:batch",
+            RuntimeAction::Delete => "delete",
         }),
         RuntimeExpr::Predicate(_) | RuntimeExpr::Barrier => {}
     }

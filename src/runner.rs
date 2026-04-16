@@ -100,11 +100,12 @@ where
         .and_then(|value| value.parse::<usize>().ok())
         .filter(|value| *value > 0)
         .unwrap_or(1);
-    let evaluator_count = if plan.traversal.order == crate::planner::TraversalOrder::DepthFirstPostOrder {
-        1
-    } else {
-        worker_count
-    };
+    let evaluator_count =
+        if plan.traversal.order == crate::planner::TraversalOrder::DepthFirstPostOrder {
+            1
+        } else {
+            worker_count
+        };
     let mut had_runtime_errors = false;
     let mut had_action_failures = false;
 

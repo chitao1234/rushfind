@@ -470,9 +470,9 @@ fn lower_action(action: Action, state: &mut PlanningState) -> Result<RuntimeExpr
                 compile_batched_exec(id, &argv)?,
             )))
         }
-        Action::ExecDir { .. } => Err(Diagnostic::unsupported("unsupported in stage13: -execdir")),
-        Action::Ok { .. } => Err(Diagnostic::unsupported("unsupported in stage13: -ok")),
-        Action::OkDir { .. } => Err(Diagnostic::unsupported("unsupported in stage13: -okdir")),
+        Action::ExecDir { .. } => Err(Diagnostic::unsupported("unsupported: -execdir")),
+        Action::Ok { .. } => Err(Diagnostic::unsupported("unsupported: -ok")),
+        Action::OkDir { .. } => Err(Diagnostic::unsupported("unsupported: -okdir")),
         Action::Delete => {
             state.saw_delete = true;
             Ok(RuntimeExpr::Action(RuntimeAction::Delete))

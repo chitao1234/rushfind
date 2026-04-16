@@ -178,18 +178,15 @@ fn exec_actions_are_optimizer_barriers() {
 #[test]
 fn depth_and_delete_are_optimizer_barriers() {
     let ast = parse_command(&argv(&[
-        ".",
-        "-uid",
-        "0",
-        "-depth",
-        "-name",
-        "*.tmp",
-        "-delete",
+        ".", "-uid", "0", "-depth", "-name", "*.tmp", "-delete",
     ]))
     .unwrap();
     let plan = plan_command(ast, 1).unwrap();
 
-    assert_eq!(linear_labels(&plan.expr), vec!["uid", "barrier", "name", "delete"]);
+    assert_eq!(
+        linear_labels(&plan.expr),
+        vec!["uid", "barrier", "name", "delete"]
+    );
 }
 
 fn predicate_labels(expr: &RuntimeExpr) -> Vec<&'static str> {

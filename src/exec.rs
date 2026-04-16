@@ -328,7 +328,9 @@ impl ParallelActionSink {
     }
 
     fn mark_action_failure(&self) {
-        self.shared.had_action_failures.store(true, Ordering::SeqCst);
+        self.shared
+            .had_action_failures
+            .store(true, Ordering::SeqCst);
     }
 }
 
@@ -354,7 +356,9 @@ impl ActionSink for ParallelActionSink {
                 Err(error) => {
                     send_broker_message(
                         &self.broker,
-                        BrokerMessage::Stderr(format!("findoxide: {}\n", error.message).into_bytes()),
+                        BrokerMessage::Stderr(
+                            format!("findoxide: {}\n", error.message).into_bytes(),
+                        ),
                     )?;
                     self.mark_action_failure();
                     Ok(false)

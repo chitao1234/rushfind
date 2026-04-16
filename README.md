@@ -2,7 +2,7 @@
 
 `findoxide` is a fresh Rust implementation of Unix `find` that targets GNU `find` syntax while adding a parallel traversal engine.
 
-## v0 and stage-13 scope
+## v0 and stage-14 scope
 
 - GNU-style argv parsing
 - Global follow-mode options: `-P`, `-H`, `-L`
@@ -16,13 +16,18 @@
 - Time predicates and `-used` accept GNU-style fractional magnitudes such as `0.5`, `+1.25`,
   and `-0.75`
 - Symlink-content predicates: `-lname`, `-ilname`
-- Traversal controls: `-mindepth`, `-maxdepth`, `-prune`, `-xdev`, `-mount`
-- Output actions: `-print`, `-print0`, `-exec ... ;`, `-exec ... +`
+- Traversal controls: `-mindepth`, `-maxdepth`, `-depth`, `-prune`, `-xdev`, `-mount`
+- Output and mutation actions: `-print`, `-print0`, `-exec ... ;`, `-exec ... +`, `-delete`
 - Ordered single-worker mode stays GNU-oriented for supported structural traversal controls
-- Relaxed-order parallel mode guarantees prune subtree boundaries but does not promise GNU sibling
-  ordering
+- Relaxed-order parallel mode guarantees prune subtree boundaries in pre-order traversal but does
+  not promise GNU sibling ordering
 - Ordered single-worker mode inherits child stdio for `-exec`
 - Relaxed-order parallel mode buffers child stdout/stderr for atomic replay
+- `-delete` implies depth-mode traversal, so directories are evaluated and removed after their
+  scheduled descendants
+- In depth mode, `-prune` remains boolean-true in expression flow but does not block descendant
+  traversal
+- Relaxed-order parallel mode preserves descendant-before-parent completion for depth-mode actions
 - `-fstype` is Linux-first in this stage
 - `-fstype` type names come from `/proc/self/mountinfo`
 - Requested filesystem types are resolved against the set known at command startup
@@ -55,8 +60,8 @@ Use the `FINDOXIDE_WORKERS` environment variable to control execution mode:
 - `-L` follows symlinks logically during traversal
 - Followed-directory traversal is loop-safe and reports a runtime error instead of recursing forever
 
-## Unsupported in stage 13
+## Unsupported in stage 14
 
-Stage 13 supports `-exec ... ;` and `-exec ... +`.
+Stage 14 supports `-exec ... ;`, `-exec ... +`, and `-delete`.
 
-`-execdir`, `-ok`, `-okdir`, and `-delete` remain unsupported.
+`-execdir`, `-ok`, and `-okdir` remain unsupported.

@@ -2,6 +2,7 @@ mod support;
 
 use assert_cmd::cargo::CommandCargoExt;
 use findoxide::birth::read_birth_time;
+use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fs;
 use std::os::unix::fs::{self as unix_fs, MetadataExt, PermissionsExt};
@@ -194,6 +195,16 @@ fn build_exec_tree() -> tempfile::TempDir {
     root
 }
 
+fn build_delete_tree() -> tempfile::TempDir {
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("tree")).unwrap();
+    fs::create_dir(root.path().join("tree/cache")).unwrap();
+    fs::create_dir(root.path().join("tree/empty-dir")).unwrap();
+    fs::write(root.path().join("tree/cache/file.tmp"), "cache\n").unwrap();
+    fs::write(root.path().join("tree/keep.txt"), "keep\n").unwrap();
+    root
+}
+
 fn touch_time(path: &Path, args: &[&str]) {
     let status = Command::new("touch").args(args).arg(path).status().unwrap();
     assert!(status.success(), "touch failed for {}", path.display());
@@ -258,6 +269,38 @@ fn assert_matches_gnu_as_sets(args: &[OsString]) {
     assert_eq!(actual.status.code(), expected.status.code());
     assert_eq!(lines(&actual.stdout), lines(&expected.stdout));
     assert_eq!(lines(&actual.stderr), lines(&expected.stderr));
+}
+
+fn snapshot_tree(root: &Path) -> BTreeSet<String> {
+    fn visit(base: &Path, path: &Path, out: &mut BTreeSet<String>) {
+        let relative = path.strip_prefix(base).unwrap();
+        let label = if relative.as_os_str().is_empty() {
+            ".".to_string()
+        } else {
+            relative.display().to_string()
+        };
+        out.insert(label);
+
+        if fs::symlink_metadata(path).unwrap().file_type().is_dir() {
+            for child in fs::read_dir(path).unwrap() {
+                visit(base, &child.unwrap().path(), out);
+            }
+        }
+    }
+
+    if !root.exists() {
+        return BTreeSet::from(["<missing>".to_string()]);
+    }
+
+    let mut out = BTreeSet::new();
+    visit(root, root, &mut out);
+    out
+}
+
+fn normalize_root(bytes: &[u8], root: &Path) -> String {
+    String::from_utf8(bytes.to_vec())
+        .unwrap()
+        .replace(&root.display().to_string(), "<ROOT>")
 }
 
 #[test]
@@ -334,6 +377,7 @@ fn ordered_mode_matches_gnu_find_exactly() {
 fn ordered_structural_traversal_controls_match_gnu_find_exactly() {
     let root = build_prune_tree();
     let args_sets = vec![
+        vec![path_arg(root.path()), "-depth".into(), "-print".into()],
         vec![
             path_arg(root.path()),
             "-name".into(),
@@ -359,6 +403,46 @@ fn ordered_structural_traversal_controls_match_gnu_find_exactly() {
     for args in args_sets {
         assert_matches_gnu_exact(&args);
     }
+}
+
+#[test]
+fn ordered_delete_matches_gnu_output_exit_and_resulting_state() {
+    let expected = build_delete_tree();
+    let actual = build_delete_tree();
+
+    let expected_root = expected.path().join("tree");
+    let actual_root = actual.path().join("tree");
+    let args_expected = vec![
+        path_arg(&expected_root),
+        "-mindepth".into(),
+        "1".into(),
+        "-delete".into(),
+    ];
+    let args_actual = vec![
+        path_arg(&actual_root),
+        "-mindepth".into(),
+        "1".into(),
+        "-delete".into(),
+    ];
+
+    let expected_output = Command::new("find").args(&args_expected).output().unwrap();
+    let actual_output = Command::cargo_bin("findoxide")
+        .unwrap()
+        .env("FINDOXIDE_WORKERS", "1")
+        .args(&args_actual)
+        .output()
+        .unwrap();
+
+    assert_eq!(actual_output.status.code(), expected_output.status.code());
+    assert_eq!(
+        normalize_root(&actual_output.stdout, &actual_root),
+        normalize_root(&expected_output.stdout, &expected_root),
+    );
+    assert_eq!(
+        normalize_root(&actual_output.stderr, &actual_root),
+        normalize_root(&expected_output.stderr, &expected_root),
+    );
+    assert_eq!(snapshot_tree(&actual_root), snapshot_tree(&expected_root));
 }
 
 #[test]

@@ -14,7 +14,12 @@ fn ordered_delete_removes_entries_reached_by_the_expression() {
     fs::write(tree.join("leaf.txt"), "leaf\n").unwrap();
 
     let output = cargo_bin_output_with_timeout(
-        &[path_arg(&tree), "-mindepth".into(), "1".into(), "-delete".into()],
+        &[
+            path_arg(&tree),
+            "-mindepth".into(),
+            "1".into(),
+            "-delete".into(),
+        ],
         1,
         Duration::from_secs(5),
     );
@@ -44,7 +49,11 @@ fn ordered_print_then_delete_emits_paths_before_removal() {
     );
 
     assert_eq!(output.status.code(), Some(0));
-    assert!(String::from_utf8(output.stdout).unwrap().contains("alpha.txt"));
+    assert!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .contains("alpha.txt")
+    );
     assert!(fs::read_dir(&tree).unwrap().next().is_none());
 }
 
@@ -75,7 +84,11 @@ fn ordered_delete_failure_falls_through_or_branch_and_sets_exit_one() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("dir"));
     assert!(stdout.contains("child.txt"));
-    assert!(String::from_utf8(output.stderr).unwrap().contains("Directory not empty"));
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("Directory not empty")
+    );
 }
 
 #[test]
@@ -87,7 +100,12 @@ fn parallel_delete_removes_the_same_tree_shape_with_relaxed_ordering() {
     fs::write(tree.join("nested/file.txt"), "child\n").unwrap();
 
     let output = cargo_bin_output_with_timeout(
-        &[path_arg(&tree), "-mindepth".into(), "1".into(), "-delete".into()],
+        &[
+            path_arg(&tree),
+            "-mindepth".into(),
+            "1".into(),
+            "-delete".into(),
+        ],
         4,
         Duration::from_secs(5),
     );
