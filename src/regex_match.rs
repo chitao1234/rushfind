@@ -71,9 +71,9 @@ impl RegexMatcher {
             Diagnostic::new(format!("invalid UTF-8 regex pattern for `{flag}`"), 1)
         })?;
         let translated_pattern = match dialect {
-            RegexDialect::Emacs => translate_emacs_subset(flag, original_pattern)?,
-            RegexDialect::PosixExtended => translate_posix_extended_subset(flag, original_pattern)?,
-            RegexDialect::PosixBasic => translate_emacs_subset(flag, original_pattern)?,
+            RegexDialect::Emacs | RegexDialect::PosixExtended | RegexDialect::PosixBasic => {
+                translate_gnu_facing_subset(flag, dialect, original_pattern)?
+            }
             RegexDialect::Rust => original_pattern.to_owned(),
         };
         let compiled = RegexBuilder::new(&format!(r"\A(?:{})\z", translated_pattern))
@@ -108,137 +108,345 @@ impl RegexMatcher {
     }
 }
 
-fn translate_posix_extended_subset(flag: &str, pattern: &str) -> Result<String, Diagnostic> {
-    validate_common_subset(flag, "posix-extended", pattern)?;
-    Ok(pattern.to_owned())
-}
-
-fn translate_emacs_subset(flag: &str, pattern: &str) -> Result<String, Diagnostic> {
-    validate_common_subset(flag, "emacs", pattern)?;
-
-    let mut translated = String::new();
-    let mut chars = pattern.chars();
-    let mut in_bracket_class = false;
-
-    while let Some(ch) = chars.next() {
-        match ch {
-            '[' if !in_bracket_class => {
-                in_bracket_class = true;
-                translated.push(ch);
-            }
-            ']' if in_bracket_class => {
-                in_bracket_class = false;
-                translated.push(ch);
-            }
-            '\\' => {
-                let escaped = chars.next().ok_or_else(|| {
-                    Diagnostic::new(
-                        format!("malformed emacs regex for `{flag}`: trailing `\\`"),
-                        1,
-                    )
-                })?;
-                translate_emacs_escape(flag, escaped, in_bracket_class, &mut translated)?;
-            }
-            '(' | ')' | '|' | '+' | '?' | '{' | '}' if !in_bracket_class => {
-                translated.push('\\');
-                translated.push(ch);
-            }
-            _ => translated.push(ch),
-        }
-    }
-
-    Ok(translated)
-}
-
-fn translate_emacs_escape(
+fn translate_gnu_facing_subset(
     flag: &str,
-    escaped: char,
-    in_bracket_class: bool,
-    translated: &mut String,
-) -> Result<(), Diagnostic> {
-    if escaped.is_ascii_digit() {
-        return Err(unsupported_construct(
-            flag,
-            "emacs",
-            "backreferences are out of scope",
-        ));
-    }
+    dialect: RegexDialect,
+    pattern: &str,
+) -> Result<String, Diagnostic> {
+    let rules = GnuDialectRules::for_dialect(dialect);
+    GnuRegexScanner::new(flag, dialect, rules, pattern).translate()
+}
 
-    if in_bracket_class {
-        translated.push('\\');
-        translated.push(escaped);
-        return Ok(());
-    }
+#[derive(Debug, Clone, Copy)]
+struct GnuDialectRules {
+    bre_style_operators: bool,
+}
 
-    match escaped {
-        '(' | ')' | '|' | '+' | '?' | '{' | '}' => translated.push(escaped),
-        '\\' | '.' | '^' | '$' | '*' | '[' | ']' => {
-            translated.push('\\');
-            translated.push(escaped);
+impl GnuDialectRules {
+    fn for_dialect(dialect: RegexDialect) -> Self {
+        match dialect {
+            RegexDialect::Emacs | RegexDialect::PosixBasic => Self {
+                bre_style_operators: true,
+            },
+            RegexDialect::PosixExtended => Self {
+                bre_style_operators: false,
+            },
+            RegexDialect::Rust => unreachable!("rust regexes are not translated as GNU subsets"),
         }
-        other => {
+    }
+}
+
+struct GnuRegexScanner<'a> {
+    flag: &'a str,
+    dialect: RegexDialect,
+    rules: GnuDialectRules,
+    chars: Vec<char>,
+    index: usize,
+    translated: String,
+    group_depth: usize,
+}
+
+impl<'a> GnuRegexScanner<'a> {
+    fn new(flag: &'a str, dialect: RegexDialect, rules: GnuDialectRules, pattern: &str) -> Self {
+        Self {
+            flag,
+            dialect,
+            rules,
+            chars: pattern.chars().collect(),
+            index: 0,
+            translated: String::new(),
+            group_depth: 0,
+        }
+    }
+
+    fn translate(mut self) -> Result<String, Diagnostic> {
+        while let Some(ch) = self.next() {
+            match ch {
+                '[' => self.translate_bracket_expression()?,
+                '\\' => self.translate_escape()?,
+                '(' if !self.rules.bre_style_operators => {
+                    if self.peek() == Some('?') {
+                        return Err(unsupported_construct(
+                            self.flag,
+                            self.dialect,
+                            "non-capturing groups are out of scope",
+                        ));
+                    }
+                    self.group_depth += 1;
+                    self.translated.push(ch);
+                }
+                ')' if !self.rules.bre_style_operators => {
+                    self.close_group()?;
+                    self.translated.push(ch);
+                }
+                '(' | ')' | '|' | '+' | '?' | '{' | '}' if self.rules.bre_style_operators => {
+                    self.push_escaped_literal(ch);
+                }
+                _ => self.translated.push(ch),
+            }
+        }
+
+        if self.group_depth != 0 {
+            return Err(malformed_regex(self.flag, self.dialect, "unclosed group"));
+        }
+
+        Ok(self.translated)
+    }
+
+    fn translate_escape(&mut self) -> Result<(), Diagnostic> {
+        let escaped = self
+            .next()
+            .ok_or_else(|| malformed_regex(self.flag, self.dialect, "trailing `\\`"))?;
+
+        if escaped.is_ascii_digit() {
             return Err(unsupported_construct(
-                flag,
-                "emacs",
-                format!("unsupported escape `\\{other}`"),
+                self.flag,
+                self.dialect,
+                "backreferences are out of scope",
             ));
         }
-    }
 
-    Ok(())
-}
-
-fn validate_common_subset(flag: &str, dialect: &str, pattern: &str) -> Result<(), Diagnostic> {
-    if pattern.contains("[:") && pattern.contains(":]") {
-        return Err(unsupported_construct(
-            flag,
-            dialect,
-            "POSIX named character classes are out of scope",
-        ));
-    }
-    if pattern.contains("[.") && pattern.contains(".]") {
-        return Err(unsupported_construct(
-            flag,
-            dialect,
-            "POSIX collating symbols are out of scope",
-        ));
-    }
-    if pattern.contains("[=") && pattern.contains("=]") {
-        return Err(unsupported_construct(
-            flag,
-            dialect,
-            "POSIX equivalence classes are out of scope",
-        ));
-    }
-    if contains_backreference(pattern) {
-        return Err(unsupported_construct(
-            flag,
-            dialect,
-            "backreferences are out of scope",
-        ));
-    }
-
-    Ok(())
-}
-
-fn contains_backreference(pattern: &str) -> bool {
-    let mut escaped = false;
-    for ch in pattern.chars() {
-        if escaped {
-            if ch.is_ascii_digit() {
-                return true;
+        if self.rules.bre_style_operators {
+            match escaped {
+                '(' => {
+                    self.group_depth += 1;
+                    self.translated.push('(');
+                }
+                ')' => {
+                    self.close_group()?;
+                    self.translated.push(')');
+                }
+                '|' | '+' | '?' => self.translated.push(escaped),
+                '{' => self.translate_bre_bound()?,
+                '\\' | '.' | '^' | '$' | '*' | '[' | ']' | '}' => {
+                    self.push_escaped_literal(escaped);
+                }
+                other => {
+                    return Err(unsupported_construct(
+                        self.flag,
+                        self.dialect,
+                        format!("unsupported escape `\\{other}`"),
+                    ));
+                }
             }
-            escaped = false;
-            continue;
+        } else {
+            match escaped {
+                '\\' | '.' | '^' | '$' | '*' | '+' | '?' | '(' | ')' | '|' | '{' | '}' | '['
+                | ']' => self.push_escaped_literal(escaped),
+                other => {
+                    return Err(unsupported_construct(
+                        self.flag,
+                        self.dialect,
+                        format!("unsupported escape `\\{other}`"),
+                    ));
+                }
+            }
         }
-        escaped = ch == '\\';
+
+        Ok(())
     }
-    false
+
+    fn translate_bre_bound(&mut self) -> Result<(), Diagnostic> {
+        let mut contents = String::new();
+
+        loop {
+            let ch = self.next().ok_or_else(|| {
+                malformed_regex(self.flag, self.dialect, "unterminated bounded repetition")
+            })?;
+
+            if ch == '\\' {
+                let escaped = self.next().ok_or_else(|| {
+                    malformed_regex(self.flag, self.dialect, "unterminated bounded repetition")
+                })?;
+                if escaped == '}' {
+                    break;
+                }
+                return Err(malformed_regex(
+                    self.flag,
+                    self.dialect,
+                    "malformed bounded repetition",
+                ));
+            }
+
+            contents.push(ch);
+        }
+
+        if !is_valid_repetition_bound(&contents) {
+            return Err(malformed_regex(
+                self.flag,
+                self.dialect,
+                "malformed bounded repetition",
+            ));
+        }
+
+        self.translated.push('{');
+        self.translated.push_str(&contents);
+        self.translated.push('}');
+        Ok(())
+    }
+
+    fn translate_bracket_expression(&mut self) -> Result<(), Diagnostic> {
+        self.translated.push('[');
+
+        if self.peek() == Some('^') {
+            self.index += 1;
+            self.translated.push('^');
+        }
+
+        if self.peek() == Some(']') {
+            self.index += 1;
+            self.translated.push(']');
+        }
+
+        while let Some(ch) = self.next() {
+            match ch {
+                ']' => {
+                    self.translated.push(']');
+                    return Ok(());
+                }
+                '[' => match self.peek() {
+                    Some(':') => {
+                        self.index += 1;
+                        let name = self.take_posix_class_name()?;
+                        let fragment = posix_named_class_fragment(self.flag, self.dialect, &name)?;
+                        self.translated.push_str(fragment);
+                    }
+                    Some('.') => {
+                        return Err(unsupported_construct(
+                            self.flag,
+                            self.dialect,
+                            "POSIX collating symbols are out of scope",
+                        ));
+                    }
+                    Some('=') => {
+                        return Err(unsupported_construct(
+                            self.flag,
+                            self.dialect,
+                            "POSIX equivalence classes are out of scope",
+                        ));
+                    }
+                    _ => self.translated.push('['),
+                },
+                '\\' => {
+                    let escaped = self.next().ok_or_else(|| {
+                        malformed_regex(self.flag, self.dialect, "unterminated bracket expression")
+                    })?;
+                    self.translated.push('\\');
+                    self.translated.push(escaped);
+                }
+                _ => self.translated.push(ch),
+            }
+        }
+
+        Err(malformed_regex(
+            self.flag,
+            self.dialect,
+            "unterminated bracket expression",
+        ))
+    }
+
+    fn take_posix_class_name(&mut self) -> Result<String, Diagnostic> {
+        let mut name = String::new();
+
+        loop {
+            let ch = self.next().ok_or_else(|| {
+                malformed_regex(
+                    self.flag,
+                    self.dialect,
+                    "unterminated POSIX character class",
+                )
+            })?;
+
+            if ch == ':' && self.peek() == Some(']') {
+                self.index += 1;
+                return Ok(name);
+            }
+
+            name.push(ch);
+        }
+    }
+
+    fn close_group(&mut self) -> Result<(), Diagnostic> {
+        if self.group_depth == 0 {
+            return Err(malformed_regex(self.flag, self.dialect, "unmatched `)`"));
+        }
+        self.group_depth -= 1;
+        Ok(())
+    }
+
+    fn push_escaped_literal(&mut self, ch: char) {
+        self.translated.push('\\');
+        self.translated.push(ch);
+    }
+
+    fn next(&mut self) -> Option<char> {
+        let ch = self.chars.get(self.index).copied()?;
+        self.index += 1;
+        Some(ch)
+    }
+
+    fn peek(&self) -> Option<char> {
+        self.chars.get(self.index).copied()
+    }
 }
 
-fn unsupported_construct(flag: &str, dialect: &str, reason: impl std::fmt::Display) -> Diagnostic {
+fn is_valid_repetition_bound(contents: &str) -> bool {
+    if let Some((left, right)) = contents.split_once(',') {
+        !left.is_empty()
+            && left.chars().all(|ch| ch.is_ascii_digit())
+            && (right.is_empty() || right.chars().all(|ch| ch.is_ascii_digit()))
+    } else {
+        !contents.is_empty() && contents.chars().all(|ch| ch.is_ascii_digit())
+    }
+}
+
+fn posix_named_class_fragment(
+    flag: &str,
+    dialect: RegexDialect,
+    name: &str,
+) -> Result<&'static str, Diagnostic> {
+    match name {
+        "alnum" => Ok("A-Za-z0-9"),
+        "alpha" => Ok("A-Za-z"),
+        "blank" => Ok(r" \t"),
+        "cntrl" => Ok(r"\x00-\x1F\x7F"),
+        "digit" => Ok("0-9"),
+        "graph" => Ok("!-~"),
+        "lower" => Ok("a-z"),
+        "print" => Ok(r"\x20-\x7E"),
+        "punct" => Ok(r"!-/:-@\x5B-\x60{-~"),
+        "space" => Ok(r" \t\r\n\f\x0B"),
+        "upper" => Ok("A-Z"),
+        "xdigit" => Ok("A-Fa-f0-9"),
+        other => Err(unsupported_construct(
+            flag,
+            dialect,
+            format!("unsupported POSIX character class `[:{other}:]`"),
+        )),
+    }
+}
+
+fn unsupported_construct(
+    flag: &str,
+    dialect: RegexDialect,
+    reason: impl std::fmt::Display,
+) -> Diagnostic {
     Diagnostic::new(
-        format!("unsupported construct in {dialect} regex for `{flag}`: {reason}"),
+        format!(
+            "unsupported construct in {} regex for `{flag}`: {reason}",
+            dialect.label()
+        ),
+        1,
+    )
+}
+
+fn malformed_regex(
+    flag: &str,
+    dialect: RegexDialect,
+    reason: impl std::fmt::Display,
+) -> Diagnostic {
+    Diagnostic::new(
+        format!("malformed {} regex for `{flag}`: {reason}", dialect.label()),
         1,
     )
 }
@@ -259,11 +467,66 @@ mod tests {
     }
 
     #[test]
-    fn emacs_subset_rejects_unescaped_grouping() {
-        let error =
-            RegexMatcher::compile("-regex", RegexDialect::Emacs, OsStr::new("\\(src"), false)
-                .unwrap_err();
+    fn gnu_facing_dialects_support_c_locale_named_classes() {
+        for dialect in [
+            RegexDialect::Emacs,
+            RegexDialect::PosixExtended,
+            RegexDialect::PosixBasic,
+        ] {
+            let matcher = RegexMatcher::compile(
+                "-regex",
+                dialect,
+                OsStr::new(".*[[:alpha:]][[:digit:]]"),
+                false,
+            )
+            .unwrap();
 
-        assert!(error.message.contains("failed to compile emacs regex"));
+            assert!(matcher.is_match(OsStr::new("./A7")));
+            assert!(!matcher.is_match(OsStr::new("./é7")));
+        }
+    }
+
+    #[test]
+    fn named_classes_work_in_negated_bracket_expressions() {
+        let matcher = RegexMatcher::compile(
+            "-regex",
+            RegexDialect::PosixExtended,
+            OsStr::new(".*[^[:space:]]\\.txt"),
+            false,
+        )
+        .unwrap();
+
+        assert!(matcher.is_match(OsStr::new("./name.txt")));
+        assert!(!matcher.is_match(OsStr::new("./ .txt")));
+    }
+
+    #[test]
+    fn gnu_facing_dialects_reject_backreferences() {
+        for dialect in [
+            RegexDialect::Emacs,
+            RegexDialect::PosixExtended,
+            RegexDialect::PosixBasic,
+        ] {
+            let error =
+                RegexMatcher::compile("-regex", dialect, OsStr::new("\\1"), false).unwrap_err();
+
+            assert!(error.message.contains(dialect.label()));
+            assert!(error.message.contains("backreferences are out of scope"));
+        }
+    }
+
+    #[test]
+    fn gnu_facing_dialects_reject_collating_and_equivalence_classes() {
+        for pattern in ["[[.ch.]]", "[[=a=]]"] {
+            let error = RegexMatcher::compile(
+                "-regex",
+                RegexDialect::PosixExtended,
+                OsStr::new(pattern),
+                false,
+            )
+            .unwrap_err();
+
+            assert!(error.message.contains("unsupported construct"));
+        }
     }
 }
