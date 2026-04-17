@@ -1,5 +1,5 @@
 use crate::diagnostics::Diagnostic;
-use crate::eval::{ActionOutcome, ActionSink};
+use crate::eval::{ActionOutcome, ActionSink, RuntimeStatus};
 use crate::output::{BrokerMessage, StdoutSink, render_output_bytes};
 use crate::planner::RuntimeAction;
 use crossbeam_channel::Sender;
@@ -140,7 +140,12 @@ impl<'a, W: std::io::Write, E: std::io::Write> OrderedActionSink<'a, W, E> {
         }
     }
 
-    fn enqueue(&mut self, spec: &BatchedExecAction, path: &Path) -> Result<(), Diagnostic> {
+    fn enqueue(
+        &mut self,
+        spec: &BatchedExecAction,
+        path: &Path,
+    ) -> Result<RuntimeStatus, Diagnostic> {
+        let mut status = RuntimeStatus::default();
         let ready = {
             let batch = self.pending.entry(spec.id).or_insert_with(|| {
                 PendingBatch::new(spec.clone(), self.batch_limit, fixed_batch_cost(spec))
@@ -156,6 +161,7 @@ impl<'a, W: std::io::Write, E: std::io::Write> OrderedActionSink<'a, W, E> {
         if let Some(ready) = ready {
             if !run_ready_batch(&ready, self.stderr)? {
                 self.had_action_failures = true;
+                status = status.merge(RuntimeStatus::action_failure());
             }
         }
 
@@ -171,16 +177,18 @@ impl<'a, W: std::io::Write, E: std::io::Write> OrderedActionSink<'a, W, E> {
             Ok(Some(ready)) => {
                 if !run_ready_batch(&ready, self.stderr)? {
                     self.had_action_failures = true;
+                    status = status.merge(RuntimeStatus::action_failure());
                 }
             }
             Ok(None) => {}
             Err(error) => {
                 self.write_diagnostic(&format!("findoxide: {error}"))?;
                 self.had_action_failures = true;
+                status = status.merge(RuntimeStatus::action_failure());
             }
         }
 
-        Ok(())
+        Ok(status)
     }
 
     pub fn write_diagnostic(&mut self, message: &str) -> Result<(), Diagnostic> {
@@ -188,7 +196,12 @@ impl<'a, W: std::io::Write, E: std::io::Write> OrderedActionSink<'a, W, E> {
             .map_err(|error| Diagnostic::new(format!("failed to write stderr: {error}"), 1))
     }
 
-    pub fn flush(&mut self) -> Result<bool, Diagnostic> {
+    pub fn flush(&mut self) -> Result<RuntimeStatus, Diagnostic> {
+        let mut status = if self.had_action_failures {
+            RuntimeStatus::action_failure()
+        } else {
+            RuntimeStatus::default()
+        };
         let pending = std::mem::take(&mut self.pending);
         for (_, batch) in pending {
             if batch.paths.is_empty() {
@@ -201,10 +214,11 @@ impl<'a, W: std::io::Write, E: std::io::Write> OrderedActionSink<'a, W, E> {
             };
             if !run_ready_batch(&ready, self.stderr)? {
                 self.had_action_failures = true;
+                status = status.merge(RuntimeStatus::action_failure());
             }
         }
 
-        Ok(self.had_action_failures)
+        Ok(status)
     }
 }
 
@@ -217,18 +231,18 @@ impl<W: std::io::Write, E: std::io::Write> ActionSink for OrderedActionSink<'_, 
         match action {
             RuntimeAction::Output(_) => self.output.dispatch(action, path),
             RuntimeAction::ExecImmediate(spec) => {
-                run_immediate_ordered(spec, path, self.stderr).map(ActionOutcome::new)
+                run_immediate_ordered(spec, path, self.stderr).map(action_success)
             }
-            RuntimeAction::ExecBatched(spec) => {
-                self.enqueue(spec, path)?;
-                Ok(ActionOutcome::matched_true())
-            }
+            RuntimeAction::ExecBatched(spec) => Ok(ActionOutcome {
+                matched: true,
+                status: self.enqueue(spec, path)?,
+            }),
             RuntimeAction::Delete => match delete_path(path) {
-                Ok(result) => Ok(ActionOutcome::new(result)),
+                Ok(result) => Ok(action_success(result)),
                 Err(error) => {
                     self.write_diagnostic(&format!("findoxide: {}", error.message))?;
                     self.had_action_failures = true;
-                    Ok(ActionOutcome::new(false))
+                    Ok(action_failure(false))
                 }
             },
         }
@@ -261,7 +275,12 @@ impl ParallelActionSink {
         })
     }
 
-    pub fn flush_all(&self) -> Result<bool, Diagnostic> {
+    pub fn flush_all(&self) -> Result<RuntimeStatus, Diagnostic> {
+        let mut status = if self.shared.had_action_failures.load(Ordering::SeqCst) {
+            RuntimeStatus::action_failure()
+        } else {
+            RuntimeStatus::default()
+        };
         let pending = {
             let mut pending = self.shared.pending.lock().map_err(|_| {
                 Diagnostic::new("internal error: parallel exec batch state was poisoned", 1)
@@ -280,13 +299,15 @@ impl ParallelActionSink {
             };
             if !run_parallel_ready_batch(&ready, &self.broker, self.shared.spill_threshold)? {
                 self.mark_action_failure();
+                status = status.merge(RuntimeStatus::action_failure());
             }
         }
 
-        Ok(self.shared.had_action_failures.load(Ordering::SeqCst))
+        Ok(status)
     }
 
-    fn enqueue(&self, spec: &BatchedExecAction, path: &Path) -> Result<(), Diagnostic> {
+    fn enqueue(&self, spec: &BatchedExecAction, path: &Path) -> Result<RuntimeStatus, Diagnostic> {
+        let mut status = RuntimeStatus::default();
         let (ready, push_result) = {
             let mut pending = self.shared.pending.lock().map_err(|_| {
                 Diagnostic::new("internal error: parallel exec batch state was poisoned", 1)
@@ -311,6 +332,7 @@ impl ParallelActionSink {
         if let Some(ready) = ready {
             if !run_parallel_ready_batch(&ready, &self.broker, self.shared.spill_threshold)? {
                 self.mark_action_failure();
+                status = status.merge(RuntimeStatus::action_failure());
             }
         }
 
@@ -318,6 +340,7 @@ impl ParallelActionSink {
             Ok(Some(ready)) => {
                 if !run_parallel_ready_batch(&ready, &self.broker, self.shared.spill_threshold)? {
                     self.mark_action_failure();
+                    status = status.merge(RuntimeStatus::action_failure());
                 }
             }
             Ok(None) => {}
@@ -327,10 +350,11 @@ impl ParallelActionSink {
                     BrokerMessage::Stderr(format!("findoxide: {error}\n").into_bytes()),
                 )?;
                 self.mark_action_failure();
+                status = status.merge(RuntimeStatus::action_failure());
             }
         }
 
-        Ok(())
+        Ok(status)
     }
 
     fn mark_action_failure(&self) {
@@ -354,19 +378,16 @@ impl ActionSink for ParallelActionSink {
                 )?;
                 Ok(ActionOutcome::matched_true())
             }
-            RuntimeAction::ExecImmediate(spec) => run_immediate_parallel(
-                spec,
-                path,
-                &self.broker,
-                self.shared.spill_threshold,
-            )
-            .map(ActionOutcome::new),
-            RuntimeAction::ExecBatched(spec) => {
-                self.enqueue(spec, path)?;
-                Ok(ActionOutcome::matched_true())
+            RuntimeAction::ExecImmediate(spec) => {
+                run_immediate_parallel(spec, path, &self.broker, self.shared.spill_threshold)
+                    .map(action_success)
             }
+            RuntimeAction::ExecBatched(spec) => Ok(ActionOutcome {
+                matched: true,
+                status: self.enqueue(spec, path)?,
+            }),
             RuntimeAction::Delete => match delete_path(path) {
-                Ok(result) => Ok(ActionOutcome::new(result)),
+                Ok(result) => Ok(action_success(result)),
                 Err(error) => {
                     send_broker_message(
                         &self.broker,
@@ -375,10 +396,24 @@ impl ActionSink for ParallelActionSink {
                         ),
                     )?;
                     self.mark_action_failure();
-                    Ok(ActionOutcome::new(false))
+                    Ok(action_failure(false))
                 }
             },
         }
+    }
+}
+
+fn action_success(matched: bool) -> ActionOutcome {
+    ActionOutcome {
+        matched,
+        status: RuntimeStatus::default(),
+    }
+}
+
+fn action_failure(matched: bool) -> ActionOutcome {
+    ActionOutcome {
+        matched,
+        status: RuntimeStatus::action_failure(),
     }
 }
 
@@ -769,9 +804,12 @@ fn os_bytes_len(value: &OsStr) -> usize {
 #[cfg(test)]
 mod tests {
     use super::{
-        BatchLimit, PendingBatch, SpillBuffer, build_batched_argv, compile_batched_exec,
-        delete_path,
+        BatchLimit, OrderedActionSink, ParallelActionSink, PendingBatch, SpillBuffer,
+        build_batched_argv, compile_batched_exec, delete_path,
     };
+    use crate::eval::ActionSink;
+    use crate::planner::RuntimeAction;
+    use crossbeam_channel::unbounded;
     use std::io::Write;
     use std::os::unix::fs as unix_fs;
     use std::path::PathBuf;
@@ -823,5 +861,57 @@ mod tests {
         assert!(delete_path(root.path().join("link.txt").as_path()).unwrap());
         assert!(root.path().join("target.txt").exists());
         assert!(!root.path().join("link.txt").exists());
+    }
+
+    #[test]
+    fn ordered_flush_reports_batched_false_as_action_failure() {
+        let spec = compile_batched_exec(7, &["false".into(), "{}".into()]).unwrap();
+        let path = PathBuf::from("placeholder");
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let mut sink = OrderedActionSink::new(&mut stdout, &mut stderr);
+
+        let outcome = sink
+            .dispatch(&RuntimeAction::ExecBatched(spec), path.as_path())
+            .unwrap();
+
+        assert!(outcome.matched);
+        assert!(!outcome.status.had_action_failures());
+
+        let status = sink.flush().unwrap();
+        assert!(status.had_action_failures());
+    }
+
+    #[test]
+    fn parallel_flush_reports_batched_false_as_action_failure() {
+        let spec = compile_batched_exec(9, &["false".into(), "{}".into()]).unwrap();
+        let path = PathBuf::from("placeholder");
+        let (broker, _rx) = unbounded();
+        let mut sink = ParallelActionSink::new(broker, 4).unwrap();
+
+        let outcome = sink
+            .dispatch(&RuntimeAction::ExecBatched(spec), path.as_path())
+            .unwrap();
+
+        assert!(outcome.matched);
+        assert!(!outcome.status.had_action_failures());
+
+        let status = sink.flush_all().unwrap();
+        assert!(status.had_action_failures());
+    }
+
+    #[test]
+    fn ordered_delete_missing_path_reports_action_failure_status() {
+        let missing = PathBuf::from("definitely-missing-delete-target");
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let mut sink = OrderedActionSink::new(&mut stdout, &mut stderr);
+
+        let outcome = sink
+            .dispatch(&RuntimeAction::Delete, missing.as_path())
+            .unwrap();
+
+        assert!(!outcome.matched);
+        assert!(outcome.status.had_action_failures());
     }
 }

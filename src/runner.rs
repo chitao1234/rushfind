@@ -77,7 +77,7 @@ where
         },
     )?;
 
-    let had_action_failures = sink.flush()?;
+    let had_action_failures = sink.flush()?.had_action_failures();
 
     Ok(RunSummary {
         had_runtime_errors,
@@ -186,7 +186,7 @@ where
                 .map_err(|_| Diagnostic::new("parallel evaluator thread panicked", 1))??;
         }
 
-        had_action_failures = sink.flush_all()?;
+        had_action_failures = sink.flush_all()?.had_action_failures();
         drop(sink);
         drop(broker);
         broker_handle

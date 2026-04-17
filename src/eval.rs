@@ -19,7 +19,7 @@ pub(crate) enum RuntimeControl {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) struct RuntimeStatus {
+pub struct RuntimeStatus {
     had_action_failures: bool,
     control: RuntimeControl,
 }
@@ -107,8 +107,11 @@ pub fn evaluate(
 }
 
 pub trait ActionSink {
-    fn dispatch(&mut self, action: &RuntimeAction, path: &Path)
-    -> Result<ActionOutcome, Diagnostic>;
+    fn dispatch(
+        &mut self,
+        action: &RuntimeAction,
+        path: &Path,
+    ) -> Result<ActionOutcome, Diagnostic>;
 }
 
 pub(crate) fn evaluate_outcome_with_context(
@@ -394,7 +397,9 @@ mod tests {
         fs::write(&path, "hello\n").unwrap();
         let entry = EntryContext::new(path, 0, true);
         let expr = RuntimeExpr::Or(
-            Box::new(RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print))),
+            Box::new(RuntimeExpr::Action(RuntimeAction::Output(
+                OutputAction::Print,
+            ))),
             Box::new(RuntimeExpr::Predicate(RuntimePredicate::True)),
         );
         let mut sink = ScriptedSink {
