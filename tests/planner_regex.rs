@@ -67,6 +67,29 @@ fn invalid_utf8_regex_pattern_is_a_planning_error() {
     assert!(error.message.contains("invalid UTF-8 regex pattern"));
 }
 
+#[test]
+fn emacs_and_posix_extended_report_unsupported_subset_constructs_clearly() {
+    let emacs_error =
+        plan_command(parse_command(&argv(&[".", "-regex", "\\1"])).unwrap(), 1).unwrap_err();
+    assert!(emacs_error.message.contains("emacs"));
+    assert!(emacs_error.message.contains("unsupported construct"));
+
+    let posix_error = plan_command(
+        parse_command(&argv(&[
+            ".",
+            "-regextype",
+            "posix-extended",
+            "-regex",
+            "[[:alpha:]]",
+        ]))
+        .unwrap(),
+        1,
+    )
+    .unwrap_err();
+    assert!(posix_error.message.contains("posix-extended"));
+    assert!(posix_error.message.contains("unsupported construct"));
+}
+
 fn regex_dialects(expr: &RuntimeExpr) -> Vec<RegexDialect> {
     let mut out = Vec::new();
     collect_regex_dialects(expr, &mut out);

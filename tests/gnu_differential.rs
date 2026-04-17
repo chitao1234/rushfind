@@ -195,6 +195,17 @@ fn build_exec_tree() -> tempfile::TempDir {
     root
 }
 
+fn build_regex_tree() -> tempfile::TempDir {
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("src")).unwrap();
+    fs::create_dir(root.path().join("docs")).unwrap();
+    fs::write(root.path().join("src/lib.rs"), "pub fn lib() {}\n").unwrap();
+    fs::write(root.path().join("src/main.rs"), "fn main() {}\n").unwrap();
+    fs::write(root.path().join("README.MD"), "# readme\n").unwrap();
+    fs::write(root.path().join("docs/Guide.txt"), "guide\n").unwrap();
+    root
+}
+
 fn build_delete_tree() -> tempfile::TempDir {
     let root = tempdir().unwrap();
     fs::create_dir(root.path().join("tree")).unwrap();
@@ -1299,4 +1310,53 @@ fn ordered_fractional_used_predicates_match_gnu_find_exactly() {
     ];
 
     assert_matches_gnu_exact(&args);
+}
+
+#[test]
+fn ordered_regex_predicates_match_gnu_find_exactly() {
+    let root = build_regex_tree();
+    let src_alias = OsString::from(format!("{}/src/*", root.path().display()));
+    let readme_alias = OsString::from(format!("{}/readme*", root.path().display()));
+    let args_sets = vec![
+        vec![
+            path_arg(root.path()),
+            "-regex".into(),
+            r".*/\(src\|docs\)/.*".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-regextype".into(),
+            "posix-extended".into(),
+            "-regex".into(),
+            ".*/(src|docs)/.*".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-iregex".into(),
+            ".*/readme\\.md".into(),
+        ],
+        vec![path_arg(root.path()), "-wholename".into(), src_alias],
+        vec![path_arg(root.path()), "-iwholename".into(), readme_alias],
+    ];
+
+    for args in args_sets {
+        assert_matches_gnu_exact(&args);
+    }
+}
+
+#[test]
+fn parallel_regex_predicates_match_gnu_find_as_sets() {
+    let root = build_regex_tree();
+    let args = vec![
+        path_arg(root.path()),
+        "(".into(),
+        "-regex".into(),
+        r".*/\(src\|docs\)/.*".into(),
+        "-o".into(),
+        "-iregex".into(),
+        ".*/readme\\.md".into(),
+        ")".into(),
+    ];
+
+    assert_matches_gnu_as_sets(&args);
 }
