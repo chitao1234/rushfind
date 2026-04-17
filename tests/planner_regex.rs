@@ -41,6 +41,31 @@ fn lowering_uses_default_emacs_until_regextype_changes() {
 }
 
 #[test]
+fn named_classes_are_supported_in_gnu_facing_planning() {
+    let plan = plan_command(
+        parse_command(&argv(&[
+            ".",
+            "-regextype",
+            "posix-extended",
+            "-regex",
+            ".*[[:alpha:]][[:digit:]]",
+            "-regextype",
+            "posix-basic",
+            "-regex",
+            ".*[[:upper:]]",
+        ]))
+        .unwrap(),
+        1,
+    )
+    .unwrap();
+
+    assert_eq!(
+        regex_dialects(&plan.expr),
+        vec![RegexDialect::PosixExtended, RegexDialect::PosixBasic]
+    );
+}
+
+#[test]
 fn unsupported_regextype_is_a_planning_error() {
     let error = plan_command(
         parse_command(&argv(&[".", "-regextype", "sed", "-regex", ".*"])).unwrap(),
@@ -77,26 +102,23 @@ fn invalid_utf8_regex_pattern_is_a_planning_error() {
 }
 
 #[test]
-fn emacs_and_posix_extended_report_unsupported_subset_constructs_clearly() {
-    let emacs_error =
-        plan_command(parse_command(&argv(&[".", "-regex", "\\1"])).unwrap(), 1).unwrap_err();
-    assert!(emacs_error.message.contains("emacs"));
-    assert!(emacs_error.message.contains("unsupported construct"));
+fn gnu_facing_dialects_report_unsupported_constructs_clearly() {
+    for (dialect_name, pattern) in [
+        ("emacs", "\\1"),
+        ("posix-extended", "\\1"),
+        ("posix-basic", "\\1"),
+        ("posix-extended", "[[.ch.]]"),
+        ("posix-basic", "[[=a=]]"),
+    ] {
+        let error = plan_command(
+            parse_command(&argv(&[".", "-regextype", dialect_name, "-regex", pattern])).unwrap(),
+            1,
+        )
+        .unwrap_err();
 
-    let posix_error = plan_command(
-        parse_command(&argv(&[
-            ".",
-            "-regextype",
-            "posix-extended",
-            "-regex",
-            "[[:alpha:]]",
-        ]))
-        .unwrap(),
-        1,
-    )
-    .unwrap_err();
-    assert!(posix_error.message.contains("posix-extended"));
-    assert!(posix_error.message.contains("unsupported construct"));
+        assert!(error.message.contains(dialect_name));
+        assert!(error.message.contains("unsupported construct"));
+    }
 }
 
 fn regex_dialects(expr: &RuntimeExpr) -> Vec<RegexDialect> {

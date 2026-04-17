@@ -85,6 +85,87 @@ fn non_utf8_candidate_paths_are_matched_without_lossy_conversion() {
     assert!(evaluate(&expr, &entry, FollowMode::Physical, &mut sink).unwrap());
 }
 
+#[test]
+fn posix_basic_supports_bre_escaped_grouping_alternation_and_repetition() {
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("src")).unwrap();
+    let lib_path = root.path().join("src/lib.rs");
+    let main_path = root.path().join("src/main.rs");
+    fs::write(&lib_path, "pub fn lib() {}\n").unwrap();
+    fs::write(&main_path, "fn main() {}\n").unwrap();
+
+    let matcher = RegexMatcher::compile(
+        "-regex",
+        RegexDialect::PosixBasic,
+        OsStr::new(r".*/src/\(lib\|main\)\.rs"),
+        false,
+    )
+    .unwrap();
+    let expr = RuntimeExpr::Predicate(RuntimePredicate::Regex(matcher));
+    let mut sink = RecordingSink::default();
+
+    assert!(
+        evaluate(
+            &expr,
+            &entry_for(&lib_path, 1),
+            FollowMode::Physical,
+            &mut sink
+        )
+        .unwrap()
+    );
+    assert!(
+        evaluate(
+            &expr,
+            &entry_for(&main_path, 1),
+            FollowMode::Physical,
+            &mut sink
+        )
+        .unwrap()
+    );
+
+    let bounded = RegexMatcher::compile(
+        "-regex",
+        RegexDialect::PosixBasic,
+        OsStr::new(r".*/src/[[:alpha:]]\{3\}\.rs"),
+        false,
+    )
+    .unwrap();
+    let bounded_expr = RuntimeExpr::Predicate(RuntimePredicate::Regex(bounded));
+
+    assert!(
+        evaluate(
+            &bounded_expr,
+            &entry_for(&lib_path, 1),
+            FollowMode::Physical,
+            &mut sink,
+        )
+        .unwrap()
+    );
+    assert!(
+        !evaluate(
+            &bounded_expr,
+            &entry_for(&main_path, 1),
+            FollowMode::Physical,
+            &mut sink,
+        )
+        .unwrap()
+    );
+}
+
+#[test]
+fn gnu_facing_named_classes_use_ascii_c_locale_semantics() {
+    let ascii = RegexMatcher::compile(
+        "-regex",
+        RegexDialect::PosixExtended,
+        OsStr::new(r".*/[[:alpha:]][[:digit:]]\.txt"),
+        false,
+    )
+    .unwrap();
+
+    assert!(ascii.is_match(OsStr::new("./A7.txt")));
+    assert!(!ascii.is_match(OsStr::new("./é7.txt")));
+}
+
 fn entry_for(path: &Path, depth: usize) -> EntryContext {
     EntryContext::new(PathBuf::from(path), depth, true)
 }
