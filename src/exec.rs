@@ -1,5 +1,5 @@
 use crate::diagnostics::Diagnostic;
-use crate::eval::ActionSink;
+use crate::eval::{ActionOutcome, ActionSink};
 use crate::output::{BrokerMessage, StdoutSink, render_output_bytes};
 use crate::planner::RuntimeAction;
 use crossbeam_channel::Sender;
@@ -209,20 +209,26 @@ impl<'a, W: std::io::Write, E: std::io::Write> OrderedActionSink<'a, W, E> {
 }
 
 impl<W: std::io::Write, E: std::io::Write> ActionSink for OrderedActionSink<'_, W, E> {
-    fn dispatch(&mut self, action: &RuntimeAction, path: &Path) -> Result<bool, Diagnostic> {
+    fn dispatch(
+        &mut self,
+        action: &RuntimeAction,
+        path: &Path,
+    ) -> Result<ActionOutcome, Diagnostic> {
         match action {
             RuntimeAction::Output(_) => self.output.dispatch(action, path),
-            RuntimeAction::ExecImmediate(spec) => run_immediate_ordered(spec, path, self.stderr),
+            RuntimeAction::ExecImmediate(spec) => {
+                run_immediate_ordered(spec, path, self.stderr).map(ActionOutcome::new)
+            }
             RuntimeAction::ExecBatched(spec) => {
                 self.enqueue(spec, path)?;
-                Ok(true)
+                Ok(ActionOutcome::matched_true())
             }
             RuntimeAction::Delete => match delete_path(path) {
-                Ok(result) => Ok(result),
+                Ok(result) => Ok(ActionOutcome::new(result)),
                 Err(error) => {
                     self.write_diagnostic(&format!("findoxide: {}", error.message))?;
                     self.had_action_failures = true;
-                    Ok(false)
+                    Ok(ActionOutcome::new(false))
                 }
             },
         }
@@ -335,24 +341,32 @@ impl ParallelActionSink {
 }
 
 impl ActionSink for ParallelActionSink {
-    fn dispatch(&mut self, action: &RuntimeAction, path: &Path) -> Result<bool, Diagnostic> {
+    fn dispatch(
+        &mut self,
+        action: &RuntimeAction,
+        path: &Path,
+    ) -> Result<ActionOutcome, Diagnostic> {
         match action {
             RuntimeAction::Output(output) => {
                 send_broker_message(
                     &self.broker,
                     BrokerMessage::Stdout(render_output_bytes(*output, path)),
                 )?;
-                Ok(true)
+                Ok(ActionOutcome::matched_true())
             }
-            RuntimeAction::ExecImmediate(spec) => {
-                run_immediate_parallel(spec, path, &self.broker, self.shared.spill_threshold)
-            }
+            RuntimeAction::ExecImmediate(spec) => run_immediate_parallel(
+                spec,
+                path,
+                &self.broker,
+                self.shared.spill_threshold,
+            )
+            .map(ActionOutcome::new),
             RuntimeAction::ExecBatched(spec) => {
                 self.enqueue(spec, path)?;
-                Ok(true)
+                Ok(ActionOutcome::matched_true())
             }
             RuntimeAction::Delete => match delete_path(path) {
-                Ok(result) => Ok(result),
+                Ok(result) => Ok(ActionOutcome::new(result)),
                 Err(error) => {
                     send_broker_message(
                         &self.broker,
@@ -361,7 +375,7 @@ impl ActionSink for ParallelActionSink {
                         ),
                     )?;
                     self.mark_action_failure();
-                    Ok(false)
+                    Ok(ActionOutcome::new(false))
                 }
             },
         }

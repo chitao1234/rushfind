@@ -11,6 +11,69 @@ use std::ffi::OsStr;
 use std::path::Path;
 use std::sync::Arc;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum RuntimeControl {
+    #[default]
+    Continue,
+    StopRequested,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct RuntimeStatus {
+    had_action_failures: bool,
+    control: RuntimeControl,
+}
+
+impl RuntimeStatus {
+    pub(crate) fn action_failure() -> Self {
+        Self {
+            had_action_failures: true,
+            control: RuntimeControl::Continue,
+        }
+    }
+
+    pub(crate) fn merge(self, other: Self) -> Self {
+        Self {
+            had_action_failures: self.had_action_failures || other.had_action_failures,
+            control: match (self.control, other.control) {
+                (RuntimeControl::StopRequested, _) | (_, RuntimeControl::StopRequested) => {
+                    RuntimeControl::StopRequested
+                }
+                _ => RuntimeControl::Continue,
+            },
+        }
+    }
+
+    pub(crate) fn had_action_failures(self) -> bool {
+        self.had_action_failures
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActionOutcome {
+    pub(crate) matched: bool,
+    pub(crate) status: RuntimeStatus,
+}
+
+impl ActionOutcome {
+    pub(crate) fn new(matched: bool) -> Self {
+        Self {
+            matched,
+            status: RuntimeStatus::default(),
+        }
+    }
+
+    pub(crate) fn matched_true() -> Self {
+        Self::new(true)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct EvalOutcome {
+    pub(crate) matched: bool,
+    pub(crate) status: RuntimeStatus,
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct EvalContext {
     mount_snapshot: Option<Arc<MountSnapshot>>,
@@ -44,7 +107,74 @@ pub fn evaluate(
 }
 
 pub trait ActionSink {
-    fn dispatch(&mut self, action: &RuntimeAction, path: &Path) -> Result<bool, Diagnostic>;
+    fn dispatch(&mut self, action: &RuntimeAction, path: &Path)
+    -> Result<ActionOutcome, Diagnostic>;
+}
+
+pub(crate) fn evaluate_outcome_with_context(
+    expr: &RuntimeExpr,
+    entry: &EntryContext,
+    follow_mode: FollowMode,
+    context: &EvalContext,
+    sink: &mut dyn ActionSink,
+) -> Result<EvalOutcome, Diagnostic> {
+    match expr {
+        RuntimeExpr::And(items) => {
+            let mut status = RuntimeStatus::default();
+            for item in items {
+                let outcome =
+                    evaluate_outcome_with_context(item, entry, follow_mode, context, sink)?;
+                status = status.merge(outcome.status);
+                if !outcome.matched {
+                    return Ok(EvalOutcome {
+                        matched: false,
+                        status,
+                    });
+                }
+            }
+
+            Ok(EvalOutcome {
+                matched: true,
+                status,
+            })
+        }
+        RuntimeExpr::Or(left, right) => {
+            let left_outcome =
+                evaluate_outcome_with_context(left, entry, follow_mode, context, sink)?;
+            if left_outcome.matched {
+                return Ok(left_outcome);
+            }
+
+            let right_outcome =
+                evaluate_outcome_with_context(right, entry, follow_mode, context, sink)?;
+            Ok(EvalOutcome {
+                matched: right_outcome.matched,
+                status: left_outcome.status.merge(right_outcome.status),
+            })
+        }
+        RuntimeExpr::Not(inner) => {
+            let inner = evaluate_outcome_with_context(inner, entry, follow_mode, context, sink)?;
+            Ok(EvalOutcome {
+                matched: !inner.matched,
+                status: inner.status,
+            })
+        }
+        RuntimeExpr::Predicate(predicate) => Ok(EvalOutcome {
+            matched: evaluate_predicate(predicate, entry, follow_mode, context)?,
+            status: RuntimeStatus::default(),
+        }),
+        RuntimeExpr::Action(action) => {
+            let outcome = sink.dispatch(action, &entry.path)?;
+            Ok(EvalOutcome {
+                matched: outcome.matched,
+                status: outcome.status,
+            })
+        }
+        RuntimeExpr::Barrier => Ok(EvalOutcome {
+            matched: true,
+            status: RuntimeStatus::default(),
+        }),
+    }
 }
 
 pub(crate) fn evaluate_with_context(
@@ -54,35 +184,7 @@ pub(crate) fn evaluate_with_context(
     context: &EvalContext,
     sink: &mut dyn ActionSink,
 ) -> Result<bool, Diagnostic> {
-    match expr {
-        RuntimeExpr::And(items) => {
-            for item in items {
-                if !evaluate_with_context(item, entry, follow_mode, context, sink)? {
-                    return Ok(false);
-                }
-            }
-            Ok(true)
-        }
-        RuntimeExpr::Or(left, right) => {
-            if evaluate_with_context(left, entry, follow_mode, context, sink)? {
-                Ok(true)
-            } else {
-                evaluate_with_context(right, entry, follow_mode, context, sink)
-            }
-        }
-        RuntimeExpr::Not(inner) => Ok(!evaluate_with_context(
-            inner,
-            entry,
-            follow_mode,
-            context,
-            sink,
-        )?),
-        RuntimeExpr::Predicate(predicate) => {
-            evaluate_predicate(predicate, entry, follow_mode, context)
-        }
-        RuntimeExpr::Action(action) => sink.dispatch(action, &entry.path),
-        RuntimeExpr::Barrier => Ok(true),
-    }
+    Ok(evaluate_outcome_with_context(expr, entry, follow_mode, context, sink)?.matched)
 }
 
 pub(crate) fn evaluate_predicate(
@@ -218,18 +320,131 @@ fn matches_newer(
 
 #[cfg(test)]
 mod tests {
-    use super::{EvalContext, evaluate, evaluate_with_context};
+    use super::{
+        ActionOutcome, ActionSink, EvalContext, RuntimeStatus, evaluate,
+        evaluate_outcome_with_context, evaluate_with_context,
+    };
+    use crate::diagnostics::Diagnostic;
     use crate::entry::test_support::CountingReader;
     use crate::entry::{AccessMode, EntryContext, EntryReader};
     use crate::follow::FollowMode;
     use crate::mounts::MountSnapshot;
     use crate::output::RecordingSink;
     use crate::parser::parse_command;
-    use crate::planner::{ExecutionPlan, RuntimeExpr, RuntimePredicate, plan_command};
+    use crate::planner::{
+        ExecutionPlan, OutputAction, RuntimeAction, RuntimeExpr, RuntimePredicate, plan_command,
+    };
+    use std::collections::VecDeque;
     use std::ffi::OsString;
     use std::fs;
     use std::os::unix::fs as unix_fs;
     use tempfile::tempdir;
+
+    #[derive(Default)]
+    struct ScriptedSink {
+        scripted: VecDeque<ActionOutcome>,
+    }
+
+    impl ActionSink for ScriptedSink {
+        fn dispatch(
+            &mut self,
+            _action: &RuntimeAction,
+            _path: &std::path::Path,
+        ) -> Result<ActionOutcome, Diagnostic> {
+            self.scripted
+                .pop_front()
+                .ok_or_else(|| Diagnostic::new("test sink ran out of scripted outcomes", 1))
+        }
+    }
+
+    #[test]
+    fn action_failure_status_survives_and_short_circuit() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("file.txt");
+        fs::write(&path, "hello\n").unwrap();
+        let entry = EntryContext::new(path, 0, true);
+        let expr = RuntimeExpr::And(vec![
+            RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)),
+            RuntimeExpr::Predicate(RuntimePredicate::True),
+        ]);
+        let mut sink = ScriptedSink {
+            scripted: VecDeque::from([ActionOutcome {
+                matched: false,
+                status: RuntimeStatus::action_failure(),
+            }]),
+        };
+
+        let outcome = evaluate_outcome_with_context(
+            &expr,
+            &entry,
+            FollowMode::Physical,
+            &EvalContext::default(),
+            &mut sink,
+        )
+        .unwrap();
+
+        assert!(!outcome.matched);
+        assert!(outcome.status.had_action_failures());
+    }
+
+    #[test]
+    fn or_keeps_status_from_false_left_branch_before_true_right_branch() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("file.txt");
+        fs::write(&path, "hello\n").unwrap();
+        let entry = EntryContext::new(path, 0, true);
+        let expr = RuntimeExpr::Or(
+            Box::new(RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print))),
+            Box::new(RuntimeExpr::Predicate(RuntimePredicate::True)),
+        );
+        let mut sink = ScriptedSink {
+            scripted: VecDeque::from([ActionOutcome {
+                matched: false,
+                status: RuntimeStatus::action_failure(),
+            }]),
+        };
+
+        let outcome = evaluate_outcome_with_context(
+            &expr,
+            &entry,
+            FollowMode::Physical,
+            &EvalContext::default(),
+            &mut sink,
+        )
+        .unwrap();
+
+        assert!(outcome.matched);
+        assert!(outcome.status.had_action_failures());
+    }
+
+    #[test]
+    fn not_inverts_truth_without_dropping_status() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("file.txt");
+        fs::write(&path, "hello\n").unwrap();
+        let entry = EntryContext::new(path, 0, true);
+        let expr = RuntimeExpr::Not(Box::new(RuntimeExpr::Action(RuntimeAction::Output(
+            OutputAction::Print,
+        ))));
+        let mut sink = ScriptedSink {
+            scripted: VecDeque::from([ActionOutcome {
+                matched: false,
+                status: RuntimeStatus::action_failure(),
+            }]),
+        };
+
+        let outcome = evaluate_outcome_with_context(
+            &expr,
+            &entry,
+            FollowMode::Physical,
+            &EvalContext::default(),
+            &mut sink,
+        )
+        .unwrap();
+
+        assert!(outcome.matched);
+        assert!(outcome.status.had_action_failures());
+    }
 
     #[test]
     fn planned_name_mismatch_skips_later_metadata_predicate() {

@@ -1,5 +1,5 @@
 use crate::diagnostics::Diagnostic;
-use crate::eval::ActionSink;
+use crate::eval::{ActionOutcome, ActionSink};
 use crate::planner::{OutputAction, RuntimeAction};
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use std::io::Write;
@@ -71,7 +71,11 @@ impl<'a, W: Write> StdoutSink<'a, W> {
 }
 
 impl<'a, W: Write> ActionSink for StdoutSink<'a, W> {
-    fn dispatch(&mut self, action: &RuntimeAction, path: &Path) -> Result<bool, Diagnostic> {
+    fn dispatch(
+        &mut self,
+        action: &RuntimeAction,
+        path: &Path,
+    ) -> Result<ActionOutcome, Diagnostic> {
         let RuntimeAction::Output(output) = action else {
             return Err(Diagnostic::new(
                 "internal error: plain stdout sink cannot execute runtime actions",
@@ -82,7 +86,7 @@ impl<'a, W: Write> ActionSink for StdoutSink<'a, W> {
         self.writer
             .write_all(&render_output_bytes(*output, path))
             .map_err(|error| Diagnostic::new(format!("failed to write stdout: {error}"), 1))?;
-        Ok(true)
+        Ok(ActionOutcome::matched_true())
     }
 }
 
@@ -98,7 +102,11 @@ impl RecordingSink {
 }
 
 impl ActionSink for RecordingSink {
-    fn dispatch(&mut self, action: &RuntimeAction, path: &Path) -> Result<bool, Diagnostic> {
+    fn dispatch(
+        &mut self,
+        action: &RuntimeAction,
+        path: &Path,
+    ) -> Result<ActionOutcome, Diagnostic> {
         let RuntimeAction::Output(output) = action else {
             return Err(Diagnostic::new(
                 "internal error: recording sink cannot execute runtime actions",
@@ -108,6 +116,6 @@ impl ActionSink for RecordingSink {
 
         self.bytes
             .extend_from_slice(&render_output_bytes(*output, path));
-        Ok(true)
+        Ok(ActionOutcome::matched_true())
     }
 }
