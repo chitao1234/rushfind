@@ -1345,6 +1345,38 @@ fn ordered_regex_predicates_match_gnu_find_exactly() {
 }
 
 #[test]
+fn ordered_expanded_regex_subset_matches_gnu_find_exactly() {
+    let root = build_regex_tree();
+    let args_sets = vec![
+        vec![
+            path_arg(root.path()),
+            "-regextype".into(),
+            "posix-basic".into(),
+            "-regex".into(),
+            r".*/src/\(lib\|main\)\.rs".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-regextype".into(),
+            "posix-basic".into(),
+            "-regex".into(),
+            r".*/src/[[:alpha:]]\{3\}\.rs".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-regextype".into(),
+            "posix-extended".into(),
+            "-regex".into(),
+            r".*/[[:upper:]][[:alpha:]]*\.MD".into(),
+        ],
+    ];
+
+    for args in args_sets {
+        assert_matches_gnu_exact(&args);
+    }
+}
+
+#[test]
 fn parallel_regex_predicates_match_gnu_find_as_sets() {
     let root = build_regex_tree();
     let args = vec![
@@ -1355,6 +1387,27 @@ fn parallel_regex_predicates_match_gnu_find_as_sets() {
         "-o".into(),
         "-iregex".into(),
         ".*/readme\\.md".into(),
+        ")".into(),
+    ];
+
+    assert_matches_gnu_as_sets(&args);
+}
+
+#[test]
+fn parallel_expanded_regex_subset_matches_gnu_find_as_sets() {
+    let root = build_regex_tree();
+    let args = vec![
+        path_arg(root.path()),
+        "(".into(),
+        "-regextype".into(),
+        "posix-basic".into(),
+        "-regex".into(),
+        r".*/src/\(lib\|main\)\.rs".into(),
+        "-o".into(),
+        "-regextype".into(),
+        "posix-extended".into(),
+        "-regex".into(),
+        r".*/[[:upper:]][[:alpha:]]*\.MD".into(),
         ")".into(),
     ];
 
