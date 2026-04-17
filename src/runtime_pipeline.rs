@@ -39,6 +39,13 @@ impl SubtreeBarrierTracker {
     pub(crate) fn is_released(&self, barrier: SubtreeBarrierId) -> bool {
         self.open_descendants.get(&barrier).copied().unwrap_or(0) == 0
     }
+
+    pub(crate) fn may_grant(&self, ticket: &EntryTicket) -> bool {
+        match ticket.block_on_subtree {
+            Some(barrier) => self.is_released(barrier),
+            None => true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -477,5 +484,22 @@ mod tests {
 
         tracker.finish_descendant(barrier);
         assert!(tracker.is_released(barrier));
+    }
+
+    #[test]
+    fn relaxed_grant_queue_holds_parent_until_its_barrier_is_released() {
+        let barrier = super::SubtreeBarrierId(11);
+        let mut tracker = super::SubtreeBarrierTracker::default();
+        tracker.register_descendant(barrier);
+
+        let parent = super::EntryTicket {
+            sequence: 5,
+            ancestor_barriers: Vec::new(),
+            block_on_subtree: Some(barrier),
+        };
+
+        assert!(!tracker.may_grant(&parent));
+        tracker.finish_descendant(barrier);
+        assert!(tracker.may_grant(&parent));
     }
 }

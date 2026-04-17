@@ -275,6 +275,13 @@ impl ParallelActionSink {
         })
     }
 
+    pub(crate) fn execute(
+        &self,
+        request: &crate::runtime_pipeline::ActionRequest,
+    ) -> Result<ActionOutcome, Diagnostic> {
+        self.execute_action(request.action(), request.path())
+    }
+
     pub fn flush_all(&self) -> Result<RuntimeStatus, Diagnostic> {
         let mut status = if self.shared.had_action_failures.load(Ordering::SeqCst) {
             RuntimeStatus::action_failure()
@@ -362,11 +369,9 @@ impl ParallelActionSink {
             .had_action_failures
             .store(true, Ordering::SeqCst);
     }
-}
 
-impl ActionSink for ParallelActionSink {
-    fn dispatch(
-        &mut self,
+    fn execute_action(
+        &self,
         action: &RuntimeAction,
         path: &Path,
     ) -> Result<ActionOutcome, Diagnostic> {
@@ -400,6 +405,16 @@ impl ActionSink for ParallelActionSink {
                 }
             },
         }
+    }
+}
+
+impl ActionSink for ParallelActionSink {
+    fn dispatch(
+        &mut self,
+        action: &RuntimeAction,
+        path: &Path,
+    ) -> Result<ActionOutcome, Diagnostic> {
+        self.execute_action(action, path)
     }
 }
 

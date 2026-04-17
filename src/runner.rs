@@ -3,7 +3,10 @@ use crate::eval::{ActionSink, EvalContext, RuntimeStatus, evaluate_with_context}
 use crate::mounts::MountSnapshot;
 use crate::output::{BrokerMessage, spawn_broker};
 use crate::planner::{ExecutionMode, ExecutionPlan, RuntimeExpr, TraversalOrder};
-use crate::runtime_pipeline::{EvalStep, OrderedReadyQueue, begin_entry_eval, resume_entry_eval};
+use crate::runtime_pipeline::{
+    EntryTicket, EvalStep, OrderedReadyQueue, SubtreeBarrierTracker, begin_entry_eval,
+    resume_entry_eval,
+};
 use crate::traversal_control::{TraversalControl, evaluate_for_traversal_with_context};
 use crate::walker::{WalkEvent, walk_ordered, walk_parallel};
 use crossbeam_channel::unbounded;
@@ -266,46 +269,42 @@ where
 {
     let eval_context = build_eval_context(plan)?;
     let worker_count = plan.runtime_policy.requested_workers;
-    let evaluator_count =
-        if plan.traversal.order == crate::planner::TraversalOrder::DepthFirstPostOrder {
-            1
-        } else {
-            worker_count
-        };
     let mut had_runtime_errors = false;
     let mut had_action_failures = false;
 
     std::thread::scope(|scope| -> Result<(), Diagnostic> {
         let (broker, broker_handle) = spawn_broker(scope, stdout, stderr);
-        let (entry_tx, entry_rx) = unbounded();
+        let (work_tx, work_rx) = unbounded::<crate::walker::ScheduledEntry>();
+        let (ready_tx, ready_rx) = unbounded::<Result<(EntryTicket, EvalStep), Diagnostic>>();
         let sink = crate::exec::ParallelActionSink::new(broker.clone(), worker_count)?;
 
         let mut evaluators = Vec::new();
-        for _ in 0..evaluator_count {
-            let entry_rx = entry_rx.clone();
+        for _ in 0..worker_count {
+            let work_rx = work_rx.clone();
+            let ready_tx = ready_tx.clone();
             let expr = plan.expr.clone();
             let eval_context = eval_context.clone();
-            let mut sink = sink.clone();
             let follow_mode = plan.follow_mode;
             evaluators.push(scope.spawn(move || -> Result<(), Diagnostic> {
-                while let Ok(entry) = entry_rx.recv() {
-                    let _ = evaluate_with_context(
-                        &expr,
-                        &entry,
-                        follow_mode,
-                        &eval_context,
-                        &mut sink,
-                    )?;
+                while let Ok(item) = work_rx.recv() {
+                    let ready = begin_entry_eval(&expr, &item.entry, follow_mode, &eval_context)
+                        .map(|step| (item.ticket, step));
+                    ready_tx.send(ready).map_err(|_| {
+                        Diagnostic::new("internal error: parallel ready queue is unavailable", 1)
+                    })?;
                 }
                 Ok(())
             }));
         }
-        drop(entry_rx);
+        drop(work_rx);
+        drop(ready_tx);
 
         let traversal_control = plan.traversal_control.clone();
         let control_context = eval_context.clone();
         let follow_mode = plan.follow_mode;
         let traversal_order = plan.traversal.order;
+        let mut barriers = SubtreeBarrierTracker::default();
+        let mut buffered: Vec<(EntryTicket, EvalStep)> = Vec::new();
         for event in walk_parallel(
             &plan.start_paths,
             plan.follow_mode,
@@ -323,9 +322,12 @@ where
         ) {
             match event {
                 WalkEvent::Entry(item) | WalkEvent::DirectoryComplete(item) => {
-                    let entry = item.entry;
-                    if entry.depth >= plan.traversal.min_depth {
-                        entry_tx.send(entry).map_err(|_| {
+                    if item.entry.depth >= plan.traversal.min_depth {
+                        for barrier in &item.ticket.ancestor_barriers {
+                            barriers.register_descendant(*barrier);
+                        }
+
+                        work_tx.send(item).map_err(|_| {
                             Diagnostic::new(
                                 "internal error: parallel evaluator channel is unavailable",
                                 1,
@@ -346,14 +348,59 @@ where
             }
         }
 
-        drop(entry_tx);
+        drop(work_tx);
+        for ready in ready_rx {
+            let ready = ready?;
+            buffered.push(ready);
+
+            let mut made_progress = true;
+            while made_progress {
+                made_progress = false;
+                let mut index = 0;
+                while index < buffered.len() {
+                    if !barriers.may_grant(&buffered[index].0) {
+                        index += 1;
+                        continue;
+                    }
+
+                    let (ticket, mut step) = buffered.swap_remove(index);
+                    loop {
+                        match step {
+                            EvalStep::Complete(outcome) => {
+                                had_action_failures |= outcome.status.had_action_failures();
+                                for barrier in &ticket.ancestor_barriers {
+                                    barriers.finish_descendant(*barrier);
+                                }
+                                break;
+                            }
+                            EvalStep::PendingAction {
+                                request,
+                                continuation,
+                            } => {
+                                let outcome = sink.execute(&request)?;
+                                step = resume_entry_eval(continuation, outcome, &eval_context)?;
+                            }
+                        }
+                    }
+                    made_progress = true;
+                }
+            }
+        }
+
+        if !buffered.is_empty() {
+            return Err(Diagnostic::new(
+                "internal error: parallel grant queue did not fully drain",
+                1,
+            ));
+        }
+
         for handle in evaluators {
             handle
                 .join()
                 .map_err(|_| Diagnostic::new("parallel evaluator thread panicked", 1))??;
         }
 
-        had_action_failures = sink.flush_all()?.had_action_failures();
+        had_action_failures |= sink.flush_all()?.had_action_failures();
         drop(sink);
         drop(broker);
         broker_handle

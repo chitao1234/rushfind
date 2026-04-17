@@ -113,3 +113,19 @@ fn parallel_delete_removes_the_same_tree_shape_with_relaxed_ordering() {
     assert_eq!(output.status.code(), Some(0));
     assert!(fs::read_dir(&tree).unwrap().next().is_none());
 }
+
+#[test]
+fn parallel_depth_delete_keeps_descendant_before_parent_behavior_with_multiple_evaluators() {
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("dir")).unwrap();
+    fs::write(root.path().join("dir/file.txt"), "child\n").unwrap();
+
+    let output = cargo_bin_output_with_timeout(
+        &[path_arg(root.path()), "-delete".into()],
+        4,
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(!root.path().join("dir").exists());
+}
