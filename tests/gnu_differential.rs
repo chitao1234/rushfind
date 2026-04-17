@@ -1369,6 +1369,13 @@ fn ordered_expanded_regex_subset_matches_gnu_find_exactly() {
             "-regex".into(),
             r".*/[[:upper:]][[:alpha:]]*\.MD".into(),
         ],
+        vec![
+            path_arg(root.path()),
+            "-regextype".into(),
+            "emacs".into(),
+            "-regex".into(),
+            r".*/[[:upper:]][[:alpha:]]*\.MD".into(),
+        ],
     ];
 
     for args in args_sets {
@@ -1406,6 +1413,11 @@ fn parallel_expanded_regex_subset_matches_gnu_find_as_sets() {
         "-o".into(),
         "-regextype".into(),
         "posix-extended".into(),
+        "-regex".into(),
+        r".*/[[:upper:]][[:alpha:]]*\.MD".into(),
+        "-o".into(),
+        "-regextype".into(),
+        "emacs".into(),
         "-regex".into(),
         r".*/[[:upper:]][[:alpha:]]*\.MD".into(),
         ")".into(),
