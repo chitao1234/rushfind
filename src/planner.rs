@@ -283,6 +283,8 @@ fn lower_predicate(
             pattern,
             case_insensitive,
         })),
+        Predicate::Regex { .. } => Err(Diagnostic::unsupported("unsupported: -regex")),
+        Predicate::RegexType(_) => Err(Diagnostic::unsupported("unsupported: -regextype")),
         Predicate::FsType(type_name) => {
             runtime.mount_snapshot = true;
             Ok(RuntimeExpr::Predicate(RuntimePredicate::FsType(type_name)))

@@ -204,16 +204,28 @@ impl<'a> Parser<'a> {
                 pattern: self.take_os_string("-iname")?,
                 case_insensitive: true,
             })
-        } else if token.matches("-path") {
+        } else if token.matches("-path") || token.matches("-wholename") {
             Expr::Predicate(Predicate::Path {
-                pattern: self.take_os_string("-path")?,
+                pattern: self.take_os_string(token_display.as_str())?,
                 case_insensitive: false,
             })
-        } else if token.matches("-ipath") {
+        } else if token.matches("-ipath") || token.matches("-iwholename") {
             Expr::Predicate(Predicate::Path {
-                pattern: self.take_os_string("-ipath")?,
+                pattern: self.take_os_string(token_display.as_str())?,
                 case_insensitive: true,
             })
+        } else if token.matches("-regex") {
+            Expr::Predicate(Predicate::Regex {
+                pattern: self.take_os_string("-regex")?,
+                case_insensitive: false,
+            })
+        } else if token.matches("-iregex") {
+            Expr::Predicate(Predicate::Regex {
+                pattern: self.take_os_string("-iregex")?,
+                case_insensitive: true,
+            })
+        } else if token.matches("-regextype") {
+            Expr::Predicate(Predicate::RegexType(self.take_os_string("-regextype")?))
         } else if token.matches("-fstype") {
             Expr::Predicate(Predicate::FsType(self.take_os_string("-fstype")?))
         } else if token.matches("-lname") {

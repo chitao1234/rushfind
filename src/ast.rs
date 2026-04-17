@@ -41,6 +41,11 @@ pub enum Predicate {
         pattern: OsString,
         case_insensitive: bool,
     },
+    Regex {
+        pattern: OsString,
+        case_insensitive: bool,
+    },
+    RegexType(OsString),
     FsType(OsString),
     Inum(OsString),
     Links(OsString),
