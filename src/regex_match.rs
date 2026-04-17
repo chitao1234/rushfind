@@ -74,6 +74,7 @@ impl RegexMatcher {
         };
         let compiled = RegexBuilder::new(&format!(r"\A(?:{})\z", translated_pattern))
             .case_insensitive(case_insensitive)
+            .unicode(false)
             .build()
             .map_err(|error| {
                 Diagnostic::new(

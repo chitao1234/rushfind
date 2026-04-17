@@ -162,6 +162,17 @@ fn access_predicates_are_reorderable_inside_read_only_and_segments() {
 }
 
 #[test]
+fn regex_sorts_after_path_but_before_metadata_checks() {
+    let ast = parse_command(&argv(&[
+        ".", "-uid", "0", "-regex", ".*\\.rs", "-path", "./src/*",
+    ]))
+    .unwrap();
+    let plan = plan_command(ast, 1).unwrap();
+
+    assert_eq!(predicate_labels(&plan.expr), vec!["path", "regex", "uid"]);
+}
+
+#[test]
 fn exec_actions_are_optimizer_barriers() {
     let ast = parse_command(&argv(&[
         ".", "-name", "*.rs", "-exec", "echo", "{}", ";", "-uid", "0",
