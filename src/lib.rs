@@ -19,6 +19,7 @@ pub mod pattern;
 pub mod perm;
 pub mod planner;
 pub mod runner;
+pub(crate) mod runtime_pipeline;
 pub(crate) mod runtime_policy;
 pub mod size;
 pub mod time;

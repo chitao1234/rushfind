@@ -6,6 +6,7 @@ use crate::follow::FollowMode;
 use crate::mounts::MountSnapshot;
 use crate::pattern::matches_pattern;
 use crate::planner::{RuntimeAction, RuntimeExpr, RuntimePredicate};
+use crate::runtime_pipeline::{EvalStep, begin_entry_eval, resume_entry_eval};
 use crate::time::{NewerMatcher, Timestamp, TimestampKind};
 use std::ffi::OsStr;
 use std::path::Path;
@@ -121,62 +122,18 @@ pub(crate) fn evaluate_outcome_with_context(
     context: &EvalContext,
     sink: &mut dyn ActionSink,
 ) -> Result<EvalOutcome, Diagnostic> {
-    match expr {
-        RuntimeExpr::And(items) => {
-            let mut status = RuntimeStatus::default();
-            for item in items {
-                let outcome =
-                    evaluate_outcome_with_context(item, entry, follow_mode, context, sink)?;
-                status = status.merge(outcome.status);
-                if !outcome.matched {
-                    return Ok(EvalOutcome {
-                        matched: false,
-                        status,
-                    });
-                }
+    let mut step = begin_entry_eval(expr, entry, follow_mode, context)?;
+    loop {
+        match step {
+            EvalStep::Complete(outcome) => return Ok(outcome),
+            EvalStep::PendingAction {
+                request,
+                continuation,
+            } => {
+                let outcome = sink.dispatch(request.action(), request.path())?;
+                step = resume_entry_eval(continuation, outcome, context)?;
             }
-
-            Ok(EvalOutcome {
-                matched: true,
-                status,
-            })
         }
-        RuntimeExpr::Or(left, right) => {
-            let left_outcome =
-                evaluate_outcome_with_context(left, entry, follow_mode, context, sink)?;
-            if left_outcome.matched {
-                return Ok(left_outcome);
-            }
-
-            let right_outcome =
-                evaluate_outcome_with_context(right, entry, follow_mode, context, sink)?;
-            Ok(EvalOutcome {
-                matched: right_outcome.matched,
-                status: left_outcome.status.merge(right_outcome.status),
-            })
-        }
-        RuntimeExpr::Not(inner) => {
-            let inner = evaluate_outcome_with_context(inner, entry, follow_mode, context, sink)?;
-            Ok(EvalOutcome {
-                matched: !inner.matched,
-                status: inner.status,
-            })
-        }
-        RuntimeExpr::Predicate(predicate) => Ok(EvalOutcome {
-            matched: evaluate_predicate(predicate, entry, follow_mode, context)?,
-            status: RuntimeStatus::default(),
-        }),
-        RuntimeExpr::Action(action) => {
-            let outcome = sink.dispatch(action, &entry.path)?;
-            Ok(EvalOutcome {
-                matched: outcome.matched,
-                status: outcome.status,
-            })
-        }
-        RuntimeExpr::Barrier => Ok(EvalOutcome {
-            matched: true,
-            status: RuntimeStatus::default(),
-        }),
     }
 }
 
