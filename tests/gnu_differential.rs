@@ -214,6 +214,14 @@ fn build_emacs_regex_edge_tree() -> tempfile::TempDir {
     root
 }
 
+fn build_bre_interval_tree() -> tempfile::TempDir {
+    let root = tempdir().unwrap();
+    for name in ["b", "ab", "aab", "aaab", "aaaab", "c"] {
+        fs::write(root.path().join(name), "x\n").unwrap();
+    }
+    root
+}
+
 fn build_delete_tree() -> tempfile::TempDir {
     let root = tempdir().unwrap();
     fs::create_dir(root.path().join("tree")).unwrap();
@@ -1449,6 +1457,62 @@ fn ordered_emacs_regex_edge_semantics_match_gnu_find_exactly() {
             "emacs".into(),
             "-regex".into(),
             r".*[\\]]".into(),
+        ],
+    ];
+
+    for args in args_sets {
+        assert_matches_gnu_exact(&args);
+    }
+}
+
+#[test]
+fn ordered_bre_intervals_with_omitted_lower_bounds_match_gnu_find_exactly() {
+    let root = build_bre_interval_tree();
+    let literal_root = regex::escape(&root.path().to_string_lossy());
+    let args_sets = vec![
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-mindepth".into(),
+            "1".into(),
+            "-regextype".into(),
+            "emacs".into(),
+            "-regex".into(),
+            format!(r"{literal_root}/a\{{,2\}}b").into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-mindepth".into(),
+            "1".into(),
+            "-regextype".into(),
+            "emacs".into(),
+            "-regex".into(),
+            format!(r"{literal_root}/a\{{,\}}b").into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-mindepth".into(),
+            "1".into(),
+            "-regextype".into(),
+            "posix-basic".into(),
+            "-regex".into(),
+            format!(r"{literal_root}/a\{{,2\}}b").into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-mindepth".into(),
+            "1".into(),
+            "-regextype".into(),
+            "posix-basic".into(),
+            "-regex".into(),
+            format!(r"{literal_root}/a\{{,\}}b").into(),
         ],
     ];
 

@@ -307,16 +307,12 @@ impl<'a> GnuRegexScanner<'a> {
             contents.push(ch);
         }
 
-        if !is_valid_repetition_bound(&contents) {
-            return Err(malformed_regex(
-                self.flag,
-                self.dialect,
-                "malformed bounded repetition",
-            ));
-        }
+        let normalized = normalize_repetition_bound(&contents).ok_or_else(|| {
+            malformed_regex(self.flag, self.dialect, "malformed bounded repetition")
+        })?;
 
         self.translated.push('{');
-        self.translated.push_str(&contents);
+        self.translated.push_str(&normalized);
         self.translated.push('}');
         self.can_repeat_atom = false;
         self.branch_start = false;
@@ -505,13 +501,20 @@ impl<'a> GnuRegexScanner<'a> {
     }
 }
 
-fn is_valid_repetition_bound(contents: &str) -> bool {
+fn normalize_repetition_bound(contents: &str) -> Option<String> {
     if let Some((left, right)) = contents.split_once(',') {
-        !left.is_empty()
-            && left.chars().all(|ch| ch.is_ascii_digit())
-            && (right.is_empty() || right.chars().all(|ch| ch.is_ascii_digit()))
+        let left_valid = left.is_empty() || left.chars().all(|ch| ch.is_ascii_digit());
+        let right_valid = right.is_empty() || right.chars().all(|ch| ch.is_ascii_digit());
+
+        if !left_valid || !right_valid {
+            return None;
+        }
+
+        let lower = if left.is_empty() { "0" } else { left };
+        Some(format!("{lower},{right}"))
     } else {
-        !contents.is_empty() && contents.chars().all(|ch| ch.is_ascii_digit())
+        (!contents.is_empty() && contents.chars().all(|ch| ch.is_ascii_digit()))
+            .then(|| contents.to_owned())
     }
 }
 
@@ -666,6 +669,38 @@ mod tests {
 
         assert!(matcher.is_match(OsStr::new("./\\]")));
         assert!(!matcher.is_match(OsStr::new("./]")));
+    }
+
+    #[test]
+    fn emacs_intervals_allow_omitted_lower_bounds() {
+        let up_to_two =
+            RegexMatcher::compile("-regex", RegexDialect::Emacs, OsStr::new(r"a\{,2\}"), false)
+                .unwrap();
+        assert!(up_to_two.is_match(OsStr::new("")));
+        assert!(up_to_two.is_match(OsStr::new("a")));
+        assert!(up_to_two.is_match(OsStr::new("aa")));
+        assert!(!up_to_two.is_match(OsStr::new("aaa")));
+
+        let unbounded =
+            RegexMatcher::compile("-regex", RegexDialect::Emacs, OsStr::new(r"a\{,\}"), false)
+                .unwrap();
+        assert!(unbounded.is_match(OsStr::new("")));
+        assert!(unbounded.is_match(OsStr::new("aaaa")));
+    }
+
+    #[test]
+    fn posix_basic_intervals_allow_omitted_lower_bounds() {
+        let matcher = RegexMatcher::compile(
+            "-regex",
+            RegexDialect::PosixBasic,
+            OsStr::new(r"a\{,2\}"),
+            false,
+        )
+        .unwrap();
+
+        assert!(matcher.is_match(OsStr::new("")));
+        assert!(matcher.is_match(OsStr::new("aa")));
+        assert!(!matcher.is_match(OsStr::new("aaa")));
     }
 
     #[test]
