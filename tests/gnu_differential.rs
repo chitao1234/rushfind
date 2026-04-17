@@ -195,6 +195,19 @@ fn build_exec_tree() -> tempfile::TempDir {
     root
 }
 
+fn build_printf_tree() -> tempfile::TempDir {
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("dir")).unwrap();
+    fs::write(root.path().join("dir/file.txt"), "hello").unwrap();
+    fs::set_permissions(
+        root.path().join("dir/file.txt"),
+        fs::Permissions::from_mode(0o640),
+    )
+    .unwrap();
+    unix_fs::symlink("dir/file.txt", root.path().join("link.txt")).unwrap();
+    root
+}
+
 fn build_regex_tree() -> tempfile::TempDir {
     let root = tempdir().unwrap();
     fs::create_dir(root.path().join("src")).unwrap();
@@ -522,6 +535,48 @@ fn parallel_mode_matches_gnu_find_as_a_set() {
 
     assert_eq!(actual.status.code(), expected.status.code());
     assert_eq!(lines(&actual.stdout), lines(&expected.stdout));
+}
+
+#[test]
+fn ordered_printf_subset_matches_gnu_find_exactly() {
+    let root = build_printf_tree();
+    let args_sets = vec![
+        vec![
+            path_arg(root.path()),
+            "-printf".into(),
+            "[%P][%f][%h][%d]\\n".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-printf".into(),
+            "[%f][%y][%s][%m]\\n".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-type".into(),
+            "l".into(),
+            "-printf".into(),
+            "[%f][%y][%l]\\n".into(),
+        ],
+    ];
+
+    for args in args_sets {
+        assert_matches_gnu_exact(&args);
+    }
+}
+
+#[test]
+fn parallel_printf_subset_matches_gnu_find_as_sets() {
+    let root = build_printf_tree();
+    let args = vec![
+        path_arg(root.path()),
+        "-printf".into(),
+        "[%P][%f][%h][%d]\\n".into(),
+    ];
+
+    assert_matches_gnu_as_sets(&args);
 }
 
 #[test]

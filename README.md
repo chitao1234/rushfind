@@ -17,7 +17,11 @@
   and `-0.75`
 - Symlink-content predicates: `-lname`, `-ilname`
 - Traversal controls: `-mindepth`, `-maxdepth`, `-depth`, `-prune`, `-xdev`, `-mount`
-- Output and mutation actions: `-print`, `-print0`, `-exec ... ;`, `-exec ... +`, `-delete`
+- Output and mutation actions: `-print`, `-print0`, `-printf`, `-exec ... ;`, `-exec ... +`,
+  `-delete`
+- `-printf` currently supports `%p`, `%P`, `%f`, `%h`, `%d`, `%y`, `%s`, `%m`, `%l`, `%%`, `\\`,
+  `\n`, `\t`, and `\0`
+- Unsupported `-printf` directives fail during planning with explicit diagnostics
 - Ordered single-worker mode stays GNU-oriented for supported structural traversal controls
 - Relaxed-order parallel mode guarantees prune subtree boundaries in pre-order traversal but does
   not promise GNU sibling ordering

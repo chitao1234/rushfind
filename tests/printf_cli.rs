@@ -63,3 +63,34 @@ fn ordered_printf_renders_metadata_and_link_directives() {
     assert!(stdout.contains("[file.txt][f][5][640][]"));
     assert!(stdout.contains("[link.txt][l][8][777][file.txt]"));
 }
+
+#[test]
+fn parallel_printf_replays_each_record_atomically() {
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("alpha.txt"), "a\n").unwrap();
+    fs::write(root.path().join("beta.txt"), "b\n").unwrap();
+
+    let output = cargo_bin_output_with_timeout(
+        &[
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-printf".into(),
+            "BEGIN:%f\\nEND:%f\\n".into(),
+        ],
+        4,
+        Duration::from_secs(5),
+    );
+
+    let lines = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    assert_eq!(lines.len(), 4);
+    assert!(lines.chunks_exact(2).all(|chunk| {
+        let begin = chunk[0].strip_prefix("BEGIN:").unwrap();
+        let end = chunk[1].strip_prefix("END:").unwrap();
+        begin == end
+    }));
+}
