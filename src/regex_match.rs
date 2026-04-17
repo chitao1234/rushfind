@@ -119,17 +119,28 @@ fn translate_gnu_facing_subset(
 
 #[derive(Debug, Clone, Copy)]
 struct GnuDialectRules {
-    bre_style_operators: bool,
+    emacs_syntax: bool,
+    posix_basic_syntax: bool,
+    posix_extended_syntax: bool,
 }
 
 impl GnuDialectRules {
     fn for_dialect(dialect: RegexDialect) -> Self {
         match dialect {
-            RegexDialect::Emacs | RegexDialect::PosixBasic => Self {
-                bre_style_operators: true,
+            RegexDialect::Emacs => Self {
+                emacs_syntax: true,
+                posix_basic_syntax: false,
+                posix_extended_syntax: false,
+            },
+            RegexDialect::PosixBasic => Self {
+                emacs_syntax: false,
+                posix_basic_syntax: true,
+                posix_extended_syntax: false,
             },
             RegexDialect::PosixExtended => Self {
-                bre_style_operators: false,
+                emacs_syntax: false,
+                posix_basic_syntax: false,
+                posix_extended_syntax: true,
             },
             RegexDialect::Rust => unreachable!("rust regexes are not translated as GNU subsets"),
         }
@@ -144,6 +155,8 @@ struct GnuRegexScanner<'a> {
     index: usize,
     translated: String,
     group_depth: usize,
+    can_repeat_atom: bool,
+    branch_start: bool,
 }
 
 impl<'a> GnuRegexScanner<'a> {
@@ -156,6 +169,8 @@ impl<'a> GnuRegexScanner<'a> {
             index: 0,
             translated: String::new(),
             group_depth: 0,
+            can_repeat_atom: false,
+            branch_start: true,
         }
     }
 
@@ -164,7 +179,11 @@ impl<'a> GnuRegexScanner<'a> {
             match ch {
                 '[' => self.translate_bracket_expression()?,
                 '\\' => self.translate_escape()?,
-                '(' if !self.rules.bre_style_operators => {
+                '^' if self.rules.emacs_syntax => self.translate_emacs_caret(),
+                '$' if self.rules.emacs_syntax => self.translate_emacs_dollar(),
+                '*' if self.rules.emacs_syntax => self.translate_contextual_postfix('*'),
+                '+' | '?' if self.rules.emacs_syntax => self.translate_contextual_postfix(ch),
+                '(' if self.rules.posix_extended_syntax => {
                     if self.peek() == Some('?') {
                         return Err(unsupported_construct(
                             self.flag,
@@ -172,17 +191,24 @@ impl<'a> GnuRegexScanner<'a> {
                             "non-capturing groups are out of scope",
                         ));
                     }
-                    self.group_depth += 1;
-                    self.translated.push(ch);
+                    self.open_group();
                 }
-                ')' if !self.rules.bre_style_operators => {
-                    self.close_group()?;
-                    self.translated.push(ch);
+                ')' if self.rules.posix_extended_syntax => self.close_group_operator()?,
+                '|' if self.rules.posix_extended_syntax => self.push_alternation_operator(),
+                '*' if self.rules.posix_basic_syntax => self.translated.push('*'),
+                '*' | '+' | '?' if self.rules.posix_extended_syntax => self.translated.push(ch),
+                '{' | '}' if self.rules.posix_extended_syntax => self.translated.push(ch),
+                '(' | ')' | '|' | '+' | '?' | '{' | '}' if self.rules.posix_basic_syntax => {
+                    self.push_literal_atom(ch);
                 }
-                '(' | ')' | '|' | '+' | '?' | '{' | '}' if self.rules.bre_style_operators => {
-                    self.push_escaped_literal(ch);
+                '(' | ')' | '|' | '{' | '}' if self.rules.emacs_syntax => {
+                    self.push_literal_atom(ch);
                 }
-                _ => self.translated.push(ch),
+                '.' => {
+                    self.translated.push('.');
+                    self.mark_atom();
+                }
+                _ => self.push_literal_atom(ch),
             }
         }
 
@@ -206,21 +232,14 @@ impl<'a> GnuRegexScanner<'a> {
             ));
         }
 
-        if self.rules.bre_style_operators {
+        if self.rules.posix_basic_syntax {
             match escaped {
-                '(' => {
-                    self.group_depth += 1;
-                    self.translated.push('(');
-                }
-                ')' => {
-                    self.close_group()?;
-                    self.translated.push(')');
-                }
-                '|' | '+' | '?' => self.translated.push(escaped),
+                '(' => self.open_group(),
+                ')' => self.close_group_operator()?,
+                '|' => self.push_alternation_operator(),
+                '+' | '?' => self.translated.push(escaped),
                 '{' => self.translate_bre_bound()?,
-                '\\' | '.' | '^' | '$' | '*' | '[' | ']' | '}' => {
-                    self.push_escaped_literal(escaped);
-                }
+                '\\' | '.' | '^' | '$' | '*' | '[' | ']' | '}' => self.push_literal_atom(escaped),
                 other => {
                     return Err(unsupported_construct(
                         self.flag,
@@ -229,10 +248,27 @@ impl<'a> GnuRegexScanner<'a> {
                     ));
                 }
             }
+        } else if self.rules.emacs_syntax {
+            match escaped {
+                '(' => self.open_group(),
+                ')' => self.close_group_operator()?,
+                '|' => self.push_alternation_operator(),
+                '{' => {
+                    if self.can_repeat_atom {
+                        self.translate_bre_bound()?;
+                    } else {
+                        self.push_literal_atom('{');
+                    }
+                }
+                '\\' | '.' | '^' | '$' | '*' | '+' | '?' | '[' | ']' | '}' => {
+                    self.push_literal_atom(escaped)
+                }
+                other => self.push_literal_atom(other),
+            }
         } else {
             match escaped {
                 '\\' | '.' | '^' | '$' | '*' | '+' | '?' | '(' | ')' | '|' | '{' | '}' | '['
-                | ']' => self.push_escaped_literal(escaped),
+                | ']' => self.push_literal_atom(escaped),
                 other => {
                     return Err(unsupported_construct(
                         self.flag,
@@ -282,6 +318,8 @@ impl<'a> GnuRegexScanner<'a> {
         self.translated.push('{');
         self.translated.push_str(&contents);
         self.translated.push('}');
+        self.can_repeat_atom = false;
+        self.branch_start = false;
         Ok(())
     }
 
@@ -302,6 +340,7 @@ impl<'a> GnuRegexScanner<'a> {
             match ch {
                 ']' => {
                     self.translated.push(']');
+                    self.mark_atom();
                     return Ok(());
                 }
                 '[' => match self.peek() {
@@ -328,11 +367,20 @@ impl<'a> GnuRegexScanner<'a> {
                     _ => self.translated.push('['),
                 },
                 '\\' => {
-                    let escaped = self.next().ok_or_else(|| {
-                        malformed_regex(self.flag, self.dialect, "unterminated bracket expression")
-                    })?;
-                    self.translated.push('\\');
-                    self.translated.push(escaped);
+                    if self.rules.emacs_syntax {
+                        self.translated.push('\\');
+                        self.translated.push('\\');
+                    } else {
+                        let escaped = self.next().ok_or_else(|| {
+                            malformed_regex(
+                                self.flag,
+                                self.dialect,
+                                "unterminated bracket expression",
+                            )
+                        })?;
+                        self.translated.push('\\');
+                        self.translated.push(escaped);
+                    }
                 }
                 _ => self.translated.push(ch),
             }
@@ -374,9 +422,72 @@ impl<'a> GnuRegexScanner<'a> {
         Ok(())
     }
 
-    fn push_escaped_literal(&mut self, ch: char) {
-        self.translated.push('\\');
+    fn open_group(&mut self) {
+        self.group_depth += 1;
+        self.translated.push('(');
+        self.can_repeat_atom = false;
+        self.branch_start = true;
+    }
+
+    fn close_group_operator(&mut self) -> Result<(), Diagnostic> {
+        self.close_group()?;
+        self.translated.push(')');
+        self.mark_atom();
+        Ok(())
+    }
+
+    fn push_alternation_operator(&mut self) {
+        self.translated.push('|');
+        self.can_repeat_atom = false;
+        self.branch_start = true;
+    }
+
+    fn translate_emacs_caret(&mut self) {
+        if self.branch_start {
+            self.translated.push('^');
+            self.can_repeat_atom = false;
+            self.branch_start = false;
+        } else {
+            self.push_literal_atom('^');
+        }
+    }
+
+    fn translate_emacs_dollar(&mut self) {
+        if self.peek().is_none()
+            || (self.peek() == Some('\\') && matches!(self.peek_n(1), Some(')') | Some('|')))
+        {
+            self.translated.push('$');
+            self.can_repeat_atom = false;
+            self.branch_start = false;
+        } else {
+            self.push_literal_atom('$');
+        }
+    }
+
+    fn translate_contextual_postfix(&mut self, ch: char) {
+        if self.can_repeat_atom {
+            self.translated.push(ch);
+            self.can_repeat_atom = false;
+            self.branch_start = false;
+        } else {
+            self.push_literal_atom(ch);
+        }
+    }
+
+    fn push_literal_atom(&mut self, ch: char) {
+        if matches!(
+            ch,
+            '.' | '^' | '$' | '|' | '(' | ')' | '[' | ']' | '{' | '}' | '*' | '+' | '?' | '\\'
+        ) {
+            self.translated.push('\\');
+        }
         self.translated.push(ch);
+        self.mark_atom();
+    }
+
+    fn mark_atom(&mut self) {
+        self.can_repeat_atom = true;
+        self.branch_start = false;
     }
 
     fn next(&mut self) -> Option<char> {
@@ -387,6 +498,10 @@ impl<'a> GnuRegexScanner<'a> {
 
     fn peek(&self) -> Option<char> {
         self.chars.get(self.index).copied()
+    }
+
+    fn peek_n(&self, offset: usize) -> Option<char> {
+        self.chars.get(self.index + offset).copied()
     }
 }
 
@@ -498,6 +613,59 @@ mod tests {
 
         assert!(matcher.is_match(OsStr::new("./name.txt")));
         assert!(!matcher.is_match(OsStr::new("./ .txt")));
+    }
+
+    #[test]
+    fn emacs_uses_bare_plus_and_treats_backslashed_plus_as_literal() {
+        let bare_plus =
+            RegexMatcher::compile("-regex", RegexDialect::Emacs, OsStr::new(".*a+"), false)
+                .unwrap();
+        assert!(bare_plus.is_match(OsStr::new("./a")));
+        assert!(bare_plus.is_match(OsStr::new("./aa")));
+        assert!(!bare_plus.is_match(OsStr::new("./a+")));
+
+        let escaped_plus =
+            RegexMatcher::compile("-regex", RegexDialect::Emacs, OsStr::new(r".*a\+"), false)
+                .unwrap();
+        assert!(!escaped_plus.is_match(OsStr::new("./a")));
+        assert!(!escaped_plus.is_match(OsStr::new("./aa")));
+        assert!(escaped_plus.is_match(OsStr::new("./a+")));
+    }
+
+    #[test]
+    fn emacs_anchors_and_repetition_are_context_sensitive() {
+        let caret_literal =
+            RegexMatcher::compile("-regex", RegexDialect::Emacs, OsStr::new(".*a^b"), false)
+                .unwrap();
+        assert!(caret_literal.is_match(OsStr::new("./a^b")));
+        assert!(!caret_literal.is_match(OsStr::new("./ab")));
+
+        let leading_caret =
+            RegexMatcher::compile("-regex", RegexDialect::Emacs, OsStr::new("^\\./a"), false)
+                .unwrap();
+        assert!(leading_caret.is_match(OsStr::new("./a")));
+        assert!(!leading_caret.is_match(OsStr::new("x./a")));
+    }
+
+    #[test]
+    fn emacs_unknown_escapes_degrade_to_the_escaped_character() {
+        let matcher =
+            RegexMatcher::compile("-regex", RegexDialect::Emacs, OsStr::new(r".*\a"), false)
+                .unwrap();
+
+        assert!(matcher.is_match(OsStr::new("./a")));
+        assert!(matcher.is_match(OsStr::new("./aa")));
+        assert!(!matcher.is_match(OsStr::new("./b")));
+    }
+
+    #[test]
+    fn emacs_backslash_is_literal_inside_bracket_expressions() {
+        let matcher =
+            RegexMatcher::compile("-regex", RegexDialect::Emacs, OsStr::new(r".*[\]]"), false)
+                .unwrap();
+
+        assert!(matcher.is_match(OsStr::new("./\\]")));
+        assert!(!matcher.is_match(OsStr::new("./]")));
     }
 
     #[test]

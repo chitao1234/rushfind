@@ -206,6 +206,14 @@ fn build_regex_tree() -> tempfile::TempDir {
     root
 }
 
+fn build_emacs_regex_edge_tree() -> tempfile::TempDir {
+    let root = tempdir().unwrap();
+    for name in ["a", "aa", "a+", "a^b", "ab", "]", "\\]"] {
+        fs::write(root.path().join(name), "x\n").unwrap();
+    }
+    root
+}
+
 fn build_delete_tree() -> tempfile::TempDir {
     let root = tempdir().unwrap();
     fs::create_dir(root.path().join("tree")).unwrap();
@@ -1375,6 +1383,72 @@ fn ordered_expanded_regex_subset_matches_gnu_find_exactly() {
             "emacs".into(),
             "-regex".into(),
             r".*/[[:upper:]][[:alpha:]]*\.MD".into(),
+        ],
+    ];
+
+    for args in args_sets {
+        assert_matches_gnu_exact(&args);
+    }
+}
+
+#[test]
+fn ordered_emacs_regex_edge_semantics_match_gnu_find_exactly() {
+    let root = build_emacs_regex_edge_tree();
+    let args_sets = vec![
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-mindepth".into(),
+            "1".into(),
+            "-regextype".into(),
+            "emacs".into(),
+            "-regex".into(),
+            ".*/a+".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-mindepth".into(),
+            "1".into(),
+            "-regextype".into(),
+            "emacs".into(),
+            "-regex".into(),
+            r".*/a\+".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-mindepth".into(),
+            "1".into(),
+            "-regextype".into(),
+            "emacs".into(),
+            "-regex".into(),
+            ".*/a^b".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-mindepth".into(),
+            "1".into(),
+            "-regextype".into(),
+            "emacs".into(),
+            "-regex".into(),
+            r".*/\a".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-mindepth".into(),
+            "1".into(),
+            "-regextype".into(),
+            "emacs".into(),
+            "-regex".into(),
+            r".*[\\]]".into(),
         ],
     ];
 
