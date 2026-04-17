@@ -182,6 +182,7 @@ impl EntryContext {
     }
 
     #[cfg(test)]
+    #[cfg_attr(test, allow(dead_code))]
     pub(crate) fn new_with_reader_and_root(
         path: PathBuf,
         depth: usize,
