@@ -10,6 +10,15 @@ pub(crate) struct TraversalControl {
     pub(crate) prune: bool,
 }
 
+impl TraversalControl {
+    pub(crate) fn allow() -> Self {
+        Self {
+            matched: true,
+            prune: false,
+        }
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn evaluate_for_traversal(
     expr: &RuntimeExpr,
@@ -35,10 +44,7 @@ pub(crate) fn evaluate_for_traversal_with_context(
 ) -> Result<TraversalControl, Diagnostic> {
     match expr {
         RuntimeExpr::And(items) => {
-            let mut verdict = TraversalControl {
-                matched: true,
-                prune: false,
-            };
+            let mut verdict = TraversalControl::allow();
 
             for item in items {
                 let next =
@@ -83,10 +89,7 @@ pub(crate) fn evaluate_for_traversal_with_context(
             matched: crate::eval::evaluate_predicate(predicate, entry, follow_mode, context)?,
             prune: false,
         }),
-        RuntimeExpr::Action(_) | RuntimeExpr::Barrier => Ok(TraversalControl {
-            matched: true,
-            prune: false,
-        }),
+        RuntimeExpr::Action(_) | RuntimeExpr::Barrier => Ok(TraversalControl::allow()),
     }
 }
 

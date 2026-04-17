@@ -2,8 +2,8 @@ use crate::diagnostics::Diagnostic;
 use crate::eval::{EvalContext, evaluate_with_context};
 use crate::mounts::MountSnapshot;
 use crate::output::{BrokerMessage, spawn_broker};
-use crate::planner::{ExecutionMode, ExecutionPlan};
-use crate::traversal_control::evaluate_for_traversal_with_context;
+use crate::planner::{ExecutionMode, ExecutionPlan, RuntimeExpr, TraversalOrder};
+use crate::traversal_control::{TraversalControl, evaluate_for_traversal_with_context};
 use crate::walker::{WalkEvent, walk_ordered, walk_parallel};
 use crossbeam_channel::unbounded;
 use std::io::Write;
@@ -29,6 +29,19 @@ where
     }
 }
 
+fn traversal_control_for_entry(
+    expr: Option<&RuntimeExpr>,
+    follow_mode: crate::follow::FollowMode,
+    order: TraversalOrder,
+    entry: &crate::entry::EntryContext,
+    context: &EvalContext,
+) -> Result<TraversalControl, Diagnostic> {
+    match expr {
+        Some(expr) => evaluate_for_traversal_with_context(expr, entry, follow_mode, order, context),
+        None => Ok(TraversalControl::allow()),
+    }
+}
+
 fn run_ordered<W, E>(
     plan: &ExecutionPlan,
     stdout: &mut W,
@@ -47,11 +60,11 @@ where
         plan.follow_mode,
         plan.traversal,
         |entry| {
-            evaluate_for_traversal_with_context(
-                &plan.expr,
-                entry,
+            traversal_control_for_entry(
+                plan.traversal_control.as_ref(),
                 plan.follow_mode,
                 plan.traversal.order,
+                entry,
                 &eval_context,
             )
         },
@@ -95,11 +108,7 @@ where
     E: Write + Send,
 {
     let eval_context = build_eval_context(plan)?;
-    let worker_count = std::env::var("FINDOXIDE_WORKERS")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(1);
+    let worker_count = plan.runtime_policy.requested_workers;
     let evaluator_count =
         if plan.traversal.order == crate::planner::TraversalOrder::DepthFirstPostOrder {
             1
@@ -136,7 +145,7 @@ where
         }
         drop(entry_rx);
 
-        let control_expr = plan.expr.clone();
+        let traversal_control = plan.traversal_control.clone();
         let control_context = eval_context.clone();
         let follow_mode = plan.follow_mode;
         let traversal_order = plan.traversal.order;
@@ -146,11 +155,11 @@ where
             plan.traversal,
             worker_count,
             move |entry| {
-                evaluate_for_traversal_with_context(
-                    &control_expr,
-                    entry,
+                traversal_control_for_entry(
+                    traversal_control.as_ref(),
                     follow_mode,
                     traversal_order,
+                    entry,
                     &control_context,
                 )
             },
@@ -227,6 +236,7 @@ mod tests {
         ExecutionMode, ExecutionPlan, OutputAction, RuntimeAction, RuntimeExpr,
         RuntimeRequirements, TraversalOptions, TraversalOrder,
     };
+    use crate::runtime_policy::RuntimePolicy;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -243,6 +253,8 @@ mod tests {
             runtime: RuntimeRequirements { mount_snapshot },
             expr: RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)),
             mode: ExecutionMode::OrderedSingle,
+            runtime_policy: RuntimePolicy::derive(1, TraversalOrder::PreOrder, true),
+            traversal_control: None,
         }
     }
 

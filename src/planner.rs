@@ -10,6 +10,7 @@ use crate::identity::FileIdentity;
 use crate::numeric::{NumericComparison, parse_numeric_argument};
 use crate::optimizer::optimize_read_only_and_chains;
 use crate::perm::{PermMatcher, parse_perm_argument};
+use crate::runtime_policy::{RuntimePolicy, build_traversal_control_plan};
 use crate::size::{SizeMatcher, parse_size_argument};
 use crate::time::{
     NewerMatcher, RelativeTimeMatcher, RelativeTimeUnit, Timestamp, TimestampKind, UsedMatcher,
@@ -29,6 +30,8 @@ pub struct ExecutionPlan {
     pub runtime: RuntimeRequirements,
     pub expr: RuntimeExpr,
     pub mode: ExecutionMode,
+    pub(crate) runtime_policy: RuntimePolicy,
+    pub(crate) traversal_control: Option<RuntimeExpr>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -174,6 +177,12 @@ pub fn plan_command_with_now(
     } else {
         ExecutionMode::ParallelRelaxed
     };
+    let runtime_policy = RuntimePolicy::derive(
+        workers,
+        traversal.order,
+        mode == ExecutionMode::OrderedSingle,
+    );
+    let traversal_control = build_traversal_control_plan(&expr, traversal.order);
 
     Ok(ExecutionPlan {
         start_paths,
@@ -182,6 +191,8 @@ pub fn plan_command_with_now(
         runtime,
         expr,
         mode,
+        runtime_policy,
+        traversal_control,
     })
 }
 
@@ -477,5 +488,49 @@ fn lower_action(action: Action, state: &mut PlanningState) -> Result<RuntimeExpr
             state.saw_delete = true;
             Ok(RuntimeExpr::Action(RuntimeAction::Delete))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::parse_command;
+
+    fn argv(items: &[&str]) -> Vec<std::ffi::OsString> {
+        items.iter().map(|item| (*item).into()).collect()
+    }
+
+    #[test]
+    fn omits_traversal_control_plan_without_prune() {
+        let ast = parse_command(&argv(&[".", "-name", "*.rs", "-print"])).unwrap();
+        let plan = plan_command(ast, 4).unwrap();
+
+        assert!(plan.traversal_control.is_none());
+        assert_eq!(plan.runtime_policy.requested_workers, 4);
+        assert_eq!(
+            plan.runtime_policy.commit,
+            crate::runtime_policy::CommitPolicy::Relaxed
+        );
+    }
+
+    #[test]
+    fn keeps_traversal_control_plan_when_prune_can_change_descent() {
+        let ast = parse_command(&argv(&[".", "-name", "cache", "-prune", "-o", "-print"])).unwrap();
+        let plan = plan_command(ast, 4).unwrap();
+
+        assert!(plan.traversal_control.is_some());
+        assert_eq!(plan.runtime_policy.requested_workers, 4);
+    }
+
+    #[test]
+    fn depth_mode_derives_subtree_barrier_commit_policy() {
+        let ast = parse_command(&argv(&[".", "-delete"])).unwrap();
+        let plan = plan_command(ast, 4).unwrap();
+
+        assert_eq!(
+            plan.runtime_policy.commit,
+            crate::runtime_policy::CommitPolicy::RelaxedWithSubtreeBarriers
+        );
+        assert!(plan.traversal_control.is_none());
     }
 }
