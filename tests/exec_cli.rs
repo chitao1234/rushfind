@@ -1,6 +1,8 @@
 mod support;
 
+use assert_cmd::cargo::CommandCargoExt;
 use std::fs;
+use std::process::Command;
 use std::time::Duration;
 use support::{cargo_bin_output_with_timeout, path_arg};
 use tempfile::tempdir;
@@ -170,6 +172,32 @@ fn ordered_exec_missing_command_plus_exits_one_after_printing_matches_stage_cont
             .unwrap()
             .contains("No such file or directory")
     );
+}
+
+#[test]
+fn ordered_exec_false_still_blocks_later_print_under_the_pipeline() {
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("file.txt"), "data\n").unwrap();
+
+    let args = vec![
+        path_arg(root.path()),
+        "-exec".into(),
+        "false".into(),
+        ";".into(),
+        "-print".into(),
+    ];
+
+    let expected = Command::new("find").args(&args).output().unwrap();
+    let actual = Command::cargo_bin("findoxide")
+        .unwrap()
+        .env("FINDOXIDE_WORKERS", "1")
+        .args(&args)
+        .output()
+        .unwrap();
+
+    assert_eq!(actual.status.code(), expected.status.code());
+    assert_eq!(actual.stdout, expected.stdout);
+    assert_eq!(actual.stderr, expected.stderr);
 }
 
 #[test]

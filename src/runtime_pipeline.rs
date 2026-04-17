@@ -3,6 +3,7 @@ use crate::entry::EntryContext;
 use crate::eval::{ActionOutcome, EvalContext, EvalOutcome, RuntimeStatus, evaluate_predicate};
 use crate::follow::FollowMode;
 use crate::planner::{RuntimeAction, RuntimeExpr};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,6 +61,33 @@ pub(crate) enum EvalStep {
         request: ActionRequest,
         continuation: PendingEntryEval,
     },
+}
+
+#[derive(Debug)]
+pub(crate) struct OrderedReadyQueue<T> {
+    next_sequence: u64,
+    buffered: BTreeMap<u64, T>,
+}
+
+impl<T> Default for OrderedReadyQueue<T> {
+    fn default() -> Self {
+        Self {
+            next_sequence: 0,
+            buffered: BTreeMap::new(),
+        }
+    }
+}
+
+impl<T> OrderedReadyQueue<T> {
+    pub(crate) fn insert(&mut self, sequence: u64, item: T) {
+        self.buffered.insert(sequence, item);
+    }
+
+    pub(crate) fn pop_next(&mut self) -> Option<T> {
+        let item = self.buffered.remove(&self.next_sequence)?;
+        self.next_sequence += 1;
+        Some(item)
+    }
 }
 
 pub(crate) fn begin_entry_eval(
@@ -384,5 +412,19 @@ mod tests {
         .unwrap();
 
         assert!(matches!(complete, EvalStep::Complete(outcome) if outcome.matched));
+    }
+
+    #[test]
+    fn ordered_ready_queue_releases_only_the_next_sequence() {
+        let mut queue = super::OrderedReadyQueue::default();
+        queue.insert(2, "two");
+        assert!(queue.pop_next().is_none());
+
+        queue.insert(0, "zero");
+        queue.insert(1, "one");
+
+        assert_eq!(queue.pop_next(), Some("zero"));
+        assert_eq!(queue.pop_next(), Some("one"));
+        assert_eq!(queue.pop_next(), Some("two"));
     }
 }
