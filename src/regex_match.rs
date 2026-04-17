@@ -6,6 +6,7 @@ use std::ffi::OsStr;
 pub enum RegexDialect {
     Emacs,
     PosixExtended,
+    PosixBasic,
     Rust,
 }
 
@@ -14,15 +15,16 @@ impl RegexDialect {
         match value.to_str() {
             Some("emacs") => Ok(Self::Emacs),
             Some("posix-extended") => Ok(Self::PosixExtended),
+            Some("posix-basic") => Ok(Self::PosixBasic),
             Some("rust") => Ok(Self::Rust),
             Some(other) => Err(Diagnostic::new(
                 format!(
-                    "unsupported `-regextype` value `{other}`; supported values: emacs, posix-extended, rust"
+                    "unsupported `-regextype` value `{other}`; supported values: emacs, posix-extended, posix-basic, rust"
                 ),
                 1,
             )),
             None => Err(Diagnostic::new(
-                "invalid UTF-8 `-regextype` value; supported values: emacs, posix-extended, rust",
+                "invalid UTF-8 `-regextype` value; supported values: emacs, posix-extended, posix-basic, rust",
                 1,
             )),
         }
@@ -32,6 +34,7 @@ impl RegexDialect {
         match self {
             Self::Emacs => "emacs",
             Self::PosixExtended => "posix-extended",
+            Self::PosixBasic => "posix-basic",
             Self::Rust => "rust",
         }
     }
@@ -70,6 +73,7 @@ impl RegexMatcher {
         let translated_pattern = match dialect {
             RegexDialect::Emacs => translate_emacs_subset(flag, original_pattern)?,
             RegexDialect::PosixExtended => translate_posix_extended_subset(flag, original_pattern)?,
+            RegexDialect::PosixBasic => translate_emacs_subset(flag, original_pattern)?,
             RegexDialect::Rust => original_pattern.to_owned(),
         };
         let compiled = RegexBuilder::new(&format!(r"\A(?:{})\z", translated_pattern))

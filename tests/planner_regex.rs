@@ -16,6 +16,10 @@ fn lowering_uses_default_emacs_until_regextype_changes() {
             "posix-extended",
             "-regex",
             "(README|LICENSE)",
+            "-regextype",
+            "posix-basic",
+            "-regex",
+            ".*",
         ]))
         .unwrap(),
         1,
@@ -24,11 +28,15 @@ fn lowering_uses_default_emacs_until_regextype_changes() {
 
     assert_eq!(
         regex_dialects(&plan.expr),
-        vec![RegexDialect::Emacs, RegexDialect::PosixExtended]
+        vec![
+            RegexDialect::Emacs,
+            RegexDialect::PosixExtended,
+            RegexDialect::PosixBasic,
+        ]
     );
     assert_eq!(
         linear_labels(&plan.expr),
-        vec!["regex", "barrier", "regex", "print"]
+        vec!["regex", "barrier", "regex", "barrier", "regex", "print"]
     );
 }
 
@@ -47,6 +55,7 @@ fn unsupported_regextype_is_a_planning_error() {
     );
     assert!(error.message.contains("emacs"));
     assert!(error.message.contains("posix-extended"));
+    assert!(error.message.contains("posix-basic"));
     assert!(error.message.contains("rust"));
 }
 

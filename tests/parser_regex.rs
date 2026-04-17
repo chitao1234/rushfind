@@ -69,3 +69,23 @@ fn reports_missing_arguments_for_regex_family() {
         );
     }
 }
+
+#[test]
+fn parses_posix_basic_regextype_as_regex_type_argument() {
+    let ast = parse_command(&argv(&[".", "-regextype", "posix-basic", "-regex", ".*"])).unwrap();
+
+    assert_eq!(
+        ast,
+        CommandAst {
+            start_paths: vec![PathBuf::from(".")],
+            global_options: vec![],
+            expr: Expr::And(vec![
+                Expr::Predicate(Predicate::RegexType("posix-basic".into())),
+                Expr::Predicate(Predicate::Regex {
+                    pattern: ".*".into(),
+                    case_insensitive: false,
+                }),
+            ]),
+        }
+    );
+}
