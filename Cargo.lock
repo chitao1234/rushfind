@@ -118,6 +118,7 @@ dependencies = [
  "crossbeam-channel",
  "libc",
  "predicates",
+ "regex",
  "tempfile",
  "wait-timeout",
 ]

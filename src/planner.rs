@@ -10,6 +10,7 @@ use crate::identity::FileIdentity;
 use crate::numeric::{NumericComparison, parse_numeric_argument};
 use crate::optimizer::optimize_read_only_and_chains;
 use crate::perm::{PermMatcher, parse_perm_argument};
+use crate::regex_match::{RegexDialect, RegexMatcher};
 use crate::runtime_policy::{RuntimePolicy, build_traversal_control_plan};
 use crate::size::{SizeMatcher, parse_size_argument};
 use crate::time::{
@@ -84,6 +85,7 @@ pub enum RuntimePredicate {
         pattern: OsString,
         case_insensitive: bool,
     },
+    Regex(RegexMatcher),
     Inum(NumericComparison),
     Links(NumericComparison),
     SameFile(FileIdentity),
@@ -152,6 +154,7 @@ pub fn plan_command_with_now(
             now,
             daystart_active: false,
         },
+        regex_dialect: RegexDialect::Emacs,
         saw_action: false,
         saw_delete: false,
         next_exec_batch_id: 0,
@@ -230,13 +233,9 @@ fn lower_expr(
             state,
             follow_mode,
         )?))),
-        Expr::Predicate(predicate) => lower_predicate(
-            predicate,
-            traversal,
-            runtime,
-            &mut state.temporal,
-            follow_mode,
-        ),
+        Expr::Predicate(predicate) => {
+            lower_predicate(predicate, traversal, runtime, state, follow_mode)
+        }
         Expr::Action(action) => lower_action(action, state),
     }
 }
@@ -245,7 +244,7 @@ fn lower_predicate(
     predicate: Predicate,
     traversal: &mut TraversalOptions,
     runtime: &mut RuntimeRequirements,
-    temporal: &mut TemporalPlanningState,
+    state: &mut PlanningState,
     follow_mode: FollowMode,
 ) -> Result<RuntimeExpr, Diagnostic> {
     match predicate {
@@ -283,8 +282,25 @@ fn lower_predicate(
             pattern,
             case_insensitive,
         })),
-        Predicate::Regex { .. } => Err(Diagnostic::unsupported("unsupported: -regex")),
-        Predicate::RegexType(_) => Err(Diagnostic::unsupported("unsupported: -regextype")),
+        Predicate::Regex {
+            pattern,
+            case_insensitive,
+        } => Ok(RuntimeExpr::Predicate(RuntimePredicate::Regex(
+            RegexMatcher::compile(
+                if case_insensitive {
+                    "-iregex"
+                } else {
+                    "-regex"
+                },
+                state.regex_dialect,
+                pattern.as_os_str(),
+                case_insensitive,
+            )?,
+        ))),
+        Predicate::RegexType(raw) => {
+            state.regex_dialect = RegexDialect::parse(raw.as_os_str())?;
+            Ok(RuntimeExpr::Barrier)
+        }
         Predicate::FsType(type_name) => {
             runtime.mount_snapshot = true;
             Ok(RuntimeExpr::Predicate(RuntimePredicate::FsType(type_name)))
@@ -337,8 +353,8 @@ fn lower_predicate(
                 raw.as_os_str(),
                 TimestampKind::Access,
                 RelativeTimeUnit::Days,
-                temporal.relative_baseline()?,
-                temporal.daystart_active,
+                state.temporal.relative_baseline()?,
+                state.temporal.daystart_active,
             )?,
         ))),
         Predicate::CTime(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(
@@ -347,8 +363,8 @@ fn lower_predicate(
                 raw.as_os_str(),
                 TimestampKind::Change,
                 RelativeTimeUnit::Days,
-                temporal.relative_baseline()?,
-                temporal.daystart_active,
+                state.temporal.relative_baseline()?,
+                state.temporal.daystart_active,
             )?,
         ))),
         Predicate::MTime(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(
@@ -357,8 +373,8 @@ fn lower_predicate(
                 raw.as_os_str(),
                 TimestampKind::Modification,
                 RelativeTimeUnit::Days,
-                temporal.relative_baseline()?,
-                temporal.daystart_active,
+                state.temporal.relative_baseline()?,
+                state.temporal.daystart_active,
             )?,
         ))),
         Predicate::AMin(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(
@@ -367,8 +383,8 @@ fn lower_predicate(
                 raw.as_os_str(),
                 TimestampKind::Access,
                 RelativeTimeUnit::Minutes,
-                temporal.relative_baseline()?,
-                temporal.daystart_active,
+                state.temporal.relative_baseline()?,
+                state.temporal.daystart_active,
             )?,
         ))),
         Predicate::CMin(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(
@@ -377,8 +393,8 @@ fn lower_predicate(
                 raw.as_os_str(),
                 TimestampKind::Change,
                 RelativeTimeUnit::Minutes,
-                temporal.relative_baseline()?,
-                temporal.daystart_active,
+                state.temporal.relative_baseline()?,
+                state.temporal.daystart_active,
             )?,
         ))),
         Predicate::MMin(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(
@@ -387,8 +403,8 @@ fn lower_predicate(
                 raw.as_os_str(),
                 TimestampKind::Modification,
                 RelativeTimeUnit::Minutes,
-                temporal.relative_baseline()?,
-                temporal.daystart_active,
+                state.temporal.relative_baseline()?,
+                state.temporal.daystart_active,
             )?,
         ))),
         Predicate::Newer(path) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Newer(
@@ -414,7 +430,7 @@ fn lower_predicate(
             )?,
         ))),
         Predicate::DayStart => {
-            temporal.daystart_active = true;
+            state.temporal.daystart_active = true;
             Ok(RuntimeExpr::Barrier)
         }
         Predicate::Type(kind) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Type(kind))),
@@ -433,6 +449,7 @@ struct TemporalPlanningState {
 #[derive(Debug, Clone, Copy)]
 struct PlanningState {
     temporal: TemporalPlanningState,
+    regex_dialect: RegexDialect,
     saw_action: bool,
     saw_delete: bool,
     next_exec_batch_id: ExecBatchId,

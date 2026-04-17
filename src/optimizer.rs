@@ -111,6 +111,7 @@ pub(crate) fn predicate_profile(predicate: &RuntimePredicate) -> PredicateProfil
         RuntimePredicate::True | RuntimePredicate::False => profile(NONE, CostTier::Constant),
         RuntimePredicate::Name { .. } => profile(BASENAME, CostTier::StringOnly),
         RuntimePredicate::Path { .. } => profile(FULL_PATH, CostTier::StringOnly),
+        RuntimePredicate::Regex(_) => profile(FULL_PATH, CostTier::StringOnly),
         RuntimePredicate::Type(_) | RuntimePredicate::XType(_) => {
             profile(FILE_TYPE, CostTier::FileType)
         }

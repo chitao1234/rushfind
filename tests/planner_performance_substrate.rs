@@ -271,6 +271,7 @@ fn predicate_label(predicate: &RuntimePredicate) -> &'static str {
         RuntimePredicate::Prune => "prune",
         RuntimePredicate::Name { .. } => "name",
         RuntimePredicate::Path { .. } => "path",
+        RuntimePredicate::Regex(_) => "regex",
         RuntimePredicate::Inum(_) => "inum",
         RuntimePredicate::Links(_) => "links",
         RuntimePredicate::SameFile(_) => "samefile",

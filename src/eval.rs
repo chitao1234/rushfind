@@ -185,6 +185,10 @@ pub(crate) fn evaluate_predicate(
             *case_insensitive,
             true,
         ),
+        RuntimePredicate::Regex(_) => Err(Diagnostic::new(
+            "internal error: regex predicate evaluation is not implemented yet",
+            1,
+        )),
         RuntimePredicate::Inum(expected) => Ok(expected.matches(entry.active_inode(follow_mode)?)),
         RuntimePredicate::Links(expected) => {
             Ok(expected.matches(entry.active_link_count(follow_mode)?))
