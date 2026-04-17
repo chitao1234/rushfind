@@ -87,7 +87,8 @@ where
         },
         |event| {
             match event {
-                WalkEvent::Entry(entry) | WalkEvent::DirectoryComplete(entry) => {
+                WalkEvent::Entry(item) | WalkEvent::DirectoryComplete(item) => {
+                    let entry = item.entry;
                     if entry.depth >= plan.traversal.min_depth {
                         let _ = evaluate_with_context(
                             &plan.expr,
@@ -170,7 +171,8 @@ where
             },
             |event| {
                 match event {
-                    WalkEvent::Entry(entry) | WalkEvent::DirectoryComplete(entry) => {
+                    WalkEvent::Entry(item) | WalkEvent::DirectoryComplete(item) => {
+                        let entry = item.entry;
                         if entry.depth >= plan.traversal.min_depth {
                             work_tx.send((next_sequence, entry)).map_err(|_| {
                                 Diagnostic::new(
@@ -320,7 +322,8 @@ where
             },
         ) {
             match event {
-                WalkEvent::Entry(entry) | WalkEvent::DirectoryComplete(entry) => {
+                WalkEvent::Entry(item) | WalkEvent::DirectoryComplete(item) => {
+                    let entry = item.entry;
                     if entry.depth >= plan.traversal.min_depth {
                         entry_tx.send(entry).map_err(|_| {
                             Diagnostic::new(

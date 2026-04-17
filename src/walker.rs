@@ -3,6 +3,7 @@ use crate::entry::EntryContext;
 use crate::follow::FollowMode;
 use crate::identity::FileIdentity;
 use crate::planner::{TraversalOptions, TraversalOrder};
+use crate::runtime_pipeline::{EntryTicket, SubtreeBarrierId};
 use crate::traversal_control::TraversalControl;
 use crossbeam_channel::{Receiver, unbounded};
 use std::collections::BTreeMap;
@@ -10,14 +11,29 @@ use std::fs::{self, FileType};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::thread;
 use std::time::Duration;
 
 #[derive(Debug, Clone)]
+pub struct ScheduledEntry {
+    pub entry: EntryContext,
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) ticket: EntryTicket,
+}
+
+impl std::ops::Deref for ScheduledEntry {
+    type Target = EntryContext;
+
+    fn deref(&self) -> &Self::Target {
+        &self.entry
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum WalkEvent {
-    Entry(EntryContext),
-    DirectoryComplete(EntryContext),
+    Entry(ScheduledEntry),
+    DirectoryComplete(ScheduledEntry),
     Error(Diagnostic),
 }
 
@@ -28,6 +44,7 @@ struct PendingPath {
     is_command_line_root: bool,
     physical_file_type_hint: Option<FileType>,
     ancestry: Vec<FileIdentity>,
+    ancestor_barriers: Vec<SubtreeBarrierId>,
     root_device: Option<u64>,
     parent_completion: Option<CompletionId>,
 }
@@ -35,7 +52,10 @@ struct PendingPath {
 #[derive(Debug, Clone)]
 enum OrderedFrame {
     Visit(PendingPath),
-    Complete(EntryContext),
+    Complete {
+        entry: EntryContext,
+        ancestor_barriers: Vec<SubtreeBarrierId>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -49,6 +69,7 @@ type CompletionId = usize;
 #[derive(Debug)]
 struct CompletionRecord {
     entry: EntryContext,
+    ancestor_barriers: Vec<SubtreeBarrierId>,
     parent: Option<CompletionId>,
     remaining_children: usize,
     traversal_complete: bool,
@@ -58,6 +79,29 @@ struct CompletionRecord {
 struct CompletionState {
     next_id: AtomicUsize,
     records: Mutex<BTreeMap<CompletionId, CompletionRecord>>,
+}
+
+#[derive(Debug)]
+struct ReleasedDirectory {
+    id: CompletionId,
+    entry: EntryContext,
+    ancestor_barriers: Vec<SubtreeBarrierId>,
+}
+
+fn scheduled_entry(
+    entry: EntryContext,
+    sequence: u64,
+    ancestor_barriers: Vec<SubtreeBarrierId>,
+    block_on_subtree: Option<SubtreeBarrierId>,
+) -> ScheduledEntry {
+    ScheduledEntry {
+        entry,
+        ticket: EntryTicket {
+            sequence,
+            ancestor_barriers,
+            block_on_subtree,
+        },
+    }
 }
 
 trait WalkBackend: Send + Sync + 'static {
@@ -140,17 +184,28 @@ where
                 is_command_line_root: true,
                 physical_file_type_hint: None,
                 ancestry: Vec::new(),
+                ancestor_barriers: Vec::new(),
                 root_device: None,
                 parent_completion: None,
             })
         })
         .collect();
+    let mut next_sequence = 0_u64;
 
     while let Some(frame) = stack.pop() {
         let pending = match frame {
             OrderedFrame::Visit(pending) => pending,
-            OrderedFrame::Complete(entry) => {
-                emit(WalkEvent::DirectoryComplete(entry))?;
+            OrderedFrame::Complete {
+                entry,
+                ancestor_barriers,
+            } => {
+                emit(WalkEvent::DirectoryComplete(scheduled_entry(
+                    entry,
+                    next_sequence,
+                    ancestor_barriers,
+                    None,
+                )))?;
+                next_sequence += 1;
                 continue;
             }
         };
@@ -180,9 +235,23 @@ where
         };
 
         match options.order {
-            TraversalOrder::PreOrder => emit(WalkEvent::Entry(entry.clone()))?,
+            TraversalOrder::PreOrder => {
+                emit(WalkEvent::Entry(scheduled_entry(
+                    entry.clone(),
+                    next_sequence,
+                    pending.ancestor_barriers.clone(),
+                    None,
+                )))?;
+                next_sequence += 1;
+            }
             TraversalOrder::DepthFirstPostOrder if !is_directory => {
-                emit(WalkEvent::Entry(entry.clone()))?
+                emit(WalkEvent::Entry(scheduled_entry(
+                    entry.clone(),
+                    next_sequence,
+                    pending.ancestor_barriers.clone(),
+                    None,
+                )))?;
+                next_sequence += 1;
             }
             TraversalOrder::DepthFirstPostOrder => {}
         }
@@ -198,7 +267,13 @@ where
             Ok(Some(result)) => result,
             Ok(None) => {
                 if options.order == TraversalOrder::DepthFirstPostOrder && is_directory {
-                    emit(WalkEvent::DirectoryComplete(entry.clone()))?;
+                    emit(WalkEvent::DirectoryComplete(scheduled_entry(
+                        entry.clone(),
+                        next_sequence,
+                        pending.ancestor_barriers.clone(),
+                        None,
+                    )))?;
+                    next_sequence += 1;
                 }
                 continue;
             }
@@ -213,7 +288,13 @@ where
             Err(error) => {
                 emit(WalkEvent::Error(error))?;
                 if options.order == TraversalOrder::DepthFirstPostOrder && is_directory {
-                    emit(WalkEvent::DirectoryComplete(entry.clone()))?;
+                    emit(WalkEvent::DirectoryComplete(scheduled_entry(
+                        entry.clone(),
+                        next_sequence,
+                        pending.ancestor_barriers.clone(),
+                        None,
+                    )))?;
+                    next_sequence += 1;
                 }
                 continue;
             }
@@ -224,7 +305,10 @@ where
         }
 
         if options.order == TraversalOrder::DepthFirstPostOrder && is_directory {
-            stack.push(OrderedFrame::Complete(entry.clone()));
+            stack.push(OrderedFrame::Complete {
+                entry: entry.clone(),
+                ancestor_barriers: pending.ancestor_barriers.clone(),
+            });
         }
 
         for child in children.into_iter().rev() {
@@ -234,6 +318,7 @@ where
                 is_command_line_root: false,
                 physical_file_type_hint: child.physical_file_type_hint,
                 ancestry: child_ancestry.clone(),
+                ancestor_barriers: pending.ancestor_barriers.clone(),
                 root_device,
                 parent_completion: None,
             }));
@@ -277,6 +362,7 @@ where
     let (work_tx, work_rx) = unbounded::<PendingPath>();
     let (event_tx, event_rx) = unbounded::<WalkEvent>();
     let inflight = Arc::new(AtomicUsize::new(0));
+    let next_sequence = Arc::new(AtomicU64::new(0));
     let control = Arc::new(control);
     let completions = Arc::new(CompletionState::default());
 
@@ -289,6 +375,7 @@ where
                 is_command_line_root: true,
                 physical_file_type_hint: None,
                 ancestry: Vec::new(),
+                ancestor_barriers: Vec::new(),
                 root_device: None,
                 parent_completion: None,
             })
@@ -300,6 +387,7 @@ where
         let work_tx = work_tx.clone();
         let event_tx = event_tx.clone();
         let inflight = inflight.clone();
+        let next_sequence = next_sequence.clone();
         let backend = backend.clone();
         let control = control.clone();
         let completions = completions.clone();
@@ -327,7 +415,12 @@ where
                                 }
                             };
 
-                            let _ = event_tx.send(WalkEvent::Entry(entry.clone()));
+                            let _ = event_tx.send(WalkEvent::Entry(scheduled_entry(
+                                entry.clone(),
+                                next_sequence.fetch_add(1, Ordering::SeqCst),
+                                pending.ancestor_barriers.clone(),
+                                None,
+                            )));
 
                             let (child_ancestry, root_device) = match should_descend_directory(
                                 &pending,
@@ -363,6 +456,7 @@ where
                                             is_command_line_root: false,
                                             physical_file_type_hint: child.physical_file_type_hint,
                                             ancestry: child_ancestry.clone(),
+                                            ancestor_barriers: pending.ancestor_barriers.clone(),
                                             root_device,
                                             parent_completion: None,
                                         });
@@ -385,6 +479,7 @@ where
                                     completions.as_ref(),
                                     pending.parent_completion,
                                     &event_tx,
+                                    next_sequence.as_ref(),
                                 );
                                 inflight.fetch_sub(1, Ordering::SeqCst);
                                 continue;
@@ -399,6 +494,7 @@ where
                                     completions.as_ref(),
                                     pending.parent_completion,
                                     &event_tx,
+                                    next_sequence.as_ref(),
                                 );
                                 inflight.fetch_sub(1, Ordering::SeqCst);
                                 continue;
@@ -414,6 +510,7 @@ where
                                         completions.as_ref(),
                                         pending.parent_completion,
                                         &event_tx,
+                                        next_sequence.as_ref(),
                                     );
                                     inflight.fetch_sub(1, Ordering::SeqCst);
                                     continue;
@@ -421,11 +518,17 @@ where
                             };
 
                         if !is_directory {
-                            let _ = event_tx.send(WalkEvent::Entry(entry.clone()));
+                            let _ = event_tx.send(WalkEvent::Entry(scheduled_entry(
+                                entry.clone(),
+                                next_sequence.fetch_add(1, Ordering::SeqCst),
+                                pending.ancestor_barriers.clone(),
+                                None,
+                            )));
                             let _ = child_finished(
                                 completions.as_ref(),
                                 pending.parent_completion,
                                 &event_tx,
+                                next_sequence.as_ref(),
                             );
                             inflight.fetch_sub(1, Ordering::SeqCst);
                             continue;
@@ -434,6 +537,7 @@ where
                         let completion_id = match begin_directory(
                             completions.as_ref(),
                             entry.clone(),
+                            pending.ancestor_barriers.clone(),
                             pending.parent_completion,
                         ) {
                             Ok(id) => id,
@@ -443,11 +547,13 @@ where
                                     completions.as_ref(),
                                     pending.parent_completion,
                                     &event_tx,
+                                    next_sequence.as_ref(),
                                 );
                                 inflight.fetch_sub(1, Ordering::SeqCst);
                                 continue;
                             }
                         };
+                        let barrier = SubtreeBarrierId(completion_id);
 
                         let (child_ancestry, root_device) = match should_descend_directory(
                             &pending,
@@ -463,6 +569,7 @@ where
                                     completions.as_ref(),
                                     completion_id,
                                     &event_tx,
+                                    next_sequence.as_ref(),
                                 );
                                 inflight.fetch_sub(1, Ordering::SeqCst);
                                 continue;
@@ -473,6 +580,7 @@ where
                                     completions.as_ref(),
                                     completion_id,
                                     &event_tx,
+                                    next_sequence.as_ref(),
                                 );
                                 inflight.fetch_sub(1, Ordering::SeqCst);
                                 continue;
@@ -485,6 +593,7 @@ where
                                     let _ = event_tx.send(WalkEvent::Error(error));
                                 }
 
+                                let child_ancestor_barriers = vec![barrier];
                                 for child in children {
                                     let _ =
                                         increment_child_count(completions.as_ref(), completion_id);
@@ -495,6 +604,7 @@ where
                                         is_command_line_root: false,
                                         physical_file_type_hint: child.physical_file_type_hint,
                                         ancestry: child_ancestry.clone(),
+                                        ancestor_barriers: child_ancestor_barriers.clone(),
                                         root_device,
                                         parent_completion: Some(completion_id),
                                     });
@@ -505,8 +615,12 @@ where
                             }
                         }
 
-                        let _ =
-                            mark_directory_ready(completions.as_ref(), completion_id, &event_tx);
+                        let _ = mark_directory_ready(
+                            completions.as_ref(),
+                            completion_id,
+                            &event_tx,
+                            next_sequence.as_ref(),
+                        );
                         inflight.fetch_sub(1, Ordering::SeqCst);
                     }
                     Err(_) if inflight.load(Ordering::SeqCst) == 0 => break,
@@ -524,6 +638,7 @@ where
 fn begin_directory(
     state: &CompletionState,
     entry: EntryContext,
+    ancestor_barriers: Vec<SubtreeBarrierId>,
     parent: Option<CompletionId>,
 ) -> Result<CompletionId, Diagnostic> {
     let id = state.next_id.fetch_add(1, Ordering::SeqCst);
@@ -535,6 +650,7 @@ fn begin_directory(
             id,
             CompletionRecord {
                 entry,
+                ancestor_barriers,
                 parent,
                 remaining_children: 0,
                 traversal_complete: false,
@@ -559,6 +675,7 @@ fn mark_directory_ready(
     state: &CompletionState,
     id: CompletionId,
     event_tx: &crossbeam_channel::Sender<WalkEvent>,
+    next_sequence: &AtomicU64,
 ) -> Result<(), Diagnostic> {
     let released = {
         let mut records = state
@@ -572,13 +689,14 @@ fn mark_directory_ready(
         collect_released_entries(&mut records, Some(id), false)
     };
 
-    emit_directory_completions(event_tx, released)
+    emit_directory_completions(event_tx, released, next_sequence)
 }
 
 fn child_finished(
     state: &CompletionState,
     parent: Option<CompletionId>,
     event_tx: &crossbeam_channel::Sender<WalkEvent>,
+    next_sequence: &AtomicU64,
 ) -> Result<(), Diagnostic> {
     let Some(parent) = parent else {
         return Ok(());
@@ -592,14 +710,14 @@ fn child_finished(
         collect_released_entries(&mut records, Some(parent), true)
     };
 
-    emit_directory_completions(event_tx, released)
+    emit_directory_completions(event_tx, released, next_sequence)
 }
 
 fn collect_released_entries(
     records: &mut BTreeMap<CompletionId, CompletionRecord>,
     start: Option<CompletionId>,
     mut decrement_first: bool,
-) -> Vec<EntryContext> {
+) -> Vec<ReleasedDirectory> {
     let mut released = Vec::new();
     let mut current = start;
 
@@ -616,9 +734,17 @@ fn collect_released_entries(
             break;
         }
 
-        let CompletionRecord { entry, parent, .. } =
-            records.remove(&id).expect("completion record exists");
-        released.push(entry);
+        let CompletionRecord {
+            entry,
+            ancestor_barriers,
+            parent,
+            ..
+        } = records.remove(&id).expect("completion record exists");
+        released.push(ReleasedDirectory {
+            id,
+            entry,
+            ancestor_barriers,
+        });
         current = parent;
         decrement_first = true;
     }
@@ -628,11 +754,17 @@ fn collect_released_entries(
 
 fn emit_directory_completions(
     event_tx: &crossbeam_channel::Sender<WalkEvent>,
-    released: Vec<EntryContext>,
+    released: Vec<ReleasedDirectory>,
+    next_sequence: &AtomicU64,
 ) -> Result<(), Diagnostic> {
-    for entry in released {
+    for item in released {
         event_tx
-            .send(WalkEvent::DirectoryComplete(entry))
+            .send(WalkEvent::DirectoryComplete(scheduled_entry(
+                item.entry,
+                next_sequence.fetch_add(1, Ordering::SeqCst),
+                item.ancestor_barriers,
+                Some(SubtreeBarrierId(item.id)),
+            )))
             .map_err(|_| Diagnostic::new("internal error: walk event channel unavailable", 1))?;
     }
     Ok(())
@@ -765,8 +897,8 @@ mod tests {
                 })
             },
             |event| {
-                if let WalkEvent::Entry(entry) = event {
-                    seen.push(entry.path);
+                if let WalkEvent::Entry(item) = event {
+                    seen.push(item.entry.path);
                 }
                 Ok(())
             },
@@ -870,12 +1002,12 @@ mod tests {
             },
             |event| {
                 match event {
-                    WalkEvent::Entry(entry) => {
-                        let rel = entry.path.strip_prefix(root.path()).unwrap();
+                    WalkEvent::Entry(item) => {
+                        let rel = item.entry.path.strip_prefix(root.path()).unwrap();
                         seen.push(format!("entry:{}", rel.display()));
                     }
-                    WalkEvent::DirectoryComplete(entry) => {
-                        let rel = entry.path.strip_prefix(root.path()).unwrap();
+                    WalkEvent::DirectoryComplete(item) => {
+                        let rel = item.entry.path.strip_prefix(root.path()).unwrap();
                         seen.push(format!("done:{}", rel.display()));
                     }
                     WalkEvent::Error(error) => panic!("unexpected walk error: {error:?}"),
@@ -931,6 +1063,48 @@ mod tests {
         assert!(file_index < dir_index);
     }
 
+    #[test]
+    fn parallel_depth_mode_assigns_parent_barriers_to_descendants() {
+        let root = tempdir().unwrap();
+        fs::create_dir(root.path().join("dir")).unwrap();
+        fs::write(root.path().join("dir/file.txt"), "child\n").unwrap();
+
+        let seen = collect_scheduled_events(
+            root.path(),
+            walk_parallel_with_backend(
+                Arc::new(TestBackend::default()),
+                &[root.path().to_path_buf()],
+                FollowMode::Physical,
+                TraversalOptions {
+                    min_depth: 0,
+                    max_depth: None,
+                    same_file_system: false,
+                    order: TraversalOrder::DepthFirstPostOrder,
+                },
+                4,
+                |_entry| {
+                    Ok(TraversalControl {
+                        matched: true,
+                        prune: false,
+                    })
+                },
+            ),
+        );
+
+        let file = seen
+            .iter()
+            .find(|item| item.label == "entry:dir/file.txt")
+            .unwrap();
+        let dir = seen.iter().find(|item| item.label == "done:dir").unwrap();
+
+        assert!(dir.ticket.block_on_subtree.is_some());
+        assert_eq!(file.ticket.ancestor_barriers.len(), 1);
+        assert_eq!(
+            file.ticket.ancestor_barriers[0],
+            dir.ticket.block_on_subtree.unwrap()
+        );
+    }
+
     #[derive(Default)]
     struct TestBackend {
         devices: BTreeMap<PathBuf, u64>,
@@ -979,8 +1153,8 @@ mod tests {
     fn collect_paths(receiver: Receiver<WalkEvent>) -> Vec<PathBuf> {
         let mut paths = Vec::new();
         for event in receiver {
-            if let WalkEvent::Entry(entry) = event {
-                paths.push(entry.path);
+            if let WalkEvent::Entry(item) = event {
+                paths.push(item.entry.path);
             }
         }
         paths
@@ -990,13 +1164,43 @@ mod tests {
         let mut seen = Vec::new();
         for event in receiver {
             match event {
-                WalkEvent::Entry(entry) => {
-                    let rel = entry.path.strip_prefix(base).unwrap().display();
+                WalkEvent::Entry(item) => {
+                    let rel = item.entry.path.strip_prefix(base).unwrap().display();
                     seen.push(format!("entry:{rel}"));
                 }
-                WalkEvent::DirectoryComplete(entry) => {
-                    let rel = entry.path.strip_prefix(base).unwrap().display();
+                WalkEvent::DirectoryComplete(item) => {
+                    let rel = item.entry.path.strip_prefix(base).unwrap().display();
                     seen.push(format!("done:{rel}"));
+                }
+                WalkEvent::Error(error) => panic!("unexpected walk error: {error:?}"),
+            }
+        }
+        seen
+    }
+
+    #[derive(Debug)]
+    struct ScheduledLabel {
+        label: String,
+        ticket: crate::runtime_pipeline::EntryTicket,
+    }
+
+    fn collect_scheduled_events(base: &Path, receiver: Receiver<WalkEvent>) -> Vec<ScheduledLabel> {
+        let mut seen = Vec::new();
+        for event in receiver {
+            match event {
+                WalkEvent::Entry(item) => {
+                    let rel = item.entry.path.strip_prefix(base).unwrap().display();
+                    seen.push(ScheduledLabel {
+                        label: format!("entry:{rel}"),
+                        ticket: item.ticket,
+                    });
+                }
+                WalkEvent::DirectoryComplete(item) => {
+                    let rel = item.entry.path.strip_prefix(base).unwrap().display();
+                    seen.push(ScheduledLabel {
+                        label: format!("done:{rel}"),
+                        ticket: item.ticket,
+                    });
                 }
                 WalkEvent::Error(error) => panic!("unexpected walk error: {error:?}"),
             }

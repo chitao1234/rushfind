@@ -6,6 +6,41 @@ use crate::planner::{RuntimeAction, RuntimeExpr};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct SubtreeBarrierId(pub(crate) usize);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EntryTicket {
+    pub(crate) sequence: u64,
+    pub(crate) ancestor_barriers: Vec<SubtreeBarrierId>,
+    pub(crate) block_on_subtree: Option<SubtreeBarrierId>,
+}
+
+#[derive(Debug, Default)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) struct SubtreeBarrierTracker {
+    open_descendants: BTreeMap<SubtreeBarrierId, usize>,
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+impl SubtreeBarrierTracker {
+    pub(crate) fn register_descendant(&mut self, barrier: SubtreeBarrierId) {
+        *self.open_descendants.entry(barrier).or_default() += 1;
+    }
+
+    pub(crate) fn finish_descendant(&mut self, barrier: SubtreeBarrierId) {
+        let count = self
+            .open_descendants
+            .get_mut(&barrier)
+            .expect("barrier registered");
+        *count -= 1;
+    }
+
+    pub(crate) fn is_released(&self, barrier: SubtreeBarrierId) -> bool {
+        self.open_descendants.get(&barrier).copied().unwrap_or(0) == 0
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ActionRequest {
     action: RuntimeAction,
@@ -426,5 +461,21 @@ mod tests {
         assert_eq!(queue.pop_next(), Some("zero"));
         assert_eq!(queue.pop_next(), Some("one"));
         assert_eq!(queue.pop_next(), Some("two"));
+    }
+
+    #[test]
+    fn subtree_barrier_tracker_releases_parent_only_after_descendants_finish() {
+        let barrier = super::SubtreeBarrierId(7);
+        let mut tracker = super::SubtreeBarrierTracker::default();
+
+        tracker.register_descendant(barrier);
+        tracker.register_descendant(barrier);
+        assert!(!tracker.is_released(barrier));
+
+        tracker.finish_descendant(barrier);
+        assert!(!tracker.is_released(barrier));
+
+        tracker.finish_descendant(barrier);
+        assert!(tracker.is_released(barrier));
     }
 }
