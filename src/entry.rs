@@ -89,6 +89,7 @@ pub struct EntryContext {
     pub path: PathBuf,
     pub depth: usize,
     pub is_command_line_root: bool,
+    root_path: Arc<PathBuf>,
     data: Arc<EntryData>,
 }
 
@@ -123,25 +124,47 @@ impl fmt::Debug for EntryContext {
 
 impl EntryContext {
     pub fn new(path: PathBuf, depth: usize, is_command_line_root: bool) -> Self {
-        Self::with_reader_and_hint(
+        let root_path = Arc::new(path.clone());
+        Self::with_reader_hint_and_root(
             path,
             depth,
             is_command_line_root,
+            root_path,
             None,
             Arc::new(FsEntryReader),
         )
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn with_file_type_hint(
         path: PathBuf,
         depth: usize,
         is_command_line_root: bool,
         physical_file_type_hint: Option<FileType>,
     ) -> Self {
-        Self::with_reader_and_hint(
+        let root_path = Arc::new(path.clone());
+        Self::with_reader_hint_and_root(
             path,
             depth,
             is_command_line_root,
+            root_path,
+            physical_file_type_hint,
+            Arc::new(FsEntryReader),
+        )
+    }
+
+    pub(crate) fn with_file_type_hint_and_root(
+        path: PathBuf,
+        depth: usize,
+        is_command_line_root: bool,
+        root_path: Arc<PathBuf>,
+        physical_file_type_hint: Option<FileType>,
+    ) -> Self {
+        Self::with_reader_hint_and_root(
+            path,
+            depth,
+            is_command_line_root,
+            root_path,
             physical_file_type_hint,
             Arc::new(FsEntryReader),
         )
@@ -154,13 +177,26 @@ impl EntryContext {
         is_command_line_root: bool,
         reader: Arc<dyn EntryReader>,
     ) -> Self {
-        Self::with_reader_and_hint(path, depth, is_command_line_root, None, reader)
+        let root_path = Arc::new(path.clone());
+        Self::with_reader_hint_and_root(path, depth, is_command_line_root, root_path, None, reader)
     }
 
-    fn with_reader_and_hint(
+    #[cfg(test)]
+    pub(crate) fn new_with_reader_and_root(
         path: PathBuf,
         depth: usize,
         is_command_line_root: bool,
+        root_path: Arc<PathBuf>,
+        reader: Arc<dyn EntryReader>,
+    ) -> Self {
+        Self::with_reader_hint_and_root(path, depth, is_command_line_root, root_path, None, reader)
+    }
+
+    fn with_reader_hint_and_root(
+        path: PathBuf,
+        depth: usize,
+        is_command_line_root: bool,
+        root_path: Arc<PathBuf>,
         physical_file_type_hint: Option<FileType>,
         reader: Arc<dyn EntryReader>,
     ) -> Self {
@@ -168,6 +204,7 @@ impl EntryContext {
             path,
             depth,
             is_command_line_root,
+            root_path,
             data: Arc::new(EntryData {
                 reader,
                 physical_file_type_hint,
@@ -186,6 +223,23 @@ impl EntryContext {
                 logical_birth_time: OnceLock::new(),
             }),
         }
+    }
+
+    pub fn relative_to_root(&self) -> Result<&Path, Diagnostic> {
+        self.path
+            .strip_prefix(self.root_path.as_path())
+            .map_err(|_| Diagnostic::new("internal error: entry root mismatch", 1))
+    }
+
+    pub fn dirname_for_printf(&self) -> PathBuf {
+        if !self.path.as_os_str().as_encoded_bytes().contains(&b'/') {
+            return PathBuf::from(".");
+        }
+
+        self.path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf()
     }
 
     pub fn physical_kind(&self) -> Result<EntryKind, Diagnostic> {

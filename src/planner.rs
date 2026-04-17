@@ -10,6 +10,7 @@ use crate::identity::FileIdentity;
 use crate::numeric::{NumericComparison, parse_numeric_argument};
 use crate::optimizer::optimize_read_only_and_chains;
 use crate::perm::{PermMatcher, parse_perm_argument};
+use crate::printf::{PrintfProgram, compile_printf_program};
 use crate::regex_match::{RegexDialect, RegexMatcher};
 use crate::runtime_policy::{RuntimePolicy, build_traversal_control_plan};
 use crate::size::{SizeMatcher, parse_size_argument};
@@ -120,6 +121,7 @@ pub enum OutputAction {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimeAction {
     Output(OutputAction),
+    Printf(PrintfProgram),
     ExecImmediate(ImmediateExecAction),
     ExecBatched(BatchedExecAction),
     Delete,
@@ -489,6 +491,9 @@ fn lower_action(action: Action, state: &mut PlanningState) -> Result<RuntimeExpr
         ))),
         Action::Print0 => Ok(RuntimeExpr::Action(RuntimeAction::Output(
             OutputAction::Print0,
+        ))),
+        Action::Printf { format } => Ok(RuntimeExpr::Action(RuntimeAction::Printf(
+            compile_printf_program("-printf", format.as_os_str())?,
         ))),
         Action::Exec { argv, batch: false } => Ok(RuntimeExpr::Action(
             RuntimeAction::ExecImmediate(compile_immediate_exec(&argv)),

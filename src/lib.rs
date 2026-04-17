@@ -18,6 +18,7 @@ pub mod parser;
 pub mod pattern;
 pub mod perm;
 pub mod planner;
+pub mod printf;
 pub mod regex_match;
 pub mod runner;
 pub(crate) mod runtime_pipeline;

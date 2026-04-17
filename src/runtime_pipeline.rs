@@ -4,7 +4,7 @@ use crate::eval::{ActionOutcome, EvalContext, EvalOutcome, RuntimeStatus, evalua
 use crate::follow::FollowMode;
 use crate::planner::{RuntimeAction, RuntimeExpr};
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct SubtreeBarrierId(pub(crate) usize);
@@ -48,23 +48,37 @@ impl SubtreeBarrierTracker {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub(crate) struct ActionRequest {
     action: RuntimeAction,
-    path: PathBuf,
+    entry: EntryContext,
+    follow_mode: FollowMode,
 }
 
 impl ActionRequest {
-    pub(crate) fn new(action: RuntimeAction, path: PathBuf) -> Self {
-        Self { action, path }
+    pub(crate) fn new(action: RuntimeAction, entry: EntryContext, follow_mode: FollowMode) -> Self {
+        Self {
+            action,
+            entry,
+            follow_mode,
+        }
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn path(&self) -> &Path {
-        &self.path
+        self.entry.path.as_path()
     }
 
     pub(crate) fn action(&self) -> &RuntimeAction {
         &self.action
+    }
+
+    pub(crate) fn entry(&self) -> &EntryContext {
+        &self.entry
+    }
+
+    pub(crate) fn follow_mode(&self) -> FollowMode {
+        self.follow_mode
     }
 }
 
@@ -186,7 +200,7 @@ fn step_expr(
             )
         }
         RuntimeExpr::Action(action) => Ok(EvalStep::PendingAction {
-            request: ActionRequest::new(action, entry.path.clone()),
+            request: ActionRequest::new(action, entry.clone(), follow_mode),
             continuation: PendingEntryEval {
                 entry,
                 follow_mode,

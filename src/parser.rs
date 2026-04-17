@@ -332,6 +332,10 @@ impl<'a> Parser<'a> {
             Expr::Action(Action::Print)
         } else if token.matches("-print0") {
             Expr::Action(Action::Print0)
+        } else if token.matches("-printf") {
+            Expr::Action(Action::Printf {
+                format: self.take_os_string("-printf")?,
+            })
         } else if token.matches("-exec") {
             Expr::Action(self.take_exec_action(false, false)?)
         } else if token.matches("-execdir") {

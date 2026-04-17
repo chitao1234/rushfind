@@ -263,6 +263,7 @@ fn expr_label(expr: &RuntimeExpr) -> &'static str {
         RuntimeExpr::Predicate(predicate) => predicate_label(predicate),
         RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)) => "print",
         RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print0)) => "print0",
+        RuntimeExpr::Action(RuntimeAction::Printf(_)) => "printf",
         RuntimeExpr::Action(RuntimeAction::Delete) => "delete",
         RuntimeExpr::Action(RuntimeAction::ExecImmediate(_)) => "exec:semicolon",
         RuntimeExpr::Action(RuntimeAction::ExecBatched(_)) => "exec:batch",

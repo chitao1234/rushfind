@@ -40,6 +40,7 @@ pub enum WalkEvent {
 #[derive(Debug, Clone)]
 struct PendingPath {
     path: PathBuf,
+    root_path: Arc<PathBuf>,
     depth: usize,
     is_command_line_root: bool,
     physical_file_type_hint: Option<FileType>,
@@ -178,8 +179,10 @@ where
         .rev()
         .cloned()
         .map(|path| {
+            let root_path = Arc::new(path.clone());
             OrderedFrame::Visit(PendingPath {
                 path,
+                root_path,
                 depth: 0,
                 is_command_line_root: true,
                 physical_file_type_hint: None,
@@ -314,6 +317,7 @@ where
         for child in children.into_iter().rev() {
             stack.push(OrderedFrame::Visit(PendingPath {
                 path: child.path,
+                root_path: pending.root_path.clone(),
                 depth: pending.depth + 1,
                 is_command_line_root: false,
                 physical_file_type_hint: child.physical_file_type_hint,
@@ -371,6 +375,7 @@ where
         work_tx
             .send(PendingPath {
                 path: path.clone(),
+                root_path: Arc::new(path.clone()),
                 depth: 0,
                 is_command_line_root: true,
                 physical_file_type_hint: None,
@@ -452,6 +457,7 @@ where
                                         inflight.fetch_add(1, Ordering::SeqCst);
                                         let _ = work_tx.send(PendingPath {
                                             path: child.path,
+                                            root_path: pending.root_path.clone(),
                                             depth: pending.depth + 1,
                                             is_command_line_root: false,
                                             physical_file_type_hint: child.physical_file_type_hint,
@@ -600,6 +606,7 @@ where
                                     inflight.fetch_add(1, Ordering::SeqCst);
                                     let _ = work_tx.send(PendingPath {
                                         path: child.path,
+                                        root_path: pending.root_path.clone(),
                                         depth: pending.depth + 1,
                                         is_command_line_root: false,
                                         physical_file_type_hint: child.physical_file_type_hint,
@@ -771,10 +778,11 @@ fn emit_directory_completions(
 }
 
 fn load_entry(pending: &PendingPath) -> Result<EntryContext, Diagnostic> {
-    let entry = EntryContext::with_file_type_hint(
+    let entry = EntryContext::with_file_type_hint_and_root(
         pending.path.clone(),
         pending.depth,
         pending.is_command_line_root,
+        pending.root_path.clone(),
         pending.physical_file_type_hint,
     );
 

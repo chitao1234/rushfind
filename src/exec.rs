@@ -1,6 +1,8 @@
 use crate::diagnostics::Diagnostic;
+use crate::entry::EntryContext;
 use crate::eval::{ActionOutcome, ActionSink, RuntimeStatus};
-use crate::output::{BrokerMessage, StdoutSink, render_output_bytes};
+use crate::follow::FollowMode;
+use crate::output::{BrokerMessage, StdoutSink, render_runtime_action_bytes};
 use crate::planner::RuntimeAction;
 use crossbeam_channel::Sender;
 use libc::_SC_ARG_MAX;
@@ -226,18 +228,21 @@ impl<W: std::io::Write, E: std::io::Write> ActionSink for OrderedActionSink<'_, 
     fn dispatch(
         &mut self,
         action: &RuntimeAction,
-        path: &Path,
+        entry: &EntryContext,
+        follow_mode: FollowMode,
     ) -> Result<ActionOutcome, Diagnostic> {
         match action {
-            RuntimeAction::Output(_) => self.output.dispatch(action, path),
+            RuntimeAction::Output(_) | RuntimeAction::Printf(_) => {
+                self.output.dispatch(action, entry, follow_mode)
+            }
             RuntimeAction::ExecImmediate(spec) => {
-                run_immediate_ordered(spec, path, self.stderr).map(action_success)
+                run_immediate_ordered(spec, entry.path.as_path(), self.stderr).map(action_success)
             }
             RuntimeAction::ExecBatched(spec) => Ok(ActionOutcome {
                 matched: true,
-                status: self.enqueue(spec, path)?,
+                status: self.enqueue(spec, entry.path.as_path())?,
             }),
-            RuntimeAction::Delete => match delete_path(path) {
+            RuntimeAction::Delete => match delete_path(entry.path.as_path()) {
                 Ok(result) => Ok(action_success(result)),
                 Err(error) => {
                     self.write_diagnostic(&format!("findoxide: {}", error.message))?;
@@ -279,7 +284,7 @@ impl ParallelActionSink {
         &self,
         request: &crate::runtime_pipeline::ActionRequest,
     ) -> Result<ActionOutcome, Diagnostic> {
-        self.execute_action(request.action(), request.path())
+        self.execute_action(request.action(), request.entry(), request.follow_mode())
     }
 
     pub fn flush_all(&self) -> Result<RuntimeStatus, Diagnostic> {
@@ -373,25 +378,29 @@ impl ParallelActionSink {
     fn execute_action(
         &self,
         action: &RuntimeAction,
-        path: &Path,
+        entry: &EntryContext,
+        follow_mode: FollowMode,
     ) -> Result<ActionOutcome, Diagnostic> {
         match action {
-            RuntimeAction::Output(output) => {
+            RuntimeAction::Output(_) | RuntimeAction::Printf(_) => {
                 send_broker_message(
                     &self.broker,
-                    BrokerMessage::Stdout(render_output_bytes(*output, path)),
+                    BrokerMessage::Stdout(render_runtime_action_bytes(action, entry, follow_mode)?),
                 )?;
                 Ok(ActionOutcome::matched_true())
             }
-            RuntimeAction::ExecImmediate(spec) => {
-                run_immediate_parallel(spec, path, &self.broker, self.shared.spill_threshold)
-                    .map(action_success)
-            }
+            RuntimeAction::ExecImmediate(spec) => run_immediate_parallel(
+                spec,
+                entry.path.as_path(),
+                &self.broker,
+                self.shared.spill_threshold,
+            )
+            .map(action_success),
             RuntimeAction::ExecBatched(spec) => Ok(ActionOutcome {
                 matched: true,
-                status: self.enqueue(spec, path)?,
+                status: self.enqueue(spec, entry.path.as_path())?,
             }),
-            RuntimeAction::Delete => match delete_path(path) {
+            RuntimeAction::Delete => match delete_path(entry.path.as_path()) {
                 Ok(result) => Ok(action_success(result)),
                 Err(error) => {
                     send_broker_message(
@@ -412,9 +421,10 @@ impl ActionSink for ParallelActionSink {
     fn dispatch(
         &mut self,
         action: &RuntimeAction,
-        path: &Path,
+        entry: &EntryContext,
+        follow_mode: FollowMode,
     ) -> Result<ActionOutcome, Diagnostic> {
-        self.execute_action(action, path)
+        self.execute_action(action, entry, follow_mode)
     }
 }
 
@@ -822,7 +832,9 @@ mod tests {
         BatchLimit, OrderedActionSink, ParallelActionSink, PendingBatch, SpillBuffer,
         build_batched_argv, compile_batched_exec, delete_path,
     };
+    use crate::entry::EntryContext;
     use crate::eval::ActionSink;
+    use crate::follow::FollowMode;
     use crate::planner::RuntimeAction;
     use crossbeam_channel::unbounded;
     use std::io::Write;
@@ -881,13 +893,17 @@ mod tests {
     #[test]
     fn ordered_flush_reports_batched_false_as_action_failure() {
         let spec = compile_batched_exec(7, &["false".into(), "{}".into()]).unwrap();
-        let path = PathBuf::from("placeholder");
+        let entry = EntryContext::new(PathBuf::from("placeholder"), 0, true);
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         let mut sink = OrderedActionSink::new(&mut stdout, &mut stderr);
 
         let outcome = sink
-            .dispatch(&RuntimeAction::ExecBatched(spec), path.as_path())
+            .dispatch(
+                &RuntimeAction::ExecBatched(spec),
+                &entry,
+                FollowMode::Physical,
+            )
             .unwrap();
 
         assert!(outcome.matched);
@@ -900,12 +916,16 @@ mod tests {
     #[test]
     fn parallel_flush_reports_batched_false_as_action_failure() {
         let spec = compile_batched_exec(9, &["false".into(), "{}".into()]).unwrap();
-        let path = PathBuf::from("placeholder");
+        let entry = EntryContext::new(PathBuf::from("placeholder"), 0, true);
         let (broker, _rx) = unbounded();
         let mut sink = ParallelActionSink::new(broker, 4).unwrap();
 
         let outcome = sink
-            .dispatch(&RuntimeAction::ExecBatched(spec), path.as_path())
+            .dispatch(
+                &RuntimeAction::ExecBatched(spec),
+                &entry,
+                FollowMode::Physical,
+            )
             .unwrap();
 
         assert!(outcome.matched);
@@ -917,13 +937,13 @@ mod tests {
 
     #[test]
     fn ordered_delete_missing_path_reports_action_failure_status() {
-        let missing = PathBuf::from("definitely-missing-delete-target");
+        let missing = EntryContext::new(PathBuf::from("definitely-missing-delete-target"), 0, true);
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         let mut sink = OrderedActionSink::new(&mut stdout, &mut stderr);
 
         let outcome = sink
-            .dispatch(&RuntimeAction::Delete, missing.as_path())
+            .dispatch(&RuntimeAction::Delete, &missing, FollowMode::Physical)
             .unwrap();
 
         assert!(!outcome.matched);

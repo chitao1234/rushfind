@@ -89,6 +89,7 @@ pub enum Predicate {
 pub enum Action {
     Print,
     Print0,
+    Printf { format: OsString },
     Exec { argv: Vec<OsString>, batch: bool },
     ExecDir { argv: Vec<OsString>, batch: bool },
     Ok { argv: Vec<OsString> },

@@ -212,7 +212,11 @@ where
                             request,
                             continuation,
                         } => {
-                            let outcome = sink.dispatch(request.action(), request.path())?;
+                            let outcome = sink.dispatch(
+                                request.action(),
+                                request.entry(),
+                                request.follow_mode(),
+                            )?;
                             ready = resume_entry_eval(continuation, outcome, &eval_context)?;
                         }
                     }
@@ -253,6 +257,7 @@ fn contains_commit_sensitive_action(expr: &RuntimeExpr) -> bool {
         }
         RuntimeExpr::Not(inner) => contains_commit_sensitive_action(inner),
         RuntimeExpr::Action(crate::planner::RuntimeAction::Output(_)) => false,
+        RuntimeExpr::Action(crate::planner::RuntimeAction::Printf(_)) => false,
         RuntimeExpr::Action(_) => true,
         RuntimeExpr::Predicate(_) | RuntimeExpr::Barrier => false,
     }

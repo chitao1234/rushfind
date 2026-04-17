@@ -9,7 +9,6 @@ use crate::planner::{RuntimeAction, RuntimeExpr, RuntimePredicate};
 use crate::runtime_pipeline::{EvalStep, begin_entry_eval, resume_entry_eval};
 use crate::time::{NewerMatcher, Timestamp, TimestampKind};
 use std::ffi::OsStr;
-use std::path::Path;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -111,7 +110,8 @@ pub trait ActionSink {
     fn dispatch(
         &mut self,
         action: &RuntimeAction,
-        path: &Path,
+        entry: &EntryContext,
+        follow_mode: FollowMode,
     ) -> Result<ActionOutcome, Diagnostic>;
 }
 
@@ -130,7 +130,8 @@ pub(crate) fn evaluate_outcome_with_context(
                 request,
                 continuation,
             } => {
-                let outcome = sink.dispatch(request.action(), request.path())?;
+                let outcome =
+                    sink.dispatch(request.action(), request.entry(), request.follow_mode())?;
                 step = resume_entry_eval(continuation, outcome, context)?;
             }
         }
@@ -310,7 +311,8 @@ mod tests {
         fn dispatch(
             &mut self,
             _action: &RuntimeAction,
-            _path: &std::path::Path,
+            _entry: &EntryContext,
+            _follow_mode: FollowMode,
         ) -> Result<ActionOutcome, Diagnostic> {
             self.scripted
                 .pop_front()
