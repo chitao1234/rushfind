@@ -363,6 +363,19 @@ fn assert_matches_gnu_as_sets_with_env(args: &[OsString]) {
     assert_eq!(lines(&actual.stderr), lines(&expected.stderr));
 }
 
+fn normalize_warning_program(bytes: &[u8]) -> Vec<String> {
+    String::from_utf8(bytes.to_vec())
+        .unwrap()
+        .lines()
+        .map(|line| {
+            line.strip_prefix("findoxide: ")
+                .or_else(|| line.strip_prefix("find: "))
+                .unwrap_or(line)
+                .to_string()
+        })
+        .collect()
+}
+
 fn proc_path_without_birth_time() -> Option<&'static Path> {
     let candidate = Path::new("/proc/self/status");
     match read_birth_time(candidate, true) {
@@ -546,6 +559,43 @@ fn fprintf_matches_gnu_for_successful_ordered_runs() {
             "-fprintf".into(),
             path_arg(&fox_out),
             "[%P][%y]\\n".into(),
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(fox.status.code(), gnu.status.code());
+    assert_eq!(fox.stderr, gnu.stderr);
+    assert_eq!(fs::read(&fox_out).unwrap(), fs::read(&gnu_out).unwrap());
+}
+
+#[test]
+fn fprintf_literal_escapes_match_gnu_for_successful_ordered_runs() {
+    let root = build_printf_tree();
+    let outputs = tempdir().unwrap();
+    let gnu_out = outputs.path().join("gnu-escapes.bin");
+    let fox_out = outputs.path().join("fox-escapes.bin");
+
+    let gnu = Command::new("find")
+        .args([
+            path_arg(root.path().join("dir/file.txt").as_path()),
+            "-maxdepth".into(),
+            "0".into(),
+            "-fprintf".into(),
+            path_arg(&gnu_out),
+            "A\\a\\101\\cB".into(),
+        ])
+        .output()
+        .unwrap();
+    let fox = Command::cargo_bin("findoxide")
+        .unwrap()
+        .env("FINDOXIDE_WORKERS", "1")
+        .args([
+            path_arg(root.path().join("dir/file.txt").as_path()),
+            "-maxdepth".into(),
+            "0".into(),
+            "-fprintf".into(),
+            path_arg(&fox_out),
+            "A\\a\\101\\cB".into(),
         ])
         .output()
         .unwrap();
@@ -797,6 +847,88 @@ fn parallel_printf_subset_matches_gnu_find_as_sets() {
     ];
 
     assert_matches_gnu_as_sets(&args);
+}
+
+#[test]
+fn ordered_printf_literal_escapes_match_gnu_find_exactly() {
+    let root = build_printf_tree();
+    let args = vec![
+        path_arg(root.path().join("dir/file.txt").as_path()),
+        "-maxdepth".into(),
+        "0".into(),
+        "-printf".into(),
+        "A\\aB\\bC\\fD\\nE\\rF\\tG\\vH\\101\\040\\0123\\400".into(),
+    ];
+
+    assert_matches_gnu_exact(&args);
+}
+
+#[test]
+fn parallel_printf_literal_escape_subset_matches_gnu_find_as_sets() {
+    let root = build_printf_tree();
+    let args = vec![
+        path_arg(root.path()),
+        "-type".into(),
+        "f".into(),
+        "-printf".into(),
+        "[%f][\\101][\\t][\\040]\\n".into(),
+    ];
+
+    assert_matches_gnu_as_sets(&args);
+}
+
+#[test]
+fn ordered_printf_unknown_escape_warnings_match_gnu_with_normalized_program_name() {
+    let root = build_printf_tree();
+    let args = vec![
+        path_arg(root.path().join("dir/file.txt").as_path()),
+        "-maxdepth".into(),
+        "0".into(),
+        "-printf".into(),
+        "X\\qY\\xZ".into(),
+    ];
+
+    let expected = Command::new("find").args(&args).output().unwrap();
+    let actual = Command::cargo_bin("findoxide")
+        .unwrap()
+        .env("FINDOXIDE_WORKERS", "1")
+        .args(&args)
+        .output()
+        .unwrap();
+
+    assert_eq!(actual.status.code(), expected.status.code());
+    assert_eq!(actual.stdout, expected.stdout);
+    assert_eq!(
+        normalize_warning_program(&actual.stderr),
+        normalize_warning_program(&expected.stderr)
+    );
+}
+
+#[test]
+fn ordered_printf_unknown_escape_warnings_match_gnu_for_zero_match_runs() {
+    let root = build_printf_tree();
+    let args = vec![
+        path_arg(root.path()),
+        "-name".into(),
+        "definitely-no-match".into(),
+        "-printf".into(),
+        "X\\q".into(),
+    ];
+
+    let expected = Command::new("find").args(&args).output().unwrap();
+    let actual = Command::cargo_bin("findoxide")
+        .unwrap()
+        .env("FINDOXIDE_WORKERS", "1")
+        .args(&args)
+        .output()
+        .unwrap();
+
+    assert_eq!(actual.status.code(), expected.status.code());
+    assert_eq!(actual.stdout, expected.stdout);
+    assert_eq!(
+        normalize_warning_program(&actual.stderr),
+        normalize_warning_program(&expected.stderr)
+    );
 }
 
 #[test]

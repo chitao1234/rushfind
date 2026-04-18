@@ -66,6 +66,129 @@ fn ordered_printf_renders_metadata_and_link_directives() {
 }
 
 #[test]
+fn ordered_printf_decodes_gnu_literal_escapes() {
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("file.txt"), "x").unwrap();
+
+    let output = cargo_bin_output_with_timeout(
+        &[
+            path_arg(root.path().join("file.txt").as_path()),
+            "-maxdepth".into(),
+            "0".into(),
+            "-printf".into(),
+            "A\\aB\\bC\\fD\\nE\\rF\\tG\\vH\\101\\040\\0123\\400".into(),
+        ],
+        1,
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.stdout, b"A\x07B\x08C\x0cD\nE\rF\tG\x0bHA \n3\0");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn ordered_printf_backslash_c_stops_only_the_current_printf_action() {
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("file.txt"), "x").unwrap();
+
+    let output = cargo_bin_output_with_timeout(
+        &[
+            path_arg(root.path().join("file.txt").as_path()),
+            "-maxdepth".into(),
+            "0".into(),
+            "-printf".into(),
+            "A\\cB".into(),
+            "-printf".into(),
+            "Z".into(),
+            "-print".into(),
+        ],
+        1,
+        Duration::from_secs(5),
+    );
+
+    let expected_path = format!("{}\n", root.path().join("file.txt").display());
+    assert_eq!(
+        output.stdout,
+        [b"AZ".as_slice(), expected_path.as_bytes()].concat()
+    );
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn ordered_printf_unknown_escapes_warn_per_occurrence_and_render_literally() {
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("file.txt"), "x").unwrap();
+
+    let output = cargo_bin_output_with_timeout(
+        &[
+            path_arg(root.path().join("file.txt").as_path()),
+            "-maxdepth".into(),
+            "0".into(),
+            "-printf".into(),
+            "X\\qY\\xZ".into(),
+        ],
+        1,
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.stdout, b"X\\qY\\xZ");
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("warning: unrecognized escape `\\q'"));
+    assert!(stderr.contains("warning: unrecognized escape `\\x'"));
+}
+
+#[test]
+fn ordered_printf_unknown_escape_warnings_are_emitted_even_when_no_entries_match() {
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("file.txt"), "x").unwrap();
+
+    let output = cargo_bin_output_with_timeout(
+        &[
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-name".into(),
+            "definitely-no-match".into(),
+            "-printf".into(),
+            "X\\q".into(),
+        ],
+        1,
+        Duration::from_secs(5),
+    );
+
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("warning: unrecognized escape `\\q'"));
+}
+
+#[test]
+fn ordered_fprintf_decodes_gnu_literal_escapes_and_honors_backslash_c_per_action() {
+    let root = tempdir().unwrap();
+    let output_path = root.path().join("out.txt");
+    fs::write(root.path().join("file.txt"), "x").unwrap();
+
+    let output = cargo_bin_output_with_timeout(
+        &[
+            path_arg(root.path().join("file.txt").as_path()),
+            "-maxdepth".into(),
+            "0".into(),
+            "-fprintf".into(),
+            path_arg(output_path.as_path()),
+            "A\\a\\101\\cB".into(),
+            "-fprintf".into(),
+            path_arg(output_path.as_path()),
+            "Z".into(),
+        ],
+        1,
+        Duration::from_secs(5),
+    );
+
+    assert!(output.status.success());
+    assert_eq!(fs::read(output_path).unwrap(), b"A\x07AZ");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
 fn parallel_printf_replays_each_record_atomically() {
     let root = tempdir().unwrap();
     fs::write(root.path().join("alpha.txt"), "a\n").unwrap();

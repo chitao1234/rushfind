@@ -14,3 +14,9 @@ fn reports_missing_printf_argument() {
     let error = parse_command(&argv(&[".", "-printf"])).unwrap_err();
     assert!(error.message.contains("missing argument for `-printf`"));
 }
+
+#[test]
+fn parses_printf_with_gnu_literal_escape_sequences() {
+    let ast = parse_command(&argv(&[".", "-printf", "\\400%p\\c"])).unwrap();
+    assert_eq!(ast.start_paths.len(), 1);
+}

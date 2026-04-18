@@ -877,6 +877,40 @@ mod tests {
     }
 
     #[test]
+    fn compiler_decodes_gnu_literal_escapes_and_collects_unknown_escape_warnings() {
+        let compiled = compile_printf_program(
+            "-printf",
+            OsStr::new("A\\aB\\bC\\fD\\nE\\rF\\tG\\vH\\101\\040\\0123\\400\\q\\x"),
+        )
+        .unwrap();
+
+        let literal_bytes = match &compiled.program.atoms[0] {
+            PrintfAtom::Literal(bytes) => bytes.clone(),
+            other => panic!("unexpected atom: {other:?}"),
+        };
+
+        assert_eq!(
+            literal_bytes,
+            b"A\x07B\x08C\x0cD\nE\rF\tG\x0bHA \n3\0\\q\\x".to_vec()
+        );
+        assert_eq!(compiled.warnings.len(), 2);
+        assert_eq!(
+            compiled.warnings,
+            vec![
+                "findoxide: warning: unrecognized escape `\\q'".to_string(),
+                "findoxide: warning: unrecognized escape `\\x'".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn compiler_emits_a_stop_atom_for_backslash_c() {
+        let compiled = compile_printf_program("-printf", OsStr::new("A\\cB")).unwrap();
+        assert!(matches!(compiled.program.atoms[0], PrintfAtom::Literal(_)));
+        assert!(matches!(compiled.program.atoms[1], PrintfAtom::Stop));
+    }
+
+    #[test]
     fn compiler_parses_full_and_family_time_directives() {
         let program = compile_printf_program(
             "-printf",
