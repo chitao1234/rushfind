@@ -87,3 +87,32 @@ fn parallel_v2_prune_keeps_the_preorder_subtree_boundary() {
     assert!(stdout.contains("keep.txt"));
     assert!(!stdout.contains("hidden.txt"));
 }
+
+#[test]
+fn parallel_v2_exec_plus_flushes_worker_shards_on_shutdown() {
+    let root = tempdir().unwrap();
+    for index in 0..40 {
+        fs::write(root.path().join(format!("file-{index:02}.txt")), "x\n").unwrap();
+    }
+
+    let output = cargo_bin_output_with_engine(
+        &[
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-exec".into(),
+            "printf".into(),
+            "B:%s\\n".into(),
+            "{}".into(),
+            "+".into(),
+        ],
+        4,
+        "v2",
+        Duration::from_secs(5),
+    );
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(stdout.lines().count(), 40);
+    assert!(stdout.lines().all(|line| line.starts_with("B:")));
+}

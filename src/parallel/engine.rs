@@ -1,11 +1,13 @@
 use crate::diagnostics::Diagnostic;
 use crate::parallel::broker::{BrokerMessage, spawn_broker};
-use crate::parallel::worker::process_entry_output_only;
+use crate::parallel::control::GlobalControl;
+use crate::parallel::worker::{WorkerActionSink, process_entry_preorder_fast_path};
 use crate::planner::ExecutionPlan;
 use crate::runner::{RunSummary, build_eval_context, traversal_control_for_entry};
 use crate::walker::{WalkEvent, walk_parallel};
 use crossbeam_channel::{bounded, unbounded};
 use std::io::Write;
+use std::sync::Arc;
 
 pub(crate) fn run_parallel_v2<W, E>(
     plan: &ExecutionPlan,
@@ -20,6 +22,7 @@ where
     let worker_count = plan.runtime_policy.requested_workers;
     let mut had_runtime_errors = false;
     let mut had_action_failures = false;
+    let control = Arc::new(GlobalControl::new());
 
     std::thread::scope(|scope| -> Result<(), Diagnostic> {
         let (broker, broker_handle) = spawn_broker(scope, stdout, stderr);
@@ -31,23 +34,48 @@ where
             let work_rx = work_rx.clone();
             let result_tx = result_tx.clone();
             let broker = broker.clone();
+            let control = control.clone();
             let eval_context = eval_context.clone();
             let plan = plan.clone();
             let follow_mode = plan.follow_mode;
             workers.push(scope.spawn(move || -> Result<(), Diagnostic> {
+                let send_result = |result| {
+                    result_tx.send(result).map_err(|_| {
+                        Diagnostic::new("internal error: v2 result queue is unavailable", 1)
+                    })
+                };
+                let mut sink = WorkerActionSink::new(control, broker);
+                let mut status = crate::eval::RuntimeStatus::default();
+
                 while let Ok(item) = work_rx.recv() {
-                    let status = process_entry_output_only(
+                    match process_entry_preorder_fast_path(
                         &plan,
                         &item.entry,
                         follow_mode,
                         &eval_context,
-                        &broker,
-                    );
-                    result_tx.send(status).map_err(|_| {
-                        Diagnostic::new("internal error: v2 result queue is unavailable", 1)
-                    })?;
+                        &mut sink,
+                    ) {
+                        Ok(entry_status) => {
+                            status = status.merge(entry_status);
+                        }
+                        Err(error) => {
+                            send_result(Err(error))?;
+                            return Ok(());
+                        }
+                    }
                 }
-                Ok(())
+
+                match sink.flush() {
+                    Ok(flush_status) => {
+                        status = status.merge(flush_status);
+                    }
+                    Err(error) => {
+                        send_result(Err(error))?;
+                        return Ok(());
+                    }
+                }
+
+                send_result(Ok(status))
             }));
         }
         drop(work_rx);
@@ -73,20 +101,22 @@ where
             },
         );
 
-        let mut granted = 0_usize;
         for event in walk_rx {
             match event {
                 WalkEvent::Entry(item) | WalkEvent::DirectoryComplete(item) => {
-                    if item.entry.depth < plan.traversal.min_depth {
+                    if !control.accepts_new_work() || item.entry.depth < plan.traversal.min_depth {
                         continue;
                     }
 
                     work_tx.send(item).map_err(|_| {
                         Diagnostic::new("internal error: v2 worker queue is unavailable", 1)
                     })?;
-                    granted += 1;
                 }
                 WalkEvent::Error(error) => {
+                    if control.quit_seen() {
+                        continue;
+                    }
+
                     had_runtime_errors = true;
                     broker
                         .send(BrokerMessage::Stderr(
@@ -101,7 +131,7 @@ where
         drop(work_tx);
 
         let mut first_error = None;
-        for _ in 0..granted {
+        for _ in 0..worker_count {
             match result_rx.recv() {
                 Ok(Ok(status)) => {
                     had_action_failures |= status.had_action_failures();
@@ -113,7 +143,7 @@ where
                 }
                 Err(_) => {
                     return Err(Diagnostic::new(
-                        "internal error: v2 result queue closed before all work completed",
+                        "internal error: v2 result queue closed before all workers completed",
                         1,
                     ));
                 }

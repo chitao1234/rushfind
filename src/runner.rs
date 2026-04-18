@@ -25,7 +25,7 @@ where
     match plan.mode {
         ExecutionMode::OrderedSingle => crate::ordered::run_ordered_plan(plan, stdout, stderr),
         ExecutionMode::ParallelRelaxed => match parallel_engine_override().as_deref() {
-            Some("v2") if can_use_parallel_v2_output_fast_path(plan) => {
+            Some("v2") if can_use_parallel_v2_preorder_fast_path(plan) => {
                 crate::parallel::run_parallel_v2(plan, stdout, stderr)
             }
             _ => crate::parallel::run_parallel_legacy(plan, stdout, stderr),
@@ -37,11 +37,8 @@ fn parallel_engine_override() -> Option<String> {
     std::env::var("FINDOXIDE_PARALLEL_ENGINE").ok()
 }
 
-fn can_use_parallel_v2_output_fast_path(plan: &ExecutionPlan) -> bool {
+fn can_use_parallel_v2_preorder_fast_path(plan: &ExecutionPlan) -> bool {
     plan.parallel_policy == Some(ParallelExecutionPolicy::PreOrderFastPath)
-        && !plan.action_profile.has_local_immediate
-        && !plan.action_profile.has_local_batched
-        && !plan.action_profile.has_global_control
         && !plan.action_profile.has_subtree_finalizer
         && !plan.action_profile.has_ordered_only
 }
@@ -79,7 +76,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::build_eval_context_with_loader;
+    use super::{build_eval_context_with_loader, can_use_parallel_v2_preorder_fast_path};
     use crate::follow::FollowMode;
     use crate::ordered::engine::ordered_evaluator_workers;
     use crate::parser::parse_command;
@@ -161,5 +158,30 @@ mod tests {
             ordered_evaluator_workers(&plan),
             plan.runtime_policy.evaluation_workers
         );
+    }
+
+    #[test]
+    fn parallel_v2_preorder_fast_path_accepts_exec_plans() {
+        let plan = plan_command(
+            parse_command(&argv(&[
+                ".", "-type", "f", "-exec", "printf", "B:%s\\n", "{}", ";",
+            ]))
+            .unwrap(),
+            4,
+        )
+        .unwrap();
+
+        assert!(can_use_parallel_v2_preorder_fast_path(&plan));
+    }
+
+    #[test]
+    fn parallel_v2_preorder_fast_path_accepts_quit_plans() {
+        let plan = plan_command(
+            parse_command(&argv(&[".", "-type", "f", "-print", "-quit"])).unwrap(),
+            4,
+        )
+        .unwrap();
+
+        assert!(can_use_parallel_v2_preorder_fast_path(&plan));
     }
 }

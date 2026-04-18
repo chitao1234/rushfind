@@ -2,7 +2,7 @@ mod support;
 
 use std::fs;
 use std::time::Duration;
-use support::{cargo_bin_output_with_timeout, path_arg};
+use support::{cargo_bin_output_with_engine, cargo_bin_output_with_timeout, path_arg};
 use tempfile::tempdir;
 
 #[test]
@@ -142,4 +142,32 @@ fn parallel_exec_plus_quit_flushes_buffered_batches_before_exit() {
     assert!(line_count >= 1);
     assert!(line_count < 200);
     assert!(stdout.lines().all(|line| line.starts_with("P:")));
+}
+
+#[test]
+fn parallel_v2_quit_stops_future_fanout_after_the_current_entry() {
+    let root = tempdir().unwrap();
+    for index in 0..200 {
+        fs::write(root.path().join(format!("file-{index:03}.txt")), "x\n").unwrap();
+    }
+
+    let output = cargo_bin_output_with_engine(
+        &[
+            path_arg(root.path()),
+            "-mindepth".into(),
+            "1".into(),
+            "-type".into(),
+            "f".into(),
+            "-print".into(),
+            "-quit".into(),
+        ],
+        4,
+        "v2",
+        Duration::from_secs(5),
+    );
+
+    let line_count = String::from_utf8(output.stdout).unwrap().lines().count();
+    assert_eq!(output.status.code(), Some(0));
+    assert!(line_count >= 1);
+    assert!(line_count < 200);
 }

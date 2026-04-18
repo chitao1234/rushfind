@@ -584,7 +584,7 @@ fn run_immediate_ordered<E: std::io::Write>(
     }
 }
 
-fn delete_path(path: &Path) -> Result<bool, Diagnostic> {
+pub(crate) fn delete_path(path: &Path) -> Result<bool, Diagnostic> {
     let file_type = fs::symlink_metadata(path)
         .map_err(|error| Diagnostic::new(format!("{}: {error}", path.display()), 1))?
         .file_type();
@@ -636,7 +636,7 @@ fn run_ordered_batch<E: std::io::Write>(
     }
 }
 
-fn run_immediate_parallel(
+pub(crate) fn run_immediate_parallel(
     spec: &ImmediateExecAction,
     path: &Path,
     broker: &Sender<BrokerMessage>,
@@ -645,7 +645,7 @@ fn run_immediate_parallel(
     run_parallel_command(render_immediate_argv(spec, path), broker, spill_threshold)
 }
 
-fn run_parallel_ready_batch(
+pub(crate) fn run_parallel_ready_batch(
     ready: &ReadyBatch,
     broker: &Sender<BrokerMessage>,
     spill_threshold: usize,
@@ -813,7 +813,7 @@ impl Write for SpillBuffer {
     }
 }
 
-fn fixed_batch_cost(spec: &BatchedExecAction) -> usize {
+pub(crate) fn fixed_batch_cost(spec: &BatchedExecAction) -> usize {
     spec.argv_prefix
         .iter()
         .map(|arg| os_bytes_len(arg.as_os_str()) + 1)

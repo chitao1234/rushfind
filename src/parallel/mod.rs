@@ -1,3 +1,4 @@
+pub(crate) mod batch;
 pub(crate) mod broker;
 pub(crate) mod control;
 pub(crate) mod engine;

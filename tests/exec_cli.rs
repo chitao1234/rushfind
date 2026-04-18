@@ -4,7 +4,7 @@ use assert_cmd::cargo::CommandCargoExt;
 use std::fs;
 use std::process::Command;
 use std::time::Duration;
-use support::{cargo_bin_output_with_timeout, path_arg};
+use support::{cargo_bin_output_with_engine, cargo_bin_output_with_timeout, path_arg};
 use tempfile::tempdir;
 
 #[test]
@@ -335,4 +335,42 @@ fn parallel_exec_and_print_share_the_broker_without_broken_lines() {
                 || line.ends_with("alpha.txt")
         );
     }
+}
+
+#[test]
+fn parallel_v2_exec_semicolon_keeps_child_output_chunks_intact() {
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("alpha.txt"), "a\n").unwrap();
+    fs::write(root.path().join("beta.txt"), "b\n").unwrap();
+
+    let output = cargo_bin_output_with_engine(
+        &[
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-exec".into(),
+            "sh".into(),
+            "-c".into(),
+            "printf 'BEGIN:%s\\n' \"$1\"; sleep 0.05; printf 'END:%s\\n' \"$1\"".into(),
+            "sh".into(),
+            "{}".into(),
+            ";".into(),
+        ],
+        4,
+        "v2",
+        Duration::from_secs(5),
+    );
+
+    let lines = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(lines.len(), 4);
+    assert!(lines.chunks_exact(2).all(|chunk| {
+        let begin = chunk[0].strip_prefix("BEGIN:").unwrap();
+        let end = chunk[1].strip_prefix("END:").unwrap();
+        begin == end
+    }));
 }
