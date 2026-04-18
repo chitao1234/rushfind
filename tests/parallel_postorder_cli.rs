@@ -53,3 +53,30 @@ fn parallel_v2_depth_prune_stays_truthy_but_does_not_block_descendants() {
             .contains("keep/file.txt")
     );
 }
+
+#[test]
+fn parallel_v2_delete_keeps_descendant_before_parent_behavior_when_parent_spills_children() {
+    let root = tempdir().unwrap();
+    let parent = root.path().join("parent");
+    fs::create_dir(&parent).unwrap();
+    for index in 0..40 {
+        let child = parent.join(format!("child-{index:02}"));
+        fs::create_dir(&child).unwrap();
+        fs::write(child.join("leaf.txt"), "x\n").unwrap();
+    }
+
+    let output = cargo_bin_output_with_timeout(
+        &[
+            path_arg(root.path()),
+            "-mindepth".into(),
+            "1".into(),
+            "-delete".into(),
+        ],
+        4,
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(!parent.exists());
+    assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
+}

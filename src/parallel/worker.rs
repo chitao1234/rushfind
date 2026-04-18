@@ -168,7 +168,7 @@ pub(crate) fn run_parallel_worker(
                         &plan,
                         &backend,
                         task,
-                        &scheduler,
+                        &mut worker,
                         barriers.as_ref(),
                         &eval_context,
                         &mut sink,
@@ -189,10 +189,10 @@ pub(crate) fn run_parallel_worker(
             ParallelTask::PostOrderResume(task) => run_postorder_resume(
                 &plan,
                 task,
+                &mut worker,
                 &eval_context,
                 &mut sink,
                 barriers.as_ref(),
-                &scheduler,
             ),
         };
 
@@ -359,7 +359,7 @@ fn run_postorder_root_task(
     plan: &ExecutionPlan,
     backend: &dyn WalkBackend,
     root: PreOrderRootTask,
-    scheduler: &Scheduler,
+    worker: &mut WorkerHandle,
     barriers: &BarrierTable,
     context: &EvalContext,
     sink: &mut WorkerActionSink,
@@ -435,7 +435,7 @@ fn run_postorder_root_task(
                             notify_parent_barrier(
                                 parent,
                                 barriers,
-                                scheduler,
+                                worker,
                                 sink.control.as_ref(),
                             )?;
                         }
@@ -460,7 +460,7 @@ fn run_postorder_root_task(
                                 notify_parent_barrier(
                                     parent,
                                     barriers,
-                                    scheduler,
+                                    worker,
                                     sink.control.as_ref(),
                                 )?;
                             }
@@ -542,7 +542,7 @@ fn run_postorder_root_task(
                         )?;
                         barrier = Some(created);
                         for pending_child in spill {
-                            scheduler.push_spill(
+                            worker.push_local(
                                 ParallelTask::PreOrderRoot(PreOrderRootTask {
                                     pending: PendingPath {
                                         ancestor_barriers: vec![created],
@@ -598,7 +598,7 @@ fn run_postorder_root_task(
                 }
 
                 if let Some(parent) = notify_parent {
-                    notify_parent_barrier(parent, barriers, scheduler, sink.control.as_ref())?;
+                    notify_parent_barrier(parent, barriers, worker, sink.control.as_ref())?;
                 }
             }
         }
@@ -606,7 +606,7 @@ fn run_postorder_root_task(
 
     if !aborted_by_stop {
         if let Some(parent) = root_notify_parent.take() {
-            notify_parent_barrier(parent, barriers, scheduler, sink.control.as_ref())?;
+            notify_parent_barrier(parent, barriers, worker, sink.control.as_ref())?;
         }
     }
 
@@ -616,10 +616,10 @@ fn run_postorder_root_task(
 fn run_postorder_resume(
     plan: &ExecutionPlan,
     task: PostOrderResumeTask,
+    worker: &mut WorkerHandle,
     context: &EvalContext,
     sink: &mut WorkerActionSink,
     barriers: &BarrierTable,
-    scheduler: &Scheduler,
 ) -> Result<RuntimeStatus, Diagnostic> {
     let mut status = RuntimeStatus::default();
 
@@ -634,7 +634,7 @@ fn run_postorder_resume(
     }
 
     if let Some(parent) = task.notify_parent {
-        notify_parent_barrier(parent, barriers, scheduler, sink.control.as_ref())?;
+        notify_parent_barrier(parent, barriers, worker, sink.control.as_ref())?;
     }
 
     Ok(status)
@@ -643,11 +643,11 @@ fn run_postorder_resume(
 fn notify_parent_barrier(
     parent: SubtreeBarrierId,
     barriers: &BarrierTable,
-    scheduler: &Scheduler,
+    worker: &mut WorkerHandle,
     control: &GlobalControl,
 ) -> Result<(), Diagnostic> {
     if let Some(resume) = barriers.finish_spilled_child(parent)? {
-        scheduler.push_resume(ParallelTask::PostOrderResume(resume), control);
+        worker.push_local(ParallelTask::PostOrderResume(resume), control);
     }
     Ok(())
 }

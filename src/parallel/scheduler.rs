@@ -69,27 +69,7 @@ impl Scheduler {
         self.push_inject(task, control);
     }
 
-    pub(crate) fn push_inject(&self, task: ParallelTask, control: &GlobalControl) {
-        if !control.accepts_new_work() {
-            return;
-        }
-
-        control.task_spawned();
-        self.injector.push(task);
-        self.wakeup.notify_one();
-    }
-
-    pub(crate) fn push_spill(&self, task: ParallelTask, control: &GlobalControl) {
-        if !control.accepts_new_work() {
-            return;
-        }
-
-        control.task_spawned();
-        self.injector.push(task);
-        self.wakeup.notify_one();
-    }
-
-    pub(crate) fn push_resume(&self, task: ParallelTask, control: &GlobalControl) {
+    fn push_inject(&self, task: ParallelTask, control: &GlobalControl) {
         if !control.accepts_new_work() {
             return;
         }
@@ -175,7 +155,7 @@ mod tests {
             ParallelTask::PreOrderRoot(PreOrderRootTask::for_path(PathBuf::from("root"), 0)),
             &control,
         );
-        scheduler.push_resume(
+        scheduler.push_inject(
             ParallelTask::PostOrderResume(PostOrderResumeTask::for_path(
                 PathBuf::from("root"),
                 0,
@@ -198,7 +178,7 @@ mod tests {
         let control_for_publisher = control.clone();
         let publisher = thread::spawn(move || {
             thread::sleep(Duration::from_millis(25));
-            scheduler_for_publisher.push_spill(
+            scheduler_for_publisher.push_inject(
                 ParallelTask::PreOrderRoot(PreOrderRootTask::for_path(PathBuf::from("child"), 1)),
                 control_for_publisher.as_ref(),
             );
