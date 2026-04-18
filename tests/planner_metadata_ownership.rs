@@ -3,7 +3,11 @@ mod support;
 use findoxide::numeric::NumericComparison;
 use findoxide::parser::parse_command;
 use findoxide::planner::{RuntimeExpr, RuntimePredicate, plan_command};
+#[cfg(unix)]
+use std::ffi::OsString;
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::ffi::OsStringExt;
 use std::os::unix::fs::MetadataExt;
 use std::process::Command;
 use support::argv;
@@ -88,6 +92,32 @@ fn rejects_unknown_user_and_group_names() {
         1,
     )
     .unwrap_err();
+    assert!(
+        group_error
+            .message
+            .contains("not the name of an existing group")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn non_utf8_user_and_group_operands_reach_nss_lookup_paths() {
+    let user_argv = vec![
+        OsString::from("."),
+        OsString::from("-user"),
+        OsString::from_vec(b"definitely_no_such_user_\xff".to_vec()),
+    ];
+    let user_error = plan_command(parse_command(&user_argv).unwrap(), 1).unwrap_err();
+    assert!(!user_error.message.contains("invalid UTF-8"));
+    assert!(user_error.message.contains("not the name of a known user"));
+
+    let group_argv = vec![
+        OsString::from("."),
+        OsString::from("-group"),
+        OsString::from_vec(b"definitely_no_such_group_\xfe".to_vec()),
+    ];
+    let group_error = plan_command(parse_command(&group_argv).unwrap(), 1).unwrap_err();
+    assert!(!group_error.message.contains("invalid UTF-8"));
     assert!(
         group_error
             .message
