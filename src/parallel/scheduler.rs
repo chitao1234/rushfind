@@ -1,23 +1,28 @@
 use crate::parallel::control::GlobalControl;
 use crate::parallel::task::ParallelTask;
 use crossbeam_deque::{Injector, Steal, Stealer, Worker};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::Duration;
 
-#[allow(dead_code)]
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) struct Scheduler {
     injector: Arc<Injector<ParallelTask>>,
     locals: Vec<Mutex<Option<Worker<ParallelTask>>>>,
     stealers: Vec<Stealer<ParallelTask>>,
+    sleep_state: Arc<Mutex<()>>,
+    wakeup: Arc<Condvar>,
 }
 
-#[allow(dead_code)]
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) struct WorkerHandle {
     local: Worker<ParallelTask>,
     peers: Vec<Stealer<ParallelTask>>,
     injector: Arc<Injector<ParallelTask>>,
+    sleep_state: Arc<Mutex<()>>,
+    wakeup: Arc<Condvar>,
 }
 
-#[allow(dead_code)]
+#[cfg_attr(not(test), allow(dead_code))]
 impl Scheduler {
     pub(crate) fn new(worker_count: usize) -> Self {
         let mut locals = Vec::with_capacity(worker_count);
@@ -32,6 +37,8 @@ impl Scheduler {
             injector: Arc::new(Injector::new()),
             locals,
             stealers,
+            sleep_state: Arc::new(Mutex::new(())),
+            wakeup: Arc::new(Condvar::new()),
         }
     }
 
@@ -53,7 +60,13 @@ impl Scheduler {
             local,
             peers,
             injector: self.injector.clone(),
+            sleep_state: self.sleep_state.clone(),
+            wakeup: self.wakeup.clone(),
         }
+    }
+
+    pub(crate) fn push_root(&self, task: ParallelTask, control: &GlobalControl) {
+        self.push_inject(task, control);
     }
 
     pub(crate) fn push_inject(&self, task: ParallelTask, control: &GlobalControl) {
@@ -63,6 +76,7 @@ impl Scheduler {
 
         control.task_spawned();
         self.injector.push(task);
+        self.wakeup.notify_one();
     }
 
     pub(crate) fn push_spill(&self, task: ParallelTask, control: &GlobalControl) {
@@ -72,12 +86,31 @@ impl Scheduler {
 
         control.task_spawned();
         self.injector.push(task);
+        self.wakeup.notify_one();
+    }
+
+    pub(crate) fn push_resume(&self, task: ParallelTask, control: &GlobalControl) {
+        if !control.accepts_new_work() {
+            return;
+        }
+
+        control.task_spawned();
+        self.injector.push(task);
+        self.wakeup.notify_one();
+    }
+
+    pub(crate) fn notify_sleepers(&self) {
+        self.wakeup.notify_all();
     }
 }
 
-#[allow(dead_code)]
+#[cfg_attr(not(test), allow(dead_code))]
 impl WorkerHandle {
     pub(crate) fn pop(&mut self) -> Option<ParallelTask> {
+        self.pop_nonblocking()
+    }
+
+    fn pop_nonblocking(&mut self) -> Option<ParallelTask> {
         if let Some(task) = self.local.pop() {
             return Some(task);
         }
@@ -94,55 +127,132 @@ impl WorkerHandle {
 
         None
     }
+
+    pub(crate) fn pop_blocking(&mut self, control: &GlobalControl) -> Option<ParallelTask> {
+        loop {
+            if let Some(task) = self.pop_nonblocking() {
+                return Some(task);
+            }
+
+            if control.workers_should_exit() {
+                return None;
+            }
+
+            let guard = self
+                .sleep_state
+                .lock()
+                .expect("scheduler sleep mutex poisoned");
+            let (_guard, _) = self
+                .wakeup
+                .wait_timeout(guard, Duration::from_millis(10))
+                .expect("scheduler condvar wait failed");
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parallel::task::SubtreeTask;
+    use crate::parallel::task::{ParallelTask, PostOrderResumeTask, PreOrderRootTask};
+    use crate::runtime_pipeline::SubtreeBarrierId;
     use std::path::PathBuf;
+    use std::thread;
+
+    #[test]
+    fn root_and_resume_tasks_both_count_as_outstanding_work() {
+        let scheduler = Scheduler::new(1);
+        let control = GlobalControl::new();
+        scheduler.push_root(
+            ParallelTask::PreOrderRoot(PreOrderRootTask::for_path(
+                PathBuf::from("root"),
+                0,
+            )),
+            &control,
+        );
+        scheduler.push_resume(
+            ParallelTask::PostOrderResume(PostOrderResumeTask::for_path(
+                PathBuf::from("root"),
+                0,
+                SubtreeBarrierId(7),
+                None,
+            )),
+            &control,
+        );
+        assert_eq!(control.outstanding_tasks(), 2);
+    }
+
+    #[test]
+    fn blocking_pop_wakes_after_spill_task_arrives() {
+        let scheduler = Arc::new(Scheduler::new(1));
+        let control = Arc::new(GlobalControl::new());
+        let mut worker = scheduler.worker_handle(0);
+
+        let scheduler_for_publisher = scheduler.clone();
+        let control_for_publisher = control.clone();
+        let publisher = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(25));
+            scheduler_for_publisher.push_spill(
+                ParallelTask::PreOrderRoot(PreOrderRootTask::for_path(
+                    PathBuf::from("child"),
+                    1,
+                )),
+                control_for_publisher.as_ref(),
+            );
+        });
+
+        let task = worker.pop_blocking(control.as_ref());
+        publisher.join().unwrap();
+
+        assert!(matches!(task, Some(ParallelTask::PreOrderRoot(_))));
+    }
+
+    #[test]
+    fn quit_wakes_sleeping_workers_and_returns_none_when_idle() {
+        let scheduler = Scheduler::new(1);
+        let control = GlobalControl::new();
+        let mut worker = scheduler.worker_handle(0);
+
+        control.request_quit();
+        scheduler.notify_sleepers();
+
+        assert!(worker.pop_blocking(&control).is_none());
+    }
 
     #[test]
     fn steal_path_drains_injected_work_after_local_queue_empties() {
         let scheduler = Scheduler::new(2);
         let control = GlobalControl::new();
-        scheduler.push_inject(
-            ParallelTask::PreOrder(SubtreeTask::new(PathBuf::from("root-a"), 0)),
+        scheduler.push_root(
+            ParallelTask::PreOrderRoot(PreOrderRootTask::for_path(
+                PathBuf::from("root-a"),
+                0,
+            )),
             &control,
         );
-        scheduler.push_inject(
-            ParallelTask::PreOrder(SubtreeTask::new(PathBuf::from("root-b"), 0)),
+        scheduler.push_root(
+            ParallelTask::PreOrderRoot(PreOrderRootTask::for_path(
+                PathBuf::from("root-b"),
+                0,
+            )),
             &control,
         );
 
         let mut worker0 = scheduler.worker_handle(0);
         let mut worker1 = scheduler.worker_handle(1);
 
-        assert!(matches!(worker0.pop(), Some(ParallelTask::PreOrder(_))));
-        assert!(matches!(worker1.pop(), Some(ParallelTask::PreOrder(_))));
-    }
-
-    #[test]
-    fn quit_state_prevents_new_spill_tasks() {
-        let scheduler = Scheduler::new(1);
-        let control = GlobalControl::new();
-        control.request_quit();
-
-        scheduler.push_spill(
-            ParallelTask::PreOrder(SubtreeTask::new(PathBuf::from("child"), 1)),
-            &control,
-        );
-        let mut worker = scheduler.worker_handle(0);
-
-        assert!(worker.pop().is_none());
+        assert!(matches!(worker0.pop(), Some(ParallelTask::PreOrderRoot(_))));
+        assert!(matches!(worker1.pop(), Some(ParallelTask::PreOrderRoot(_))));
     }
 
     #[test]
     fn outstanding_task_count_hits_zero_only_after_finish() {
         let scheduler = Scheduler::new(1);
         let control = GlobalControl::new();
-        scheduler.push_inject(
-            ParallelTask::PreOrder(SubtreeTask::new(PathBuf::from("root"), 0)),
+        scheduler.push_root(
+            ParallelTask::PreOrderRoot(PreOrderRootTask::for_path(
+                PathBuf::from("root"),
+                0,
+            )),
             &control,
         );
 

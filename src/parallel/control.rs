@@ -52,4 +52,8 @@ impl GlobalControl {
     pub(crate) fn outstanding_tasks(&self) -> usize {
         self.outstanding_tasks.load(Ordering::SeqCst)
     }
+
+    pub(crate) fn workers_should_exit(&self) -> bool {
+        !self.accepts_new_work() && self.outstanding_tasks() == 0
+    }
 }
