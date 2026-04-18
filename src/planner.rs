@@ -572,6 +572,9 @@ fn lower_action(
             }
             Ok(RuntimeExpr::Action(RuntimeAction::Printf(program)))
         }
+        Action::FPrint { .. } => Err(Diagnostic::unsupported("unsupported: -fprint")),
+        Action::FPrint0 { .. } => Err(Diagnostic::unsupported("unsupported: -fprint0")),
+        Action::FPrintf { .. } => Err(Diagnostic::unsupported("unsupported: -fprintf")),
         Action::Quit => Ok(RuntimeExpr::Action(RuntimeAction::Quit)),
         Action::Exec { argv, batch: false } => Ok(RuntimeExpr::Action(
             RuntimeAction::ExecImmediate(compile_immediate_exec(&argv)),

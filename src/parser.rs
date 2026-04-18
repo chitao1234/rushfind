@@ -336,6 +336,19 @@ impl<'a> Parser<'a> {
             Expr::Action(Action::Printf {
                 format: self.take_os_string("-printf")?,
             })
+        } else if token.matches("-fprint") {
+            Expr::Action(Action::FPrint {
+                path: PathBuf::from(self.take_os_string("-fprint")?),
+            })
+        } else if token.matches("-fprint0") {
+            Expr::Action(Action::FPrint0 {
+                path: PathBuf::from(self.take_os_string("-fprint0")?),
+            })
+        } else if token.matches("-fprintf") {
+            Expr::Action(Action::FPrintf {
+                path: PathBuf::from(self.take_os_string("-fprintf")?),
+                format: self.take_os_string("-fprintf")?,
+            })
         } else if token.matches("-quit") {
             Expr::Action(Action::Quit)
         } else if token.matches("-exec") {
