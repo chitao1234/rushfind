@@ -21,6 +21,7 @@ pub mod pattern;
 pub mod perm;
 pub mod planner;
 pub mod printf;
+pub(crate) mod printf_time;
 pub mod regex_match;
 mod runner;
 pub(crate) mod runtime_pipeline;
