@@ -476,6 +476,125 @@ fn ordered_quit_matches_gnu_find_exactly() {
 }
 
 #[test]
+fn fprint_matches_gnu_for_successful_ordered_runs() {
+    let root = build_printf_tree();
+    let outputs = tempdir().unwrap();
+    let gnu_out = outputs.path().join("gnu-paths.txt");
+    let fox_out = outputs.path().join("fox-paths.txt");
+
+    let gnu = Command::new("find")
+        .args([
+            path_arg(root.path()),
+            "-mindepth".into(),
+            "1".into(),
+            "-maxdepth".into(),
+            "1".into(),
+            "-fprint".into(),
+            path_arg(&gnu_out),
+        ])
+        .output()
+        .unwrap();
+    let fox = Command::cargo_bin("findoxide")
+        .unwrap()
+        .env("FINDOXIDE_WORKERS", "1")
+        .args([
+            path_arg(root.path()),
+            "-mindepth".into(),
+            "1".into(),
+            "-maxdepth".into(),
+            "1".into(),
+            "-fprint".into(),
+            path_arg(&fox_out),
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(fox.status.code(), gnu.status.code());
+    assert_eq!(fox.stderr, gnu.stderr);
+    assert_eq!(fs::read(&fox_out).unwrap(), fs::read(&gnu_out).unwrap());
+}
+
+#[test]
+fn fprintf_matches_gnu_for_successful_ordered_runs() {
+    let root = build_printf_tree();
+    let outputs = tempdir().unwrap();
+    let gnu_out = outputs.path().join("gnu.txt");
+    let fox_out = outputs.path().join("fox.txt");
+
+    let gnu = Command::new("find")
+        .args([
+            path_arg(root.path()),
+            "-mindepth".into(),
+            "1".into(),
+            "-maxdepth".into(),
+            "1".into(),
+            "-fprintf".into(),
+            path_arg(&gnu_out),
+            "[%P][%y]\\n".into(),
+        ])
+        .output()
+        .unwrap();
+    let fox = Command::cargo_bin("findoxide")
+        .unwrap()
+        .env("FINDOXIDE_WORKERS", "1")
+        .args([
+            path_arg(root.path()),
+            "-mindepth".into(),
+            "1".into(),
+            "-maxdepth".into(),
+            "1".into(),
+            "-fprintf".into(),
+            path_arg(&fox_out),
+            "[%P][%y]\\n".into(),
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(fox.status.code(), gnu.status.code());
+    assert_eq!(fox.stderr, gnu.stderr);
+    assert_eq!(fs::read(&fox_out).unwrap(), fs::read(&gnu_out).unwrap());
+}
+
+#[test]
+fn fprint0_matches_gnu_for_successful_ordered_runs() {
+    let root = build_printf_tree();
+    let outputs = tempdir().unwrap();
+    let gnu_out = outputs.path().join("gnu.bin");
+    let fox_out = outputs.path().join("fox.bin");
+
+    let gnu = Command::new("find")
+        .args([
+            path_arg(root.path()),
+            "-mindepth".into(),
+            "1".into(),
+            "-maxdepth".into(),
+            "1".into(),
+            "-fprint0".into(),
+            path_arg(&gnu_out),
+        ])
+        .output()
+        .unwrap();
+    let fox = Command::cargo_bin("findoxide")
+        .unwrap()
+        .env("FINDOXIDE_WORKERS", "1")
+        .args([
+            path_arg(root.path()),
+            "-mindepth".into(),
+            "1".into(),
+            "-maxdepth".into(),
+            "1".into(),
+            "-fprint0".into(),
+            path_arg(&fox_out),
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(fox.status.code(), gnu.status.code());
+    assert_eq!(fox.stderr, gnu.stderr);
+    assert_eq!(fs::read(&fox_out).unwrap(), fs::read(&gnu_out).unwrap());
+}
+
+#[test]
 fn reports_parse_errors_nonzero() {
     let output = Command::cargo_bin("findoxide")
         .unwrap()

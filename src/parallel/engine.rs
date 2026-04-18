@@ -1,4 +1,5 @@
 use crate::diagnostics::Diagnostic;
+use crate::file_output::SharedFileOutputs;
 use crate::parallel::broker::spawn_broker;
 use crate::parallel::control::GlobalControl;
 use crate::parallel::postorder::BarrierTable;
@@ -21,6 +22,7 @@ where
     E: Write + Send,
 {
     let eval_context = build_eval_context(plan)?;
+    let file_outputs = SharedFileOutputs::open_all(&plan.file_outputs)?;
     let worker_count = plan.runtime_policy.requested_workers.max(1);
     let control = Arc::new(GlobalControl::new());
     let scheduler = Arc::new(Scheduler::new(worker_count));
@@ -44,6 +46,7 @@ where
             let barriers = barriers.clone();
             let control = control.clone();
             let broker = broker.clone();
+            let file_outputs = file_outputs.clone();
             let plan = plan.clone();
             let eval_context = eval_context.clone();
             let result_tx = result_tx.clone();
@@ -54,6 +57,7 @@ where
                     barriers,
                     control,
                     broker,
+                    file_outputs,
                     plan,
                     eval_context,
                     result_tx,

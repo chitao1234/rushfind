@@ -131,3 +131,38 @@ fn ordered_fprint_destination_is_visible_when_created_inside_the_tree() {
     assert_eq!(output.status.code(), Some(0));
     assert!(String::from_utf8(output.stdout).unwrap().contains("seen.txt"));
 }
+
+#[test]
+fn parallel_fprintf_keeps_each_record_atomic_per_destination() {
+    let root = tempdir().unwrap();
+    let out_dir = tempdir().unwrap();
+    fs::write(root.path().join("alpha.txt"), "a\n").unwrap();
+    fs::write(root.path().join("beta.txt"), "b\n").unwrap();
+    let out = out_dir.path().join("parallel.txt");
+
+    let output = cargo_bin_output_with_timeout(
+        &[
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-fprintf".into(),
+            path_arg(&out),
+            "BEGIN:%f\\nEND:%f\\n".into(),
+        ],
+        4,
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    let lines = fs::read_to_string(&out)
+        .unwrap()
+        .lines()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    assert_eq!(lines.len(), 4);
+    assert!(lines.chunks_exact(2).all(|chunk| {
+        let begin = chunk[0].strip_prefix("BEGIN:").unwrap();
+        let end = chunk[1].strip_prefix("END:").unwrap();
+        begin == end
+    }));
+}

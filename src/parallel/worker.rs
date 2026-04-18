@@ -4,6 +4,7 @@ use crate::eval::{
     ActionOutcome, ActionSink, EvalContext, RuntimeStatus, evaluate_outcome_with_context,
 };
 use crate::exec::{ImmediateExecAction, delete_path, run_immediate_parallel};
+use crate::file_output::{SharedFileOutputs, render_file_print_bytes};
 use crate::follow::FollowMode;
 use crate::output::render_runtime_action_bytes;
 use crate::parallel::batch::WorkerBatchState;
@@ -26,6 +27,7 @@ const SPLIT_CHILD_THRESHOLD: usize = 32;
 pub(crate) struct WorkerActionSink {
     control: Arc<GlobalControl>,
     broker: Sender<BrokerMessage>,
+    file_outputs: SharedFileOutputs,
     batches: WorkerBatchState,
 }
 
@@ -43,10 +45,15 @@ enum PostOrderFrame {
 }
 
 impl WorkerActionSink {
-    pub(crate) fn new(control: Arc<GlobalControl>, broker: Sender<BrokerMessage>) -> Self {
+    pub(crate) fn new(
+        control: Arc<GlobalControl>,
+        broker: Sender<BrokerMessage>,
+        file_outputs: SharedFileOutputs,
+    ) -> Self {
         Self {
             control,
             broker,
+            file_outputs,
             batches: WorkerBatchState::new(DEFAULT_SPILL_THRESHOLD),
         }
     }
@@ -106,12 +113,22 @@ impl ActionSink for WorkerActionSink {
                     .map_err(|_| Diagnostic::new("internal error: v2 broker is unavailable", 1))?;
                 Ok(ActionOutcome::matched_true())
             }
-            RuntimeAction::FilePrint { .. } | RuntimeAction::FilePrintf { .. } => Err(
-                Diagnostic::new(
-                    "internal error: file-backed output actions are not wired into v2 workers yet",
-                    1,
-                ),
-            ),
+            RuntimeAction::FilePrint {
+                destination,
+                terminator,
+            } => {
+                let bytes = render_file_print_bytes(entry, *terminator);
+                self.file_outputs.write_record(*destination, &bytes)?;
+                Ok(ActionOutcome::matched_true())
+            }
+            RuntimeAction::FilePrintf {
+                destination,
+                program,
+            } => {
+                let bytes = crate::printf::render_printf_bytes(program, entry, follow_mode, context)?;
+                self.file_outputs.write_record(*destination, &bytes)?;
+                Ok(ActionOutcome::matched_true())
+            }
             RuntimeAction::Quit => {
                 self.control.request_quit();
                 Ok(ActionOutcome::quit())
@@ -145,6 +162,7 @@ pub(crate) fn run_parallel_worker(
     barriers: Arc<BarrierTable>,
     control: Arc<GlobalControl>,
     broker: Sender<BrokerMessage>,
+    file_outputs: SharedFileOutputs,
     plan: ExecutionPlan,
     eval_context: EvalContext,
     result_tx: Sender<Result<WorkerReport, Diagnostic>>,
@@ -155,7 +173,7 @@ pub(crate) fn run_parallel_worker(
             .map_err(|_| Diagnostic::new("internal error: v2 result queue is unavailable", 1))
     };
     let backend = FsWalkBackend;
-    let mut sink = WorkerActionSink::new(control.clone(), broker);
+    let mut sink = WorkerActionSink::new(control.clone(), broker, file_outputs);
     let mut status = RuntimeStatus::default();
     let mut had_runtime_errors = false;
 
