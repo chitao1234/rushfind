@@ -24,6 +24,22 @@ pub fn lines(bytes: &[u8]) -> BTreeSet<String> {
         .collect()
 }
 
+pub fn newline_records(bytes: &[u8]) -> BTreeSet<Vec<u8>> {
+    bytes
+        .split(|byte| *byte == b'\n')
+        .filter(|record| !record.is_empty())
+        .map(|record| record.to_vec())
+        .collect()
+}
+
+pub fn nul_records(bytes: &[u8]) -> BTreeSet<Vec<u8>> {
+    bytes
+        .split(|byte| *byte == 0)
+        .filter(|record| !record.is_empty())
+        .map(|record| record.to_vec())
+        .collect()
+}
+
 pub fn cargo_bin_output_with_timeout(
     args: &[OsString],
     workers: usize,
