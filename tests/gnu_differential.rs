@@ -291,6 +291,8 @@ fn current_fstype(path: &Path) -> OsString {
     OsString::from(String::from_utf8(output.stdout).unwrap().trim().to_owned())
 }
 
+const PRINTF_TIME_TZ: &str = "Asia/Shanghai";
+
 fn assert_matches_gnu_exact(args: &[OsString]) {
     let expected = Command::new("find").args(args).output().unwrap();
     let actual = Command::cargo_bin("findoxide")
@@ -317,6 +319,56 @@ fn assert_matches_gnu_as_sets(args: &[OsString]) {
     assert_eq!(actual.status.code(), expected.status.code());
     assert_eq!(lines(&actual.stdout), lines(&expected.stdout));
     assert_eq!(lines(&actual.stderr), lines(&expected.stderr));
+}
+
+fn assert_matches_gnu_exact_with_env(args: &[OsString]) {
+    let expected = Command::new("find")
+        .env("LC_ALL", "C")
+        .env("TZ", PRINTF_TIME_TZ)
+        .args(args)
+        .output()
+        .unwrap();
+    let actual = Command::cargo_bin("findoxide")
+        .unwrap()
+        .env("FINDOXIDE_WORKERS", "1")
+        .env("LC_ALL", "C")
+        .env("TZ", PRINTF_TIME_TZ)
+        .args(args)
+        .output()
+        .unwrap();
+
+    assert_eq!(actual.status.code(), expected.status.code());
+    assert_eq!(actual.stdout, expected.stdout);
+    assert_eq!(actual.stderr, expected.stderr);
+}
+
+fn assert_matches_gnu_as_sets_with_env(args: &[OsString]) {
+    let expected = Command::new("find")
+        .env("LC_ALL", "C")
+        .env("TZ", PRINTF_TIME_TZ)
+        .args(args)
+        .output()
+        .unwrap();
+    let actual = Command::cargo_bin("findoxide")
+        .unwrap()
+        .env("FINDOXIDE_WORKERS", "4")
+        .env("LC_ALL", "C")
+        .env("TZ", PRINTF_TIME_TZ)
+        .args(args)
+        .output()
+        .unwrap();
+
+    assert_eq!(actual.status.code(), expected.status.code());
+    assert_eq!(lines(&actual.stdout), lines(&expected.stdout));
+    assert_eq!(lines(&actual.stderr), lines(&expected.stderr));
+}
+
+fn proc_path_without_birth_time() -> Option<&'static Path> {
+    let candidate = Path::new("/proc/self/status");
+    match read_birth_time(candidate, true) {
+        Ok(None) => Some(candidate),
+        _ => None,
+    }
 }
 
 fn snapshot_tree(root: &Path) -> BTreeSet<String> {
@@ -668,6 +720,140 @@ fn parallel_printf_expanded_subset_matches_gnu_find_as_sets() {
     ];
 
     assert_matches_gnu_as_sets(&args);
+}
+
+#[test]
+fn ordered_printf_time_directives_match_gnu_find_exactly() {
+    let root = build_printf_tree();
+    let status = Command::new("touch")
+        .env("TZ", PRINTF_TIME_TZ)
+        .args(["-a", "-m", "-d", "2024-03-04 13:06:07.123456789"])
+        .arg(root.path().join("dir/file.txt"))
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let args_sets = vec![
+        vec![
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-printf".into(),
+            "[%a][%c][%t]\n".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-printf".into(),
+            "[%TY][%Tm][%Td][%TH][%TM][%TS][%TZ][%Tz]\n".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-printf".into(),
+            "[%Ta][%TA][%TB][%Tp][%T@][%T+]\n".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-printf".into(),
+            "[%.3Ta][%10Ta][%.5T@][%010Ta][%+10T@][%#10T+]\n".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-printf".into(),
+            "[%AY][%Cm][%Td][%CH:%CM:%CS]\n".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-printf".into(),
+            "[%Tb][%Th][%Tc][%TD][%TF][%Tg][%TG][%TI][%Tj][%Tr][%TR][%Tu][%TU][%Tw][%TW][%Tx][%TX][%Ty][%TV][%Tt]\n".into(),
+        ],
+    ];
+
+    for args in args_sets {
+        assert_matches_gnu_exact_with_env(&args);
+    }
+
+}
+
+#[test]
+fn parallel_printf_time_directives_match_gnu_find_as_sets() {
+    let root = build_printf_tree();
+    let args = vec![
+        path_arg(root.path()),
+        "-type".into(),
+        "f".into(),
+        "-printf".into(),
+        "[%f][%TY-%Tm-%Td][%TH:%TM:%TS][%T@][%T+][%Tb][%Tc][%TR][%TX][%TV]\n".into(),
+    ];
+
+    assert_matches_gnu_as_sets_with_env(&args);
+}
+
+#[test]
+fn ordered_printf_birth_time_renders_empty_fields_when_unavailable() {
+    let Some(proc_path) = proc_path_without_birth_time() else {
+        return;
+    };
+
+    let output = Command::cargo_bin("findoxide")
+        .unwrap()
+        .env("FINDOXIDE_WORKERS", "1")
+        .env("LC_ALL", "C")
+        .env("TZ", PRINTF_TIME_TZ)
+        .args([
+            path_arg(proc_path),
+            "-maxdepth".into(),
+            "0".into(),
+            "-printf".into(),
+            "[%B][%BY][%B@][%B+]\n".into(),
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), "[][][][]\n");
+}
+
+#[test]
+fn ordered_printf_birth_time_renders_linux_birth_data_when_available() {
+    let root = build_printf_tree();
+    let birth_path = root.path().join("dir/file.txt");
+    if read_birth_time(&birth_path, true).unwrap().is_none() {
+        return;
+    }
+
+    let output = Command::cargo_bin("findoxide")
+        .unwrap()
+        .env("FINDOXIDE_WORKERS", "1")
+        .env("LC_ALL", "C")
+        .env("TZ", PRINTF_TIME_TZ)
+        .args([
+            path_arg(&birth_path),
+            "-maxdepth".into(),
+            "0".into(),
+            "-printf".into(),
+            "[%B][%BY][%Bm][%Bd][%B@][%B+]\n".into(),
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.starts_with('['));
+    assert!(stdout.contains("][20"));
+    assert!(stdout.contains("][0"));
+    assert!(stdout.contains('.'));
+    assert!(stdout.contains('+'));
+    assert!(stdout.ends_with("]\n"));
 }
 
 #[test]

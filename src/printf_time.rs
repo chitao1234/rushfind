@@ -5,6 +5,15 @@ use std::ffi::CStr;
 use std::mem::MaybeUninit;
 
 const WEEKDAYS_ABBR: [&[u8]; 7] = [b"Sun", b"Mon", b"Tue", b"Wed", b"Thu", b"Fri", b"Sat"];
+const WEEKDAYS_FULL: [&[u8]; 7] = [
+    b"Sunday",
+    b"Monday",
+    b"Tuesday",
+    b"Wednesday",
+    b"Thursday",
+    b"Friday",
+    b"Saturday",
+];
 const MONTHS_ABBR: [&[u8]; 12] = [
     b"Jan", b"Feb", b"Mar", b"Apr", b"May", b"Jun", b"Jul", b"Aug", b"Sep", b"Oct", b"Nov",
     b"Dec",
@@ -113,9 +122,17 @@ pub(crate) fn render_selector_bytes(
         PrintfTimeSelector::GnuPlus => Ok(render_gnu_plus(parts)),
         PrintfTimeSelector::Byte(byte) => match byte {
             b'a' => Ok(WEEKDAYS_ABBR[parts.local.tm_wday as usize].to_vec()),
+            b'A' => Ok(WEEKDAYS_FULL[parts.local.tm_wday as usize].to_vec()),
+            b'b' | b'h' => Ok(MONTHS_ABBR[parts.local.tm_mon as usize].to_vec()),
             b'B' => Ok(MONTHS_FULL[parts.local.tm_mon as usize].to_vec()),
+            b'c' => Ok(render_c_locale_datetime(parts)),
             b'd' => Ok(format!("{:02}", parts.local.tm_mday).into_bytes()),
+            b'D' | b'x' => Ok(render_month_day_year(parts)),
+            b'F' => Ok(render_iso_date(parts)),
+            b'g' | b'G' | b'V' => render_iso_week_fields(parts, byte),
             b'H' => Ok(format!("{:02}", parts.local.tm_hour).into_bytes()),
+            b'I' => Ok(format!("{:02}", hour_12(parts.local.tm_hour)).into_bytes()),
+            b'j' => Ok(format!("{:03}", parts.local.tm_yday + 1).into_bytes()),
             b'M' => Ok(format!("{:02}", parts.local.tm_min).into_bytes()),
             b'm' => Ok(format!("{:02}", parts.local.tm_mon + 1).into_bytes()),
             b'p' => Ok(if parts.local.tm_hour < 12 {
@@ -123,8 +140,31 @@ pub(crate) fn render_selector_bytes(
             } else {
                 b"PM".to_vec()
             }),
+            b'r' => Ok(format!(
+                "{:02}:{:02}:{} {}",
+                hour_12(parts.local.tm_hour),
+                parts.local.tm_min,
+                seconds_without_fraction(parts.local.tm_sec),
+                am_pm(parts.local.tm_hour)
+            )
+            .into_bytes()),
+            b'R' => Ok(format!("{:02}:{:02}", parts.local.tm_hour, parts.local.tm_min).into()),
             b'S' => Ok(seconds_with_fraction(parts.local.tm_sec, parts.timestamp.nanos).into()),
+            b't' => Ok(vec![b'\t']),
+            b'T' | b'X' => Ok(format!(
+                "{:02}:{:02}:{}",
+                parts.local.tm_hour,
+                parts.local.tm_min,
+                seconds_with_fraction(parts.local.tm_sec, parts.timestamp.nanos)
+            )
+            .into_bytes()),
+            b'u' => Ok(weekday_monday_one(parts.local.tm_wday).to_string().into_bytes()),
+            b'U' | b'W' => Ok(render_week_number(parts, byte).into_bytes()),
+            b'w' => Ok(parts.local.tm_wday.to_string().into_bytes()),
             b'Y' => Ok(format!("{:04}", parts.local.tm_year + 1900).into_bytes()),
+            b'y' => Ok(format!("{:02}", (parts.local.tm_year + 1900) % 100).into_bytes()),
+            b'Z' => Ok(parts.timezone_name.clone()),
+            b'z' => Ok(render_numeric_offset(parts.utc_offset_seconds)),
             other => Err(Diagnostic::new(
                 format!(
                     "internal error: time selector {} not implemented yet",
@@ -155,6 +195,117 @@ fn render_gnu_plus(parts: &ResolvedTimeParts) -> Vec<u8> {
 
 fn seconds_with_fraction(second: i32, nanos: i32) -> String {
     format!("{second:02}.{nanos:09}0")
+}
+
+fn render_numeric_offset(offset_seconds: i32) -> Vec<u8> {
+    let sign = if offset_seconds < 0 { '-' } else { '+' };
+    let absolute = offset_seconds.abs();
+    let hours = absolute / 3600;
+    let minutes = (absolute % 3600) / 60;
+    format!("{sign}{hours:02}{minutes:02}").into_bytes()
+}
+
+fn render_c_locale_datetime(parts: &ResolvedTimeParts) -> Vec<u8> {
+    format!(
+        "{} {} {:>2} {:02}:{:02}:{} {}",
+        std::str::from_utf8(WEEKDAYS_ABBR[parts.local.tm_wday as usize]).unwrap(),
+        std::str::from_utf8(MONTHS_ABBR[parts.local.tm_mon as usize]).unwrap(),
+        parts.local.tm_mday,
+        parts.local.tm_hour,
+        parts.local.tm_min,
+        seconds_without_fraction(parts.local.tm_sec),
+        parts.local.tm_year + 1900,
+    )
+    .into_bytes()
+}
+
+fn render_month_day_year(parts: &ResolvedTimeParts) -> Vec<u8> {
+    format!(
+        "{:02}/{:02}/{:02}",
+        parts.local.tm_mon + 1,
+        parts.local.tm_mday,
+        (parts.local.tm_year + 1900) % 100
+    )
+    .into_bytes()
+}
+
+fn render_iso_date(parts: &ResolvedTimeParts) -> Vec<u8> {
+    format!(
+        "{:04}-{:02}-{:02}",
+        parts.local.tm_year + 1900,
+        parts.local.tm_mon + 1,
+        parts.local.tm_mday
+    )
+    .into_bytes()
+}
+
+fn render_iso_week_fields(parts: &ResolvedTimeParts, selector: u8) -> Result<Vec<u8>, Diagnostic> {
+    let (iso_year, iso_week) =
+        iso_week_year(parts.local.tm_year + 1900, parts.local.tm_yday + 1, parts.local.tm_wday);
+    match selector {
+        b'g' => Ok(format!("{:02}", iso_year % 100).into_bytes()),
+        b'G' => Ok(format!("{iso_year:04}").into_bytes()),
+        b'V' => Ok(format!("{iso_week:02}").into_bytes()),
+        _ => unreachable!("caller restricts selector"),
+    }
+}
+
+fn hour_12(hour: i32) -> i32 {
+    match hour % 12 {
+        0 => 12,
+        other => other,
+    }
+}
+
+fn am_pm(hour: i32) -> &'static str {
+    if hour < 12 { "AM" } else { "PM" }
+}
+
+fn seconds_without_fraction(second: i32) -> String {
+    format!("{second:02}")
+}
+
+fn weekday_monday_one(wday: i32) -> i32 {
+    if wday == 0 { 7 } else { wday }
+}
+
+fn render_week_number(parts: &ResolvedTimeParts, selector: u8) -> String {
+    let week = match selector {
+        b'U' => week_number_sunday(parts.local.tm_yday + 1, parts.local.tm_wday),
+        b'W' => week_number_monday(parts.local.tm_yday + 1, parts.local.tm_wday),
+        _ => unreachable!("caller restricts selector"),
+    };
+    format!("{week:02}")
+}
+
+fn week_number_sunday(yday_one_based: i32, wday: i32) -> i32 {
+    ((yday_one_based + 6 - wday) / 7).max(0)
+}
+
+fn week_number_monday(yday_one_based: i32, wday: i32) -> i32 {
+    let monday_index = weekday_monday_one(wday) - 1;
+    ((yday_one_based + 6 - monday_index) / 7).max(0)
+}
+
+fn iso_week_year(year: i32, yday_one_based: i32, wday: i32) -> (i32, i32) {
+    let monday_based_weekday = weekday_monday_one(wday);
+    let thursday_yday = yday_one_based + (4 - monday_based_weekday);
+    if thursday_yday < 1 {
+        let prev_year = year - 1;
+        let prev_year_len = if is_leap_year(prev_year) { 366 } else { 365 };
+        return iso_week_year(prev_year, prev_year_len + thursday_yday, wday);
+    }
+
+    let year_len = if is_leap_year(year) { 366 } else { 365 };
+    if thursday_yday > year_len {
+        return iso_week_year(year + 1, thursday_yday - year_len, wday);
+    }
+
+    (year, ((thursday_yday - 1) / 7) + 1)
+}
+
+fn is_leap_year(year: i32) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
 
 #[allow(dead_code)]

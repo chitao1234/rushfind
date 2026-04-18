@@ -291,8 +291,8 @@ fn parse_time_selector_byte(byte: u8) -> Option<PrintfTimeSelector> {
         b'@' => Some(PrintfTimeSelector::EpochSeconds),
         b'+' => Some(PrintfTimeSelector::GnuPlus),
         b'a' | b'A' | b'b' | b'B' | b'c' | b'd' | b'D' | b'F' | b'g' | b'G' | b'h' | b'H'
-        | b'I' | b'j' | b'm' | b'M' | b'p' | b'r' | b'S' | b't' | b'T' | b'u' | b'U' | b'V'
-        | b'w' | b'W' | b'x' | b'X' | b'y' | b'Y' | b'z' | b'Z' => {
+        | b'I' | b'j' | b'm' | b'M' | b'p' | b'r' | b'R' | b'S' | b't' | b'T' | b'u' | b'U'
+        | b'V' | b'w' | b'W' | b'x' | b'X' | b'y' | b'Y' | b'z' | b'Z' => {
             Some(PrintfTimeSelector::Byte(byte))
         }
         _ => None,
