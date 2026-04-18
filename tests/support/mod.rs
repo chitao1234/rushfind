@@ -29,8 +29,22 @@ pub fn cargo_bin_output_with_timeout(
     workers: usize,
     timeout: Duration,
 ) -> Output {
-    let mut child = Command::new(cargo_bin("findoxide"))
-        .env("FINDOXIDE_WORKERS", workers.to_string())
+    cargo_bin_output_with_env_timeout(args, workers, &[], timeout)
+}
+
+pub fn cargo_bin_output_with_env_timeout(
+    args: &[OsString],
+    workers: usize,
+    envs: &[(&str, &str)],
+    timeout: Duration,
+) -> Output {
+    let mut command = Command::new(cargo_bin("findoxide"));
+    command.env("FINDOXIDE_WORKERS", workers.to_string());
+    for (key, value) in envs {
+        command.env(key, value);
+    }
+
+    let mut child = command
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

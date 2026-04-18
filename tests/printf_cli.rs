@@ -2,8 +2,9 @@ mod support;
 
 use std::fs;
 use std::os::unix::fs::{self as unix_fs, MetadataExt, PermissionsExt};
+use std::process::Command;
 use std::time::Duration;
-use support::{cargo_bin_output_with_timeout, path_arg};
+use support::{cargo_bin_output_with_env_timeout, cargo_bin_output_with_timeout, path_arg};
 use tempfile::tempdir;
 
 #[test]
@@ -178,4 +179,69 @@ fn parallel_printf_keeps_expanded_records_atomic() {
             .chunks_exact(2)
             .all(|chunk| chunk[0].starts_with("BEGIN:") && chunk[1].starts_with("END:"))
     );
+}
+
+#[test]
+fn ordered_printf_renders_time_directives_in_a_fixed_local_timezone() {
+    let root = tempdir().unwrap();
+    let path = root.path().join("stamp.txt");
+    fs::write(&path, "hello").unwrap();
+    let status = Command::new("touch")
+        .env("TZ", "Asia/Shanghai")
+        .args(["-a", "-m", "-d", "2024-03-04 13:06:07.123456789"])
+        .arg(&path)
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let output = cargo_bin_output_with_env_timeout(
+        &[
+            path_arg(&path),
+            "-maxdepth".into(),
+            "0".into(),
+            "-printf".into(),
+            "[%t][%TY-%Tm-%Td][%TH:%TM:%TS][%T@][%T+][%.3Ta][%10Ta]\\n".into(),
+        ],
+        1,
+        &[("TZ", "Asia/Shanghai"), ("LC_ALL", "C")],
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "[Mon Mar  4 13:06:07.1234567890 2024][2024-03-04][13:06:07.1234567890][1709528767.1234567890][2024-03-04+13:06:07.1234567890][Mon][       Mon]\n"
+    );
+}
+
+#[test]
+fn parallel_printf_keeps_time_records_atomic() {
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("alpha.txt"), "a\n").unwrap();
+    fs::write(root.path().join("beta.txt"), "b\n").unwrap();
+
+    let output = cargo_bin_output_with_env_timeout(
+        &[
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-printf".into(),
+            "BEGIN:%f:%TY-%Tm-%Td\\nEND:%f:%T@\\n".into(),
+        ],
+        4,
+        &[("TZ", "Asia/Shanghai"), ("LC_ALL", "C")],
+        Duration::from_secs(5),
+    );
+
+    let lines = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    assert_eq!(lines.len(), 4);
+    assert!(lines.chunks_exact(2).all(|chunk| {
+        let begin_name = chunk[0].split(':').nth(1).unwrap();
+        let end_name = chunk[1].split(':').nth(1).unwrap();
+        begin_name == end_name
+    }));
 }

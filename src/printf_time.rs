@@ -29,7 +29,9 @@ const MONTHS_FULL: [&[u8]; 12] = [
 pub(crate) struct ResolvedTimeParts {
     pub timestamp: Timestamp,
     pub local: libc::tm,
+    #[allow(dead_code)]
     pub timezone_name: Vec<u8>,
+    #[allow(dead_code)]
     pub utc_offset_seconds: i32,
 }
 
@@ -112,12 +114,17 @@ pub(crate) fn render_selector_bytes(
         PrintfTimeSelector::Byte(byte) => match byte {
             b'a' => Ok(WEEKDAYS_ABBR[parts.local.tm_wday as usize].to_vec()),
             b'B' => Ok(MONTHS_FULL[parts.local.tm_mon as usize].to_vec()),
+            b'd' => Ok(format!("{:02}", parts.local.tm_mday).into_bytes()),
+            b'H' => Ok(format!("{:02}", parts.local.tm_hour).into_bytes()),
+            b'M' => Ok(format!("{:02}", parts.local.tm_min).into_bytes()),
+            b'm' => Ok(format!("{:02}", parts.local.tm_mon + 1).into_bytes()),
             b'p' => Ok(if parts.local.tm_hour < 12 {
                 b"AM".to_vec()
             } else {
                 b"PM".to_vec()
             }),
             b'S' => Ok(seconds_with_fraction(parts.local.tm_sec, parts.timestamp.nanos).into()),
+            b'Y' => Ok(format!("{:04}", parts.local.tm_year + 1900).into_bytes()),
             other => Err(Diagnostic::new(
                 format!(
                     "internal error: time selector {} not implemented yet",

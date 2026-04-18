@@ -3,6 +3,9 @@ use crate::diagnostics::Diagnostic;
 use crate::entry::{EntryContext, EntryKind};
 use crate::eval::EvalContext;
 use crate::follow::FollowMode;
+use crate::printf_time::{
+    ResolvedTimeParts, render_full_time_bytes, render_selector_bytes, resolve_local_time_parts,
+};
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 
@@ -343,12 +346,13 @@ pub(crate) fn render_printf_bytes(
     context: &EvalContext,
 ) -> Result<Vec<u8>, Diagnostic> {
     let mut rendered = Vec::new();
+    let mut state = PrintfRenderState::default();
 
     for atom in &program.atoms {
         match atom {
             PrintfAtom::Literal(bytes) => rendered.extend_from_slice(bytes),
             PrintfAtom::Directive(directive) => rendered.extend_from_slice(
-                &render_directive_bytes(directive, entry, follow_mode, context)?,
+                &render_directive_bytes(directive, entry, follow_mode, context, &mut state)?,
             ),
         }
     }
@@ -361,6 +365,7 @@ fn render_directive_bytes(
     entry: &EntryContext,
     follow_mode: FollowMode,
     context: &EvalContext,
+    state: &mut PrintfRenderState,
 ) -> Result<Vec<u8>, Diagnostic> {
     Ok(match directive.kind {
         PrintfDirectiveKind::Path => {
@@ -467,13 +472,58 @@ fn render_directive_bytes(
             })?;
             format_string_like(type_name.as_bytes(), directive.format)
         }
-        PrintfDirectiveKind::FullTimestamp(_) | PrintfDirectiveKind::TimestampPart { .. } => {
-            return Err(Diagnostic::new(
-                "internal error: time -printf rendering is not implemented yet",
-                1,
-            ));
+        PrintfDirectiveKind::FullTimestamp(family) => {
+            match resolve_cached_time_parts(state, family, entry, follow_mode)? {
+                Some(parts) => format_string_like(&render_full_time_bytes(parts)?, directive.format),
+                None => format_string_like(b"", directive.format),
+            }
+        }
+        PrintfDirectiveKind::TimestampPart { family, selector } => {
+            match resolve_cached_time_parts(state, family, entry, follow_mode)? {
+                Some(parts) => {
+                    format_string_like(&render_selector_bytes(parts, selector)?, directive.format)
+                }
+                None => format_string_like(b"", directive.format),
+            }
         }
     })
+}
+
+#[derive(Default)]
+struct PrintfRenderState {
+    access: Option<Option<ResolvedTimeParts>>,
+    change: Option<Option<ResolvedTimeParts>>,
+    modification: Option<Option<ResolvedTimeParts>>,
+    birth: Option<Option<ResolvedTimeParts>>,
+}
+
+fn resolve_cached_time_parts<'a>(
+    state: &'a mut PrintfRenderState,
+    family: PrintfTimeFamily,
+    entry: &EntryContext,
+    follow_mode: FollowMode,
+) -> Result<Option<&'a ResolvedTimeParts>, Diagnostic> {
+    let slot = match family {
+        PrintfTimeFamily::Access => &mut state.access,
+        PrintfTimeFamily::Change => &mut state.change,
+        PrintfTimeFamily::Modification => &mut state.modification,
+        PrintfTimeFamily::Birth => &mut state.birth,
+    };
+
+    if slot.is_none() {
+        let timestamp = match family {
+            PrintfTimeFamily::Access => Some(entry.active_atime(follow_mode)?),
+            PrintfTimeFamily::Change => Some(entry.active_ctime(follow_mode)?),
+            PrintfTimeFamily::Modification => Some(entry.active_mtime(follow_mode)?),
+            PrintfTimeFamily::Birth => entry.active_birth_time(follow_mode)?,
+        };
+        *slot = Some(match timestamp {
+            Some(timestamp) => Some(resolve_local_time_parts(timestamp)?),
+            None => None,
+        });
+    }
+
+    Ok(slot.as_ref().and_then(|value| value.as_ref()))
 }
 
 fn name_or_id_bytes(name: Option<&OsStr>, id: u32) -> Vec<u8> {
