@@ -163,10 +163,7 @@ mod tests {
         let scheduler = Scheduler::new(1);
         let control = GlobalControl::new();
         scheduler.push_root(
-            ParallelTask::PreOrderRoot(PreOrderRootTask::for_path(
-                PathBuf::from("root"),
-                0,
-            )),
+            ParallelTask::PreOrderRoot(PreOrderRootTask::for_path(PathBuf::from("root"), 0)),
             &control,
         );
         scheduler.push_resume(
@@ -186,22 +183,22 @@ mod tests {
         let scheduler = Arc::new(Scheduler::new(1));
         let control = Arc::new(GlobalControl::new());
         let mut worker = scheduler.worker_handle(0);
+        control.task_spawned();
 
         let scheduler_for_publisher = scheduler.clone();
         let control_for_publisher = control.clone();
         let publisher = thread::spawn(move || {
             thread::sleep(Duration::from_millis(25));
             scheduler_for_publisher.push_spill(
-                ParallelTask::PreOrderRoot(PreOrderRootTask::for_path(
-                    PathBuf::from("child"),
-                    1,
-                )),
+                ParallelTask::PreOrderRoot(PreOrderRootTask::for_path(PathBuf::from("child"), 1)),
                 control_for_publisher.as_ref(),
             );
         });
 
         let task = worker.pop_blocking(control.as_ref());
         publisher.join().unwrap();
+        control.task_finished();
+        control.task_finished();
 
         assert!(matches!(task, Some(ParallelTask::PreOrderRoot(_))));
     }
@@ -223,17 +220,11 @@ mod tests {
         let scheduler = Scheduler::new(2);
         let control = GlobalControl::new();
         scheduler.push_root(
-            ParallelTask::PreOrderRoot(PreOrderRootTask::for_path(
-                PathBuf::from("root-a"),
-                0,
-            )),
+            ParallelTask::PreOrderRoot(PreOrderRootTask::for_path(PathBuf::from("root-a"), 0)),
             &control,
         );
         scheduler.push_root(
-            ParallelTask::PreOrderRoot(PreOrderRootTask::for_path(
-                PathBuf::from("root-b"),
-                0,
-            )),
+            ParallelTask::PreOrderRoot(PreOrderRootTask::for_path(PathBuf::from("root-b"), 0)),
             &control,
         );
 
@@ -249,10 +240,7 @@ mod tests {
         let scheduler = Scheduler::new(1);
         let control = GlobalControl::new();
         scheduler.push_root(
-            ParallelTask::PreOrderRoot(PreOrderRootTask::for_path(
-                PathBuf::from("root"),
-                0,
-            )),
+            ParallelTask::PreOrderRoot(PreOrderRootTask::for_path(PathBuf::from("root"), 0)),
             &control,
         );
 

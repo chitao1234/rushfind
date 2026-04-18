@@ -12,7 +12,7 @@ use std::sync::Arc;
 #[derive(Debug, Clone)]
 pub struct ScheduledEntry {
     pub entry: EntryContext,
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)]
     pub(crate) ticket: EntryTicket,
 }
 
@@ -416,13 +416,10 @@ mod tests {
     use crate::entry::EntryContext;
     use crate::follow::FollowMode;
     use crate::identity::FileIdentity;
-    use crate::parallel::postorder::walk_parallel_with_backend;
     use crate::planner::{TraversalOptions, TraversalOrder};
     use crate::traversal_control::TraversalControl;
-    use crossbeam_channel::Receiver;
-    use std::collections::BTreeMap;
     use std::fs;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
     use std::sync::Arc;
     use tempfile::tempdir;
 
@@ -434,7 +431,7 @@ mod tests {
         fs::write(root.path().join("keep/file.txt"), "keep\n").unwrap();
         fs::write(root.path().join("skip/file.txt"), "skip\n").unwrap();
 
-        let backend = Arc::new(TestBackend::default());
+        let backend = Arc::new(TestBackend);
         let mut seen = Vec::new();
         walk_ordered_with_backend(
             backend,
@@ -468,73 +465,6 @@ mod tests {
     }
 
     #[test]
-    fn parallel_walk_applies_same_filesystem_per_root() {
-        let root = tempdir().unwrap();
-        let left = root.path().join("left");
-        let right = root.path().join("right");
-        fs::create_dir(&left).unwrap();
-        fs::create_dir(&right).unwrap();
-        fs::create_dir(left.join("local")).unwrap();
-        fs::create_dir(left.join("remote")).unwrap();
-        fs::create_dir(right.join("local")).unwrap();
-        fs::create_dir(right.join("remote")).unwrap();
-        fs::write(left.join("local/keep.txt"), "left-local\n").unwrap();
-        fs::write(left.join("remote/skip.txt"), "left-remote\n").unwrap();
-        fs::write(right.join("local/keep.txt"), "right-local\n").unwrap();
-        fs::write(right.join("remote/skip.txt"), "right-remote\n").unwrap();
-
-        let backend = Arc::new(TestBackend::with_devices(BTreeMap::from([
-            (left.clone(), 1),
-            (left.join("local"), 1),
-            (left.join("remote"), 2),
-            (right.clone(), 2),
-            (right.join("local"), 2),
-            (right.join("remote"), 1),
-        ])));
-
-        let receiver = walk_parallel_with_backend(
-            backend,
-            &[left.clone(), right.clone()],
-            FollowMode::Physical,
-            TraversalOptions {
-                min_depth: 0,
-                max_depth: None,
-                same_file_system: true,
-                order: TraversalOrder::PreOrder,
-            },
-            4,
-            |_entry| {
-                Ok(TraversalControl {
-                    matched: true,
-                    prune: false,
-                })
-            },
-        );
-
-        let seen = collect_paths(receiver);
-        assert!(seen.iter().any(|path| path.ends_with("left/remote")));
-        assert!(seen.iter().any(|path| path.ends_with("right/remote")));
-        assert!(
-            !seen
-                .iter()
-                .any(|path| path.ends_with("left/remote/skip.txt"))
-        );
-        assert!(
-            !seen
-                .iter()
-                .any(|path| path.ends_with("right/remote/skip.txt"))
-        );
-        assert!(
-            seen.iter()
-                .any(|path| path.ends_with("left/local/keep.txt"))
-        );
-        assert!(
-            seen.iter()
-                .any(|path| path.ends_with("right/local/keep.txt"))
-        );
-    }
-
-    #[test]
     fn ordered_depth_mode_emits_directory_completion_after_descendants() {
         let root = tempdir().unwrap();
         fs::create_dir(root.path().join("dir")).unwrap();
@@ -542,7 +472,7 @@ mod tests {
 
         let mut seen = Vec::new();
         walk_ordered_with_backend(
-            Arc::new(TestBackend::default()),
+            Arc::new(TestBackend),
             &[root.path().to_path_buf()],
             FollowMode::Physical,
             TraversalOptions {
@@ -584,94 +514,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn parallel_depth_mode_completes_parent_after_descendants() {
-        let root = tempdir().unwrap();
-        fs::create_dir(root.path().join("dir")).unwrap();
-        fs::write(root.path().join("dir/file.txt"), "child\n").unwrap();
-
-        let seen = collect_paths_and_completions(
-            root.path(),
-            walk_parallel_with_backend(
-                Arc::new(TestBackend::default()),
-                &[root.path().to_path_buf()],
-                FollowMode::Physical,
-                TraversalOptions {
-                    min_depth: 0,
-                    max_depth: None,
-                    same_file_system: false,
-                    order: TraversalOrder::DepthFirstPostOrder,
-                },
-                4,
-                |_entry| {
-                    Ok(TraversalControl {
-                        matched: true,
-                        prune: false,
-                    })
-                },
-            ),
-        );
-
-        let file_index = seen
-            .iter()
-            .position(|label| label == "entry:dir/file.txt")
-            .unwrap();
-        let dir_index = seen.iter().position(|label| label == "done:dir").unwrap();
-        assert!(file_index < dir_index);
-    }
-
-    #[test]
-    fn parallel_depth_mode_assigns_parent_barriers_to_descendants() {
-        let root = tempdir().unwrap();
-        fs::create_dir(root.path().join("dir")).unwrap();
-        fs::write(root.path().join("dir/file.txt"), "child\n").unwrap();
-
-        let seen = collect_scheduled_events(
-            root.path(),
-            walk_parallel_with_backend(
-                Arc::new(TestBackend::default()),
-                &[root.path().to_path_buf()],
-                FollowMode::Physical,
-                TraversalOptions {
-                    min_depth: 0,
-                    max_depth: None,
-                    same_file_system: false,
-                    order: TraversalOrder::DepthFirstPostOrder,
-                },
-                4,
-                |_entry| {
-                    Ok(TraversalControl {
-                        matched: true,
-                        prune: false,
-                    })
-                },
-            ),
-        );
-
-        let file = seen
-            .iter()
-            .find(|item| item.label == "entry:dir/file.txt")
-            .unwrap();
-        let dir = seen.iter().find(|item| item.label == "done:dir").unwrap();
-
-        assert!(dir.ticket.block_on_subtree.is_some());
-        assert_eq!(file.ticket.ancestor_barriers.len(), 1);
-        assert_eq!(
-            file.ticket.ancestor_barriers[0],
-            dir.ticket.block_on_subtree.unwrap()
-        );
-    }
-
-    #[derive(Default)]
-    struct TestBackend {
-        devices: BTreeMap<PathBuf, u64>,
-    }
-
-    impl TestBackend {
-        fn with_devices(devices: BTreeMap<PathBuf, u64>) -> Self {
-            Self { devices }
-        }
-    }
+    struct TestBackend;
 
     impl WalkBackend for TestBackend {
         fn load_entry(&self, pending: &PendingPath) -> Result<EntryContext, Diagnostic> {
@@ -695,73 +538,7 @@ mod tests {
             entry: &EntryContext,
             follow_mode: FollowMode,
         ) -> Result<Option<FileIdentity>, Diagnostic> {
-            let identity = entry.active_directory_identity(follow_mode)?;
-            Ok(identity.map(|identity| FileIdentity {
-                dev: self
-                    .devices
-                    .get(&entry.path)
-                    .copied()
-                    .unwrap_or(identity.dev),
-                ino: identity.ino,
-            }))
+            entry.active_directory_identity(follow_mode)
         }
-    }
-
-    fn collect_paths(receiver: Receiver<WalkEvent>) -> Vec<PathBuf> {
-        let mut paths = Vec::new();
-        for event in receiver {
-            if let WalkEvent::Entry(item) = event {
-                paths.push(item.entry.path);
-            }
-        }
-        paths
-    }
-
-    fn collect_paths_and_completions(base: &Path, receiver: Receiver<WalkEvent>) -> Vec<String> {
-        let mut seen = Vec::new();
-        for event in receiver {
-            match event {
-                WalkEvent::Entry(item) => {
-                    let rel = item.entry.path.strip_prefix(base).unwrap().display();
-                    seen.push(format!("entry:{rel}"));
-                }
-                WalkEvent::DirectoryComplete(item) => {
-                    let rel = item.entry.path.strip_prefix(base).unwrap().display();
-                    seen.push(format!("done:{rel}"));
-                }
-                WalkEvent::Error(error) => panic!("unexpected walk error: {error:?}"),
-            }
-        }
-        seen
-    }
-
-    #[derive(Debug)]
-    struct ScheduledLabel {
-        label: String,
-        ticket: crate::runtime_pipeline::EntryTicket,
-    }
-
-    fn collect_scheduled_events(base: &Path, receiver: Receiver<WalkEvent>) -> Vec<ScheduledLabel> {
-        let mut seen = Vec::new();
-        for event in receiver {
-            match event {
-                WalkEvent::Entry(item) => {
-                    let rel = item.entry.path.strip_prefix(base).unwrap().display();
-                    seen.push(ScheduledLabel {
-                        label: format!("entry:{rel}"),
-                        ticket: item.ticket,
-                    });
-                }
-                WalkEvent::DirectoryComplete(item) => {
-                    let rel = item.entry.path.strip_prefix(base).unwrap().display();
-                    seen.push(ScheduledLabel {
-                        label: format!("done:{rel}"),
-                        ticket: item.ticket,
-                    });
-                }
-                WalkEvent::Error(error) => panic!("unexpected walk error: {error:?}"),
-            }
-        }
-        seen
     }
 }

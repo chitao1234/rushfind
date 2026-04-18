@@ -143,9 +143,9 @@ pub(crate) fn run_parallel_worker(
     result_tx: Sender<Result<WorkerReport, Diagnostic>>,
 ) -> Result<(), Diagnostic> {
     let send_result = |result| {
-        result_tx.send(result).map_err(|_| {
-            Diagnostic::new("internal error: v2 result queue is unavailable", 1)
-        })
+        result_tx
+            .send(result)
+            .map_err(|_| Diagnostic::new("internal error: v2 result queue is unavailable", 1))
     };
     let backend = FsWalkBackend;
     let mut sink = WorkerActionSink::new(control.clone(), broker);
@@ -432,7 +432,12 @@ fn run_postorder_root_task(
 
                     if pending.path == root_path && pending.depth == root_depth {
                         if let Some(parent) = root_notify_parent.take() {
-                            notify_parent_barrier(parent, barriers, scheduler, sink.control.as_ref())?;
+                            notify_parent_barrier(
+                                parent,
+                                barriers,
+                                scheduler,
+                                sink.control.as_ref(),
+                            )?;
                         }
                     }
                     continue;
@@ -471,7 +476,10 @@ fn run_postorder_root_task(
                     } else {
                         None
                     };
-                    stack.push(PostOrderFrame::CompleteInline { entry, notify_parent });
+                    stack.push(PostOrderFrame::CompleteInline {
+                        entry,
+                        notify_parent,
+                    });
                     continue;
                 };
 
@@ -486,7 +494,10 @@ fn run_postorder_root_task(
                             } else {
                                 None
                             };
-                        stack.push(PostOrderFrame::CompleteInline { entry, notify_parent });
+                        stack.push(PostOrderFrame::CompleteInline {
+                            entry,
+                            notify_parent,
+                        });
                         continue;
                     }
                 };
@@ -552,7 +563,10 @@ fn run_postorder_root_task(
                     } else {
                         None
                     };
-                    stack.push(PostOrderFrame::CompleteInline { entry, notify_parent });
+                    stack.push(PostOrderFrame::CompleteInline {
+                        entry,
+                        notify_parent,
+                    });
                 }
 
                 let child_ancestor_barriers = barrier

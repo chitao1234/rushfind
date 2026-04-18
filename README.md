@@ -25,10 +25,12 @@
 - Ordered single-worker mode stays GNU-oriented and remains a separate engine for supported
   structural traversal controls
 - Ordered single-worker mode matches GNU `-quit` behavior for the supported action set
-- Relaxed-order parallel mode is worker-owned, may emit side effects out of order, guarantees
-  prune subtree boundaries in pre-order traversal, and does not promise GNU sibling ordering
-- Relaxed-order parallel mode treats `-quit` as cancellation: no new work is granted after it is
-  observed, already granted work may still finish, and buffered `-exec ... +` batches still flush
+- Relaxed-order parallel mode is subtree-scheduled and worker-owned, may emit side effects out of
+  order, guarantees prune subtree boundaries in pre-order traversal, and does not promise GNU
+  sibling ordering
+- Relaxed-order parallel mode treats `-quit` as cancellation: no new subtree tasks are published
+  after it is observed, already granted work may still finish, and buffered `-exec ... +` batches
+  still flush
 - Ordered single-worker mode inherits child stdio for `-exec`
 - Relaxed-order parallel mode buffers child stdout/stderr for atomic replay
 - `-delete` implies depth-mode traversal, so directories are evaluated and removed after their
