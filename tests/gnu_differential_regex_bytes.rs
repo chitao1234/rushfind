@@ -37,8 +37,16 @@ fn run_fox(args: &[OsString]) -> Output {
 
 fn build_non_utf8_regex_tree() -> tempfile::TempDir {
     let root = tempdir().unwrap();
-    fs::write(root.path().join(path_from_bytes(b"ReadMe-\xff.TXT")), "target\n").unwrap();
-    fs::write(root.path().join(path_from_bytes(b"ReadMe-\xfe.TXT")), "other\n").unwrap();
+    fs::write(
+        root.path().join(path_from_bytes(b"ReadMe-\xff.TXT")),
+        "target\n",
+    )
+    .unwrap();
+    fs::write(
+        root.path().join(path_from_bytes(b"ReadMe-\xfe.TXT")),
+        "other\n",
+    )
+    .unwrap();
     fs::write(root.path().join("README.TXT"), "ascii\n").unwrap();
     root
 }
