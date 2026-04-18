@@ -143,3 +143,34 @@ fn parallel_v2_split_subtrees_still_visit_each_matching_file_once() {
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(lines.len(), 64);
 }
+
+#[test]
+fn parallel_v2_wide_root_split_still_visits_each_matching_file_once() {
+    let root = tempdir().unwrap();
+    for dir_index in 0..48 {
+        let dir = root.path().join(format!("dir-{dir_index:02}"));
+        fs::create_dir(&dir).unwrap();
+        for file_index in 0..8 {
+            fs::write(dir.join(format!("file-{file_index:02}.txt")), "x\n").unwrap();
+        }
+    }
+
+    let output = cargo_bin_output_with_timeout(
+        &[
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-print".into(),
+        ],
+        4,
+        Duration::from_secs(5),
+    );
+
+    let lines = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(str::to_owned)
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(lines.len(), 48 * 8);
+}

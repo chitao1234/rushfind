@@ -179,7 +179,7 @@ pub(crate) fn run_parallel_worker(
                         &plan,
                         &backend,
                         task,
-                        &scheduler,
+                        &mut worker,
                         &eval_context,
                         &mut sink,
                         &mut had_runtime_errors,
@@ -236,7 +236,7 @@ fn run_preorder_root_serial(
     plan: &ExecutionPlan,
     backend: &dyn WalkBackend,
     root: PreOrderRootTask,
-    scheduler: &Scheduler,
+    worker: &mut WorkerHandle,
     context: &EvalContext,
     sink: &mut WorkerActionSink,
     had_runtime_errors: &mut bool,
@@ -338,7 +338,7 @@ fn run_preorder_root_serial(
         if discovered.len() >= SPLIT_CHILD_THRESHOLD && sink.control.accepts_new_work() {
             let spill = discovered.split_off(1);
             for pending_child in spill {
-                scheduler.push_spill(
+                worker.push_local(
                     ParallelTask::PreOrderRoot(PreOrderRootTask {
                         pending: pending_child,
                     }),
