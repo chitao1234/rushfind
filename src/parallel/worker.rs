@@ -19,6 +19,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 const DEFAULT_SPILL_THRESHOLD: usize = 64 * 1024;
+const SPLIT_CHILD_THRESHOLD: usize = 32;
 
 pub(crate) struct WorkerActionSink {
     control: Arc<GlobalControl>,
@@ -204,7 +205,7 @@ fn run_preorder_root_serial(
     plan: &ExecutionPlan,
     backend: &dyn WalkBackend,
     root: PreOrderRootTask,
-    _scheduler: &Scheduler,
+    scheduler: &Scheduler,
     context: &EvalContext,
     sink: &mut WorkerActionSink,
     had_runtime_errors: &mut bool,
@@ -288,8 +289,9 @@ fn run_preorder_root_serial(
             *had_runtime_errors = true;
         }
 
-        for child in children.into_iter().rev() {
-            stack.push(PendingPath {
+        let mut discovered = children
+            .into_iter()
+            .map(|child| PendingPath {
                 path: child.path,
                 root_path: pending.root_path.clone(),
                 depth: pending.depth + 1,
@@ -299,7 +301,23 @@ fn run_preorder_root_serial(
                 ancestor_barriers: pending.ancestor_barriers.clone(),
                 root_device,
                 parent_completion: None,
-            });
+            })
+            .collect::<Vec<_>>();
+
+        if discovered.len() >= SPLIT_CHILD_THRESHOLD && sink.control.accepts_new_work() {
+            let spill = discovered.split_off(1);
+            for pending_child in spill {
+                scheduler.push_spill(
+                    ParallelTask::PreOrderRoot(PreOrderRootTask {
+                        pending: pending_child,
+                    }),
+                    sink.control.as_ref(),
+                );
+            }
+        }
+
+        for child in discovered.into_iter().rev() {
+            stack.push(child);
         }
     }
 
