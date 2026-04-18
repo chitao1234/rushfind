@@ -432,12 +432,7 @@ fn run_postorder_root_task(
 
                     if pending.path == root_path && pending.depth == root_depth {
                         if let Some(parent) = root_notify_parent.take() {
-                            notify_parent_barrier(
-                                parent,
-                                barriers,
-                                worker,
-                                sink.control.as_ref(),
-                            )?;
+                            notify_parent_barrier(parent, barriers, worker, sink.control.as_ref())?;
                         }
                     }
                     continue;
