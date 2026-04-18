@@ -22,10 +22,11 @@
 - `-printf` currently supports `%p`, `%P`, `%f`, `%h`, `%d`, `%y`, `%s`, `%m`, `%l`, `%%`, `\\`,
   `\n`, `\t`, and `\0`
 - Unsupported `-printf` directives fail during planning with explicit diagnostics
-- Ordered single-worker mode stays GNU-oriented for supported structural traversal controls
+- Ordered single-worker mode stays GNU-oriented and remains a separate engine for supported
+  structural traversal controls
 - Ordered single-worker mode matches GNU `-quit` behavior for the supported action set
-- Relaxed-order parallel mode guarantees prune subtree boundaries in pre-order traversal but does
-  not promise GNU sibling ordering
+- Relaxed-order parallel mode is worker-owned, may emit side effects out of order, guarantees
+  prune subtree boundaries in pre-order traversal, and does not promise GNU sibling ordering
 - Relaxed-order parallel mode treats `-quit` as cancellation: no new work is granted after it is
   observed, already granted work may still finish, and buffered `-exec ... +` batches still flush
 - Ordered single-worker mode inherits child stdio for `-exec`
@@ -58,7 +59,9 @@
 Use the `FINDOXIDE_WORKERS` environment variable to control execution mode:
 
 - `FINDOXIDE_WORKERS=1` keeps traversal/output close to GNU ordering
-- `FINDOXIDE_WORKERS=4` enables relaxed-order parallel traversal
+- `FINDOXIDE_WORKERS=4` enables the worker-owned relaxed-order parallel engine by default
+- `FINDOXIDE_PARALLEL_ENGINE=legacy` keeps the previous coordinator-centric engine available for
+  comparison during migration
 
 ## Follow modes
 

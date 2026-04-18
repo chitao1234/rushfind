@@ -1,9 +1,7 @@
 use crate::diagnostics::Diagnostic;
 use crate::eval::EvalContext;
 use crate::mounts::MountSnapshot;
-use crate::planner::{
-    ExecutionMode, ExecutionPlan, ParallelExecutionPolicy, RuntimeExpr, TraversalOrder,
-};
+use crate::planner::{ExecutionMode, ExecutionPlan, RuntimeExpr, TraversalOrder};
 use crate::traversal_control::{TraversalControl, evaluate_for_traversal_with_context};
 use std::io::Write;
 
@@ -25,10 +23,13 @@ where
     match plan.mode {
         ExecutionMode::OrderedSingle => crate::ordered::run_ordered_plan(plan, stdout, stderr),
         ExecutionMode::ParallelRelaxed => match parallel_engine_override().as_deref() {
-            Some("v2") if can_use_parallel_v2(plan) => {
-                crate::parallel::run_parallel_v2(plan, stdout, stderr)
-            }
-            _ => crate::parallel::run_parallel_legacy(plan, stdout, stderr),
+            Some("legacy") => crate::parallel::run_parallel_legacy(plan, stdout, stderr),
+            Some("v2") => crate::parallel::run_parallel_v2(plan, stdout, stderr),
+            None => crate::parallel::run_parallel_v2(plan, stdout, stderr),
+            Some(other) => Err(Diagnostic::new(
+                format!("unsupported FINDOXIDE_PARALLEL_ENGINE `{other}`"),
+                2,
+            )),
         },
     }
 }
@@ -37,7 +38,10 @@ fn parallel_engine_override() -> Option<String> {
     std::env::var("FINDOXIDE_PARALLEL_ENGINE").ok()
 }
 
+#[cfg(test)]
 fn can_use_parallel_v2(plan: &ExecutionPlan) -> bool {
+    use crate::planner::ParallelExecutionPolicy;
+
     matches!(
         plan.parallel_policy,
         Some(ParallelExecutionPolicy::PreOrderFastPath)

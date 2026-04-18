@@ -33,10 +33,32 @@ fn parallel_mode_matches_gnu_find_as_an_unordered_set() {
     let actual = Command::cargo_bin("findoxide")
         .unwrap()
         .env("FINDOXIDE_WORKERS", "4")
+        .env_remove("FINDOXIDE_PARALLEL_ENGINE")
         .args(&args)
         .output()
         .unwrap();
 
     assert_eq!(actual.status.code(), expected.status.code());
     assert_eq!(lines(&actual.stdout), lines(&expected.stdout));
+}
+
+#[test]
+fn unsupported_parallel_engine_override_returns_exit_two() {
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("a.txt"), "a\n").unwrap();
+
+    let output = Command::cargo_bin("findoxide")
+        .unwrap()
+        .env("FINDOXIDE_WORKERS", "4")
+        .env("FINDOXIDE_PARALLEL_ENGINE", "bogus")
+        .arg(path_arg(root.path()))
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("unsupported FINDOXIDE_PARALLEL_ENGINE `bogus`")
+    );
 }
