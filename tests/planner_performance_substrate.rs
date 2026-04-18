@@ -1,5 +1,6 @@
 mod support;
 
+use findoxide::file_output::FileOutputTerminator;
 use findoxide::parser::parse_command;
 use findoxide::planner::{
     OutputAction, RuntimeAction, RuntimeExpr, RuntimePredicate, plan_command,
@@ -264,6 +265,11 @@ fn expr_label(expr: &RuntimeExpr) -> &'static str {
         RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)) => "print",
         RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print0)) => "print0",
         RuntimeExpr::Action(RuntimeAction::Printf(_)) => "printf",
+        RuntimeExpr::Action(RuntimeAction::FilePrint { terminator, .. }) => match terminator {
+            FileOutputTerminator::Newline => "fprint",
+            FileOutputTerminator::Nul => "fprint0",
+        },
+        RuntimeExpr::Action(RuntimeAction::FilePrintf { .. }) => "fprintf",
         RuntimeExpr::Action(RuntimeAction::Quit) => "quit",
         RuntimeExpr::Action(RuntimeAction::Delete) => "delete",
         RuntimeExpr::Action(RuntimeAction::ExecImmediate(_)) => "exec:semicolon",

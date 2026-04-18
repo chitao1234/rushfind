@@ -106,6 +106,12 @@ impl ActionSink for WorkerActionSink {
                     .map_err(|_| Diagnostic::new("internal error: v2 broker is unavailable", 1))?;
                 Ok(ActionOutcome::matched_true())
             }
+            RuntimeAction::FilePrint { .. } | RuntimeAction::FilePrintf { .. } => Err(
+                Diagnostic::new(
+                    "internal error: file-backed output actions are not wired into v2 workers yet",
+                    1,
+                ),
+            ),
             RuntimeAction::Quit => {
                 self.control.request_quit();
                 Ok(ActionOutcome::quit())

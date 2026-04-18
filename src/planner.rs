@@ -5,6 +5,7 @@ use crate::exec::{
     BatchedExecAction, ExecBatchId, ImmediateExecAction, compile_batched_exec,
     compile_immediate_exec,
 };
+use crate::file_output::{FileOutputId, FileOutputTerminator, PlannedFileOutput};
 use crate::follow::FollowMode;
 use crate::identity::FileIdentity;
 use crate::numeric::{NumericComparison, parse_numeric_argument};
@@ -19,6 +20,7 @@ use crate::time::{
     local_day_start, parse_relative_time_argument, parse_time_comparison,
     resolve_reference_matcher,
 };
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -45,6 +47,7 @@ pub struct ExecutionPlan {
     pub follow_mode: FollowMode,
     pub traversal: TraversalOptions,
     pub runtime: RuntimeRequirements,
+    pub file_outputs: Vec<PlannedFileOutput>,
     pub expr: RuntimeExpr,
     pub mode: ExecutionMode,
     pub parallel_policy: Option<ParallelExecutionPolicy>,
@@ -139,6 +142,14 @@ pub enum OutputAction {
 pub enum RuntimeAction {
     Output(OutputAction),
     Printf(PrintfProgram),
+    FilePrint {
+        destination: FileOutputId,
+        terminator: FileOutputTerminator,
+    },
+    FilePrintf {
+        destination: FileOutputId,
+        program: PrintfProgram,
+    },
     Quit,
     ExecImmediate(ImmediateExecAction),
     ExecBatched(BatchedExecAction),
@@ -178,6 +189,8 @@ pub fn plan_command_with_now(
         saw_action: false,
         saw_delete: false,
         next_exec_batch_id: 0,
+        file_outputs: Vec::new(),
+        file_output_ids: BTreeMap::new(),
     };
     let lowered = lower_expr(expr, &mut traversal, &mut runtime, &mut state, follow_mode)?;
     let lowered = optimize_read_only_and_chains(lowered);
@@ -214,6 +227,7 @@ pub fn plan_command_with_now(
         follow_mode,
         traversal,
         runtime,
+        file_outputs: state.file_outputs.clone(),
         expr,
         mode,
         parallel_policy,
@@ -260,7 +274,10 @@ fn populate_action_profile(expr: &RuntimeExpr, profile: &mut ActionProfile) {
         }
         RuntimeExpr::Not(inner) => populate_action_profile(inner, profile),
         RuntimeExpr::Action(action) => match action {
-            RuntimeAction::Output(_) | RuntimeAction::Printf(_) => {}
+            RuntimeAction::Output(_)
+            | RuntimeAction::Printf(_)
+            | RuntimeAction::FilePrint { .. }
+            | RuntimeAction::FilePrintf { .. } => {}
             RuntimeAction::Quit => profile.has_global_control = true,
             RuntimeAction::ExecImmediate(_) => profile.has_local_immediate = true,
             RuntimeAction::ExecBatched(_) => profile.has_local_batched = true,
@@ -517,13 +534,15 @@ struct TemporalPlanningState {
     daystart_active: bool,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct PlanningState {
     temporal: TemporalPlanningState,
     regex_dialect: RegexDialect,
     saw_action: bool,
     saw_delete: bool,
     next_exec_batch_id: ExecBatchId,
+    file_outputs: Vec<PlannedFileOutput>,
+    file_output_ids: BTreeMap<PathBuf, FileOutputId>,
 }
 
 impl TemporalPlanningState {
@@ -551,6 +570,20 @@ fn resolve_samefile_reference(
     Ok(FileIdentity::from_metadata(&metadata))
 }
 
+fn register_file_output(state: &mut PlanningState, path: PathBuf) -> FileOutputId {
+    if let Some(existing) = state.file_output_ids.get(&path) {
+        return *existing;
+    }
+
+    let id = state.file_outputs.len();
+    state.file_outputs.push(PlannedFileOutput {
+        id,
+        path: path.clone(),
+    });
+    state.file_output_ids.insert(path, id);
+    id
+}
+
 fn lower_action(
     action: Action,
     runtime: &mut RuntimeRequirements,
@@ -572,9 +605,24 @@ fn lower_action(
             }
             Ok(RuntimeExpr::Action(RuntimeAction::Printf(program)))
         }
-        Action::FPrint { .. } => Err(Diagnostic::unsupported("unsupported: -fprint")),
-        Action::FPrint0 { .. } => Err(Diagnostic::unsupported("unsupported: -fprint0")),
-        Action::FPrintf { .. } => Err(Diagnostic::unsupported("unsupported: -fprintf")),
+        Action::FPrint { path } => Ok(RuntimeExpr::Action(RuntimeAction::FilePrint {
+            destination: register_file_output(state, path),
+            terminator: FileOutputTerminator::Newline,
+        })),
+        Action::FPrint0 { path } => Ok(RuntimeExpr::Action(RuntimeAction::FilePrint {
+            destination: register_file_output(state, path),
+            terminator: FileOutputTerminator::Nul,
+        })),
+        Action::FPrintf { path, format } => {
+            let program = compile_printf_program("-fprintf", format.as_os_str())?;
+            if program.requires_mount_snapshot() {
+                runtime.mount_snapshot = true;
+            }
+            Ok(RuntimeExpr::Action(RuntimeAction::FilePrintf {
+                destination: register_file_output(state, path),
+                program,
+            }))
+        }
         Action::Quit => Ok(RuntimeExpr::Action(RuntimeAction::Quit)),
         Action::Exec { argv, batch: false } => Ok(RuntimeExpr::Action(
             RuntimeAction::ExecImmediate(compile_immediate_exec(&argv)),

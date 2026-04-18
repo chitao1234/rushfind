@@ -83,6 +83,7 @@ mod tests {
                 order: TraversalOrder::PreOrder,
             },
             runtime: RuntimeRequirements { mount_snapshot },
+            file_outputs: Vec::new(),
             expr: RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)),
             mode: ExecutionMode::OrderedSingle,
             parallel_policy: None,

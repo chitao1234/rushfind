@@ -224,6 +224,8 @@ fn contains_commit_sensitive_action(expr: &RuntimeExpr) -> bool {
         RuntimeExpr::Not(inner) => contains_commit_sensitive_action(inner),
         RuntimeExpr::Action(crate::planner::RuntimeAction::Output(_)) => false,
         RuntimeExpr::Action(crate::planner::RuntimeAction::Printf(_)) => false,
+        RuntimeExpr::Action(crate::planner::RuntimeAction::FilePrint { .. }) => false,
+        RuntimeExpr::Action(crate::planner::RuntimeAction::FilePrintf { .. }) => false,
         RuntimeExpr::Action(_) => true,
         RuntimeExpr::Predicate(_) | RuntimeExpr::Barrier => false,
     }

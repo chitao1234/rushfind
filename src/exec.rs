@@ -236,6 +236,12 @@ impl<W: std::io::Write, E: std::io::Write> ActionSink for OrderedActionSink<'_, 
             RuntimeAction::Output(_) | RuntimeAction::Printf(_) => {
                 self.output.dispatch(action, entry, follow_mode, context)
             }
+            RuntimeAction::FilePrint { .. } | RuntimeAction::FilePrintf { .. } => Err(
+                Diagnostic::new(
+                    "internal error: file-backed output actions are not wired into ordered execution yet",
+                    1,
+                ),
+            ),
             RuntimeAction::Quit => Ok(ActionOutcome::quit()),
             RuntimeAction::ExecImmediate(spec) => {
                 run_immediate_ordered(spec, entry.path.as_path(), self.stderr).map(action_success)
@@ -390,6 +396,12 @@ impl ParallelActionSink {
                 )?;
                 Ok(ActionOutcome::matched_true())
             }
+            RuntimeAction::FilePrint { .. } | RuntimeAction::FilePrintf { .. } => Err(
+                Diagnostic::new(
+                    "internal error: file-backed output actions are not wired into parallel execution yet",
+                    1,
+                ),
+            ),
             RuntimeAction::Quit => Ok(ActionOutcome::quit()),
             RuntimeAction::ExecImmediate(spec) => run_immediate_parallel(
                 spec,
