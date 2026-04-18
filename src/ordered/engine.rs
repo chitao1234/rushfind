@@ -33,7 +33,7 @@ where
     E: Write,
 {
     let eval_context = build_eval_context(plan)?;
-    let mut sink = crate::exec::OrderedActionSink::new(stdout, stderr);
+    let mut sink = crate::exec::OrderedActionSink::new(stdout, stderr, &plan.file_outputs)?;
     let mut had_runtime_errors = false;
 
     walk_ordered(
@@ -94,7 +94,7 @@ where
     E: Write,
 {
     let eval_context = build_eval_context(plan)?;
-    let mut sink = crate::exec::OrderedActionSink::new(stdout, stderr);
+    let mut sink = crate::exec::OrderedActionSink::new(stdout, stderr, &plan.file_outputs)?;
     let mut had_runtime_errors = false;
     let mut had_action_failures = false;
 

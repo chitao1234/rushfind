@@ -1,6 +1,7 @@
 use crate::diagnostics::Diagnostic;
 use crate::entry::EntryContext;
 use crate::eval::{ActionOutcome, ActionSink, EvalContext, RuntimeStatus};
+use crate::file_output::{OrderedFileOutputs, PlannedFileOutput, render_file_print_bytes};
 use crate::follow::FollowMode;
 use crate::output::{BrokerMessage, StdoutSink, render_runtime_action_bytes};
 use crate::planner::RuntimeAction;
@@ -126,20 +127,26 @@ impl PendingBatch {
 pub struct OrderedActionSink<'a, W: std::io::Write, E: std::io::Write> {
     output: StdoutSink<'a, W>,
     stderr: &'a mut E,
+    file_outputs: OrderedFileOutputs,
     pending: BTreeMap<ExecBatchId, PendingBatch>,
     batch_limit: BatchLimit,
     had_action_failures: bool,
 }
 
 impl<'a, W: std::io::Write, E: std::io::Write> OrderedActionSink<'a, W, E> {
-    pub fn new(stdout: &'a mut W, stderr: &'a mut E) -> Self {
-        Self {
+    pub fn new(
+        stdout: &'a mut W,
+        stderr: &'a mut E,
+        planned_file_outputs: &[PlannedFileOutput],
+    ) -> Result<Self, Diagnostic> {
+        Ok(Self {
             output: StdoutSink::new(stdout),
             stderr,
+            file_outputs: OrderedFileOutputs::open_all(planned_file_outputs)?,
             pending: BTreeMap::new(),
             batch_limit: BatchLimit::detect(),
             had_action_failures: false,
-        }
+        })
     }
 
     fn enqueue(
@@ -236,12 +243,22 @@ impl<W: std::io::Write, E: std::io::Write> ActionSink for OrderedActionSink<'_, 
             RuntimeAction::Output(_) | RuntimeAction::Printf(_) => {
                 self.output.dispatch(action, entry, follow_mode, context)
             }
-            RuntimeAction::FilePrint { .. } | RuntimeAction::FilePrintf { .. } => Err(
-                Diagnostic::new(
-                    "internal error: file-backed output actions are not wired into ordered execution yet",
-                    1,
-                ),
-            ),
+            RuntimeAction::FilePrint {
+                destination,
+                terminator,
+            } => {
+                let bytes = render_file_print_bytes(entry, *terminator);
+                self.file_outputs.write_record(*destination, &bytes)?;
+                Ok(ActionOutcome::matched_true())
+            }
+            RuntimeAction::FilePrintf {
+                destination,
+                program,
+            } => {
+                let bytes = crate::printf::render_printf_bytes(program, entry, follow_mode, context)?;
+                self.file_outputs.write_record(*destination, &bytes)?;
+                Ok(ActionOutcome::matched_true())
+            }
             RuntimeAction::Quit => Ok(ActionOutcome::quit()),
             RuntimeAction::ExecImmediate(spec) => {
                 run_immediate_ordered(spec, entry.path.as_path(), self.stderr).map(action_success)
@@ -911,7 +928,7 @@ mod tests {
         let entry = EntryContext::new(PathBuf::from("placeholder"), 0, true);
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        let mut sink = OrderedActionSink::new(&mut stdout, &mut stderr);
+        let mut sink = OrderedActionSink::new(&mut stdout, &mut stderr, &[]).unwrap();
         let context = EvalContext::default();
 
         let outcome = sink
@@ -959,7 +976,7 @@ mod tests {
         let missing = EntryContext::new(PathBuf::from("definitely-missing-delete-target"), 0, true);
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        let mut sink = OrderedActionSink::new(&mut stdout, &mut stderr);
+        let mut sink = OrderedActionSink::new(&mut stdout, &mut stderr, &[]).unwrap();
         let context = EvalContext::default();
 
         let outcome = sink
