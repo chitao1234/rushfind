@@ -1,10 +1,11 @@
 use crate::diagnostics::Diagnostic;
 use crate::parallel::broker::{BrokerMessage, spawn_broker};
 use crate::parallel::control::GlobalControl;
+use crate::parallel::postorder::walk_parallel;
 use crate::parallel::worker::{WorkerActionSink, process_entry_preorder_fast_path};
 use crate::planner::ExecutionPlan;
 use crate::runner::{RunSummary, build_eval_context, traversal_control_for_entry};
-use crate::walker::{WalkEvent, walk_parallel};
+use crate::walker::WalkEvent;
 use crossbeam_channel::{bounded, unbounded};
 use std::io::Write;
 use std::sync::Arc;

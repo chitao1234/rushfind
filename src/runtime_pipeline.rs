@@ -16,38 +16,6 @@ pub(crate) struct EntryTicket {
     pub(crate) block_on_subtree: Option<SubtreeBarrierId>,
 }
 
-#[derive(Debug, Default)]
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) struct SubtreeBarrierTracker {
-    open_descendants: BTreeMap<SubtreeBarrierId, usize>,
-}
-
-#[cfg_attr(not(test), allow(dead_code))]
-impl SubtreeBarrierTracker {
-    pub(crate) fn register_descendant(&mut self, barrier: SubtreeBarrierId) {
-        *self.open_descendants.entry(barrier).or_default() += 1;
-    }
-
-    pub(crate) fn finish_descendant(&mut self, barrier: SubtreeBarrierId) {
-        let count = self
-            .open_descendants
-            .get_mut(&barrier)
-            .expect("barrier registered");
-        *count -= 1;
-    }
-
-    pub(crate) fn is_released(&self, barrier: SubtreeBarrierId) -> bool {
-        self.open_descendants.get(&barrier).copied().unwrap_or(0) == 0
-    }
-
-    pub(crate) fn may_grant(&self, ticket: &EntryTicket) -> bool {
-        match ticket.block_on_subtree {
-            Some(barrier) => self.is_released(barrier),
-            None => true,
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct ActionRequest {
     action: RuntimeAction,
@@ -508,38 +476,5 @@ mod tests {
         assert_eq!(queue.pop_next(), Some("zero"));
         assert_eq!(queue.pop_next(), Some("one"));
         assert_eq!(queue.pop_next(), Some("two"));
-    }
-
-    #[test]
-    fn subtree_barrier_tracker_releases_parent_only_after_descendants_finish() {
-        let barrier = super::SubtreeBarrierId(7);
-        let mut tracker = super::SubtreeBarrierTracker::default();
-
-        tracker.register_descendant(barrier);
-        tracker.register_descendant(barrier);
-        assert!(!tracker.is_released(barrier));
-
-        tracker.finish_descendant(barrier);
-        assert!(!tracker.is_released(barrier));
-
-        tracker.finish_descendant(barrier);
-        assert!(tracker.is_released(barrier));
-    }
-
-    #[test]
-    fn relaxed_grant_queue_holds_parent_until_its_barrier_is_released() {
-        let barrier = super::SubtreeBarrierId(11);
-        let mut tracker = super::SubtreeBarrierTracker::default();
-        tracker.register_descendant(barrier);
-
-        let parent = super::EntryTicket {
-            sequence: 5,
-            ancestor_barriers: Vec::new(),
-            block_on_subtree: Some(barrier),
-        };
-
-        assert!(!tracker.may_grant(&parent));
-        tracker.finish_descendant(barrier);
-        assert!(tracker.may_grant(&parent));
     }
 }

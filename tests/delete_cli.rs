@@ -2,7 +2,7 @@ mod support;
 
 use std::fs;
 use std::time::Duration;
-use support::{cargo_bin_output_with_engine, cargo_bin_output_with_timeout, path_arg};
+use support::{cargo_bin_output_with_timeout, path_arg};
 use tempfile::tempdir;
 
 #[test]
@@ -138,7 +138,7 @@ fn parallel_v2_delete_removes_the_same_tree_shape_under_the_override() {
     fs::create_dir(tree.join("nested")).unwrap();
     fs::write(tree.join("nested/file.txt"), "child\n").unwrap();
 
-    let output = cargo_bin_output_with_engine(
+    let output = cargo_bin_output_with_timeout(
         &[
             path_arg(&tree),
             "-mindepth".into(),
@@ -146,7 +146,6 @@ fn parallel_v2_delete_removes_the_same_tree_shape_under_the_override() {
             "-delete".into(),
         ],
         4,
-        "v2",
         Duration::from_secs(5),
     );
 

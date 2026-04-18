@@ -2,7 +2,7 @@ mod support;
 
 use std::fs;
 use std::time::Duration;
-use support::{cargo_bin_output_with_engine, path_arg};
+use support::{cargo_bin_output_with_timeout, path_arg};
 use tempfile::tempdir;
 
 #[test]
@@ -12,7 +12,7 @@ fn parallel_v2_print_matches_set_contract() {
         fs::write(root.path().join(name), "x\n").unwrap();
     }
 
-    let output = cargo_bin_output_with_engine(
+    let output = cargo_bin_output_with_timeout(
         &[
             path_arg(root.path()),
             "-type".into(),
@@ -20,7 +20,6 @@ fn parallel_v2_print_matches_set_contract() {
             "-print".into(),
         ],
         4,
-        "v2",
         Duration::from_secs(5),
     );
 
@@ -34,7 +33,7 @@ fn parallel_v2_printf_replays_each_record_atomically() {
     fs::write(root.path().join("alpha.txt"), "a\n").unwrap();
     fs::write(root.path().join("beta.txt"), "b\n").unwrap();
 
-    let output = cargo_bin_output_with_engine(
+    let output = cargo_bin_output_with_timeout(
         &[
             path_arg(root.path()),
             "-type".into(),
@@ -43,7 +42,6 @@ fn parallel_v2_printf_replays_each_record_atomically() {
             "BEGIN:%p\\nEND:%p\\n".into(),
         ],
         4,
-        "v2",
         Duration::from_secs(5),
     );
 
@@ -68,7 +66,7 @@ fn parallel_v2_prune_keeps_the_preorder_subtree_boundary() {
     fs::write(root.path().join("skip/hidden.txt"), "x\n").unwrap();
     fs::write(root.path().join("keep.txt"), "x\n").unwrap();
 
-    let output = cargo_bin_output_with_engine(
+    let output = cargo_bin_output_with_timeout(
         &[
             path_arg(root.path()),
             "-name".into(),
@@ -78,7 +76,6 @@ fn parallel_v2_prune_keeps_the_preorder_subtree_boundary() {
             "-print".into(),
         ],
         4,
-        "v2",
         Duration::from_secs(5),
     );
 
@@ -95,7 +92,7 @@ fn parallel_v2_exec_plus_flushes_worker_shards_on_shutdown() {
         fs::write(root.path().join(format!("file-{index:02}.txt")), "x\n").unwrap();
     }
 
-    let output = cargo_bin_output_with_engine(
+    let output = cargo_bin_output_with_timeout(
         &[
             path_arg(root.path()),
             "-type".into(),
@@ -107,7 +104,6 @@ fn parallel_v2_exec_plus_flushes_worker_shards_on_shutdown() {
             "+".into(),
         ],
         4,
-        "v2",
         Duration::from_secs(5),
     );
 

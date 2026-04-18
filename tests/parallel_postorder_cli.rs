@@ -2,7 +2,7 @@ mod support;
 
 use std::fs;
 use std::time::Duration;
-use support::{cargo_bin_output_with_engine, path_arg};
+use support::{cargo_bin_output_with_timeout, path_arg};
 use tempfile::tempdir;
 
 #[test]
@@ -11,7 +11,7 @@ fn parallel_v2_delete_keeps_descendant_before_parent_behavior() {
     fs::create_dir(root.path().join("dir")).unwrap();
     fs::write(root.path().join("dir/file.txt"), "x\n").unwrap();
 
-    let output = cargo_bin_output_with_engine(
+    let output = cargo_bin_output_with_timeout(
         &[
             path_arg(root.path()),
             "-mindepth".into(),
@@ -19,7 +19,6 @@ fn parallel_v2_delete_keeps_descendant_before_parent_behavior() {
             "-delete".into(),
         ],
         4,
-        "v2",
         Duration::from_secs(5),
     );
 
@@ -33,7 +32,7 @@ fn parallel_v2_depth_prune_stays_truthy_but_does_not_block_descendants() {
     fs::create_dir(root.path().join("keep")).unwrap();
     fs::write(root.path().join("keep/file.txt"), "x\n").unwrap();
 
-    let output = cargo_bin_output_with_engine(
+    let output = cargo_bin_output_with_timeout(
         &[
             path_arg(root.path()),
             "-depth".into(),
@@ -44,7 +43,6 @@ fn parallel_v2_depth_prune_stays_truthy_but_does_not_block_descendants() {
             "-print".into(),
         ],
         4,
-        "v2",
         Duration::from_secs(5),
     );
 

@@ -22,31 +22,8 @@ where
 {
     match plan.mode {
         ExecutionMode::OrderedSingle => crate::ordered::run_ordered_plan(plan, stdout, stderr),
-        ExecutionMode::ParallelRelaxed => match parallel_engine_override().as_deref() {
-            Some("legacy") => crate::parallel::run_parallel_legacy(plan, stdout, stderr),
-            Some("v2") => crate::parallel::run_parallel_v2(plan, stdout, stderr),
-            None => crate::parallel::run_parallel_v2(plan, stdout, stderr),
-            Some(other) => Err(Diagnostic::new(
-                format!("unsupported FINDOXIDE_PARALLEL_ENGINE `{other}`"),
-                2,
-            )),
-        },
+        ExecutionMode::ParallelRelaxed => crate::parallel::run_parallel(plan, stdout, stderr),
     }
-}
-
-fn parallel_engine_override() -> Option<String> {
-    std::env::var("FINDOXIDE_PARALLEL_ENGINE").ok()
-}
-
-#[cfg(test)]
-fn can_use_parallel_v2(plan: &ExecutionPlan) -> bool {
-    use crate::planner::ParallelExecutionPolicy;
-
-    matches!(
-        plan.parallel_policy,
-        Some(ParallelExecutionPolicy::PreOrderFastPath)
-            | Some(ParallelExecutionPolicy::PostOrderSubtree)
-    ) && !plan.action_profile.has_ordered_only
 }
 
 pub(crate) fn traversal_control_for_entry(
@@ -82,7 +59,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{build_eval_context_with_loader, can_use_parallel_v2};
+    use super::build_eval_context_with_loader;
     use crate::follow::FollowMode;
     use crate::ordered::engine::ordered_evaluator_workers;
     use crate::parser::parse_command;
@@ -164,37 +141,5 @@ mod tests {
             ordered_evaluator_workers(&plan),
             plan.runtime_policy.evaluation_workers
         );
-    }
-
-    #[test]
-    fn parallel_v2_preorder_fast_path_accepts_exec_plans() {
-        let plan = plan_command(
-            parse_command(&argv(&[
-                ".", "-type", "f", "-exec", "printf", "B:%s\\n", "{}", ";",
-            ]))
-            .unwrap(),
-            4,
-        )
-        .unwrap();
-
-        assert!(can_use_parallel_v2(&plan));
-    }
-
-    #[test]
-    fn parallel_v2_preorder_fast_path_accepts_quit_plans() {
-        let plan = plan_command(
-            parse_command(&argv(&[".", "-type", "f", "-print", "-quit"])).unwrap(),
-            4,
-        )
-        .unwrap();
-
-        assert!(can_use_parallel_v2(&plan));
-    }
-
-    #[test]
-    fn parallel_v2_accepts_postorder_subtree_plans() {
-        let plan = plan_command(parse_command(&argv(&[".", "-delete"])).unwrap(), 4).unwrap();
-
-        assert!(can_use_parallel_v2(&plan));
     }
 }

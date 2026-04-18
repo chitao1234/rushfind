@@ -4,7 +4,7 @@ use assert_cmd::cargo::CommandCargoExt;
 use std::fs;
 use std::process::Command;
 use std::time::Duration;
-use support::{cargo_bin_output_with_engine, cargo_bin_output_with_timeout, path_arg};
+use support::{cargo_bin_output_with_timeout, path_arg};
 use tempfile::tempdir;
 
 #[test]
@@ -343,7 +343,7 @@ fn parallel_v2_exec_semicolon_keeps_child_output_chunks_intact() {
     fs::write(root.path().join("alpha.txt"), "a\n").unwrap();
     fs::write(root.path().join("beta.txt"), "b\n").unwrap();
 
-    let output = cargo_bin_output_with_engine(
+    let output = cargo_bin_output_with_timeout(
         &[
             path_arg(root.path()),
             "-type".into(),
@@ -357,7 +357,6 @@ fn parallel_v2_exec_semicolon_keeps_child_output_chunks_intact() {
             ";".into(),
         ],
         4,
-        "v2",
         Duration::from_secs(5),
     );
 

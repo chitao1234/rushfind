@@ -60,8 +60,6 @@ Use the `FINDOXIDE_WORKERS` environment variable to control execution mode:
 
 - `FINDOXIDE_WORKERS=1` keeps traversal/output close to GNU ordering
 - `FINDOXIDE_WORKERS=4` enables the worker-owned relaxed-order parallel engine by default
-- `FINDOXIDE_PARALLEL_ENGINE=legacy` keeps the previous coordinator-centric engine available for
-  comparison during migration
 
 ## Follow modes
 

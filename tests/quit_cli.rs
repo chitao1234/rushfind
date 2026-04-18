@@ -2,7 +2,7 @@ mod support;
 
 use std::fs;
 use std::time::Duration;
-use support::{cargo_bin_output_with_engine, cargo_bin_output_with_timeout, path_arg};
+use support::{cargo_bin_output_with_timeout, path_arg};
 use tempfile::tempdir;
 
 #[test]
@@ -151,7 +151,7 @@ fn parallel_v2_quit_stops_future_fanout_after_the_current_entry() {
         fs::write(root.path().join(format!("file-{index:03}.txt")), "x\n").unwrap();
     }
 
-    let output = cargo_bin_output_with_engine(
+    let output = cargo_bin_output_with_timeout(
         &[
             path_arg(root.path()),
             "-mindepth".into(),
@@ -162,7 +162,6 @@ fn parallel_v2_quit_stops_future_fanout_after_the_current_entry() {
             "-quit".into(),
         ],
         4,
-        "v2",
         Duration::from_secs(5),
     );
 

@@ -281,13 +281,6 @@ impl ParallelActionSink {
         })
     }
 
-    pub(crate) fn execute(
-        &self,
-        request: &crate::runtime_pipeline::ActionRequest,
-    ) -> Result<ActionOutcome, Diagnostic> {
-        self.execute_action(request.action(), request.entry(), request.follow_mode())
-    }
-
     pub fn flush_all(&self) -> Result<RuntimeStatus, Diagnostic> {
         let mut status = if self.shared.had_action_failures.load(Ordering::SeqCst) {
             RuntimeStatus::action_failure()
