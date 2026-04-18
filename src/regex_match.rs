@@ -1,6 +1,7 @@
 use crate::diagnostics::Diagnostic;
 use regex::bytes::{Regex, RegexBuilder};
 use std::ffi::OsStr;
+use std::fmt::Write as _;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RegexDialect {
@@ -43,7 +44,7 @@ impl RegexDialect {
 #[derive(Debug, Clone)]
 pub struct RegexMatcher {
     dialect: RegexDialect,
-    original_pattern: String,
+    original_pattern: Vec<u8>,
     translated_pattern: String,
     case_insensitive: bool,
     compiled: Regex,
@@ -67,14 +68,12 @@ impl RegexMatcher {
         pattern: &OsStr,
         case_insensitive: bool,
     ) -> Result<Self, Diagnostic> {
-        let original_pattern = pattern.to_str().ok_or_else(|| {
-            Diagnostic::new(format!("invalid UTF-8 regex pattern for `{flag}`"), 1)
-        })?;
+        let original_pattern = pattern.as_encoded_bytes().to_vec();
         let translated_pattern = match dialect {
             RegexDialect::Emacs | RegexDialect::PosixExtended | RegexDialect::PosixBasic => {
-                translate_gnu_facing_subset(flag, dialect, original_pattern)?
+                translate_gnu_facing_subset(flag, dialect, &original_pattern)?
             }
-            RegexDialect::Rust => original_pattern.to_owned(),
+            RegexDialect::Rust => translate_rust_bytes(&original_pattern),
         };
         let compiled = RegexBuilder::new(&format!(r"\A(?:{})\z", translated_pattern))
             .case_insensitive(case_insensitive)
@@ -92,7 +91,7 @@ impl RegexMatcher {
 
         Ok(Self {
             dialect,
-            original_pattern: original_pattern.to_owned(),
+            original_pattern,
             translated_pattern,
             case_insensitive,
             compiled,
@@ -111,10 +110,18 @@ impl RegexMatcher {
 fn translate_gnu_facing_subset(
     flag: &str,
     dialect: RegexDialect,
-    pattern: &str,
+    pattern: &[u8],
 ) -> Result<String, Diagnostic> {
     let rules = GnuDialectRules::for_dialect(dialect);
     GnuRegexScanner::new(flag, dialect, rules, pattern).translate()
+}
+
+fn translate_rust_bytes(pattern: &[u8]) -> String {
+    let mut translated = String::new();
+    for &byte in pattern {
+        push_rust_pattern_byte(&mut translated, byte);
+    }
+    translated
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -151,7 +158,7 @@ struct GnuRegexScanner<'a> {
     flag: &'a str,
     dialect: RegexDialect,
     rules: GnuDialectRules,
-    chars: Vec<char>,
+    bytes: &'a [u8],
     index: usize,
     translated: String,
     group_depth: usize,
@@ -160,12 +167,17 @@ struct GnuRegexScanner<'a> {
 }
 
 impl<'a> GnuRegexScanner<'a> {
-    fn new(flag: &'a str, dialect: RegexDialect, rules: GnuDialectRules, pattern: &str) -> Self {
+    fn new(
+        flag: &'a str,
+        dialect: RegexDialect,
+        rules: GnuDialectRules,
+        pattern: &'a [u8],
+    ) -> Self {
         Self {
             flag,
             dialect,
             rules,
-            chars: pattern.chars().collect(),
+            bytes: pattern,
             index: 0,
             translated: String::new(),
             group_depth: 0,
@@ -175,16 +187,16 @@ impl<'a> GnuRegexScanner<'a> {
     }
 
     fn translate(mut self) -> Result<String, Diagnostic> {
-        while let Some(ch) = self.next() {
-            match ch {
-                '[' => self.translate_bracket_expression()?,
-                '\\' => self.translate_escape()?,
-                '^' if self.rules.emacs_syntax => self.translate_emacs_caret(),
-                '$' if self.rules.emacs_syntax => self.translate_emacs_dollar(),
-                '*' if self.rules.emacs_syntax => self.translate_contextual_postfix('*'),
-                '+' | '?' if self.rules.emacs_syntax => self.translate_contextual_postfix(ch),
-                '(' if self.rules.posix_extended_syntax => {
-                    if self.peek() == Some('?') {
+        while let Some(byte) = self.next() {
+            match byte {
+                b'[' => self.translate_bracket_expression()?,
+                b'\\' => self.translate_escape()?,
+                b'^' if self.rules.emacs_syntax => self.translate_emacs_caret(),
+                b'$' if self.rules.emacs_syntax => self.translate_emacs_dollar(),
+                b'*' if self.rules.emacs_syntax => self.translate_contextual_postfix(b'*'),
+                b'+' | b'?' if self.rules.emacs_syntax => self.translate_contextual_postfix(byte),
+                b'(' if self.rules.posix_extended_syntax => {
+                    if self.peek() == Some(b'?') {
                         return Err(unsupported_construct(
                             self.flag,
                             self.dialect,
@@ -193,22 +205,26 @@ impl<'a> GnuRegexScanner<'a> {
                     }
                     self.open_group();
                 }
-                ')' if self.rules.posix_extended_syntax => self.close_group_operator()?,
-                '|' if self.rules.posix_extended_syntax => self.push_alternation_operator(),
-                '*' if self.rules.posix_basic_syntax => self.translated.push('*'),
-                '*' | '+' | '?' if self.rules.posix_extended_syntax => self.translated.push(ch),
-                '{' | '}' if self.rules.posix_extended_syntax => self.translated.push(ch),
-                '(' | ')' | '|' | '+' | '?' | '{' | '}' if self.rules.posix_basic_syntax => {
-                    self.push_literal_atom(ch);
+                b')' if self.rules.posix_extended_syntax => self.close_group_operator()?,
+                b'|' if self.rules.posix_extended_syntax => self.push_alternation_operator(),
+                b'*' if self.rules.posix_basic_syntax => self.translated.push('*'),
+                b'*' | b'+' | b'?' if self.rules.posix_extended_syntax => {
+                    self.translated.push(char::from(byte));
                 }
-                '(' | ')' | '|' | '{' | '}' if self.rules.emacs_syntax => {
-                    self.push_literal_atom(ch);
+                b'{' | b'}' if self.rules.posix_extended_syntax => {
+                    self.translated.push(char::from(byte));
                 }
-                '.' => {
+                b'(' | b')' | b'|' | b'+' | b'?' | b'{' | b'}' if self.rules.posix_basic_syntax => {
+                    self.push_literal_atom(byte);
+                }
+                b'(' | b')' | b'|' | b'{' | b'}' if self.rules.emacs_syntax => {
+                    self.push_literal_atom(byte);
+                }
+                b'.' => {
                     self.translated.push('.');
                     self.mark_atom();
                 }
-                _ => self.push_literal_atom(ch),
+                _ => self.push_literal_atom(byte),
             }
         }
 
@@ -234,46 +250,48 @@ impl<'a> GnuRegexScanner<'a> {
 
         if self.rules.posix_basic_syntax {
             match escaped {
-                '(' => self.open_group(),
-                ')' => self.close_group_operator()?,
-                '|' => self.push_alternation_operator(),
-                '+' | '?' => self.translated.push(escaped),
-                '{' => self.translate_bre_bound()?,
-                '\\' | '.' | '^' | '$' | '*' | '[' | ']' | '}' => self.push_literal_atom(escaped),
+                b'(' => self.open_group(),
+                b')' => self.close_group_operator()?,
+                b'|' => self.push_alternation_operator(),
+                b'+' | b'?' => self.translated.push(char::from(escaped)),
+                b'{' => self.translate_bre_bound()?,
+                b'\\' | b'.' | b'^' | b'$' | b'*' | b'[' | b']' | b'}' => {
+                    self.push_literal_atom(escaped)
+                }
                 other => {
                     return Err(unsupported_construct(
                         self.flag,
                         self.dialect,
-                        format!("unsupported escape `\\{other}`"),
+                        format!("unsupported escape `{}`", escaped_display(other)),
                     ));
                 }
             }
         } else if self.rules.emacs_syntax {
             match escaped {
-                '(' => self.open_group(),
-                ')' => self.close_group_operator()?,
-                '|' => self.push_alternation_operator(),
-                '{' => {
+                b'(' => self.open_group(),
+                b')' => self.close_group_operator()?,
+                b'|' => self.push_alternation_operator(),
+                b'{' => {
                     if self.can_repeat_atom {
                         self.translate_bre_bound()?;
                     } else {
-                        self.push_literal_atom('{');
+                        self.push_literal_atom(b'{');
                     }
                 }
-                '\\' | '.' | '^' | '$' | '*' | '+' | '?' | '[' | ']' | '}' => {
+                b'\\' | b'.' | b'^' | b'$' | b'*' | b'+' | b'?' | b'[' | b']' | b'}' => {
                     self.push_literal_atom(escaped)
                 }
                 other => self.push_literal_atom(other),
             }
         } else {
             match escaped {
-                '\\' | '.' | '^' | '$' | '*' | '+' | '?' | '(' | ')' | '|' | '{' | '}' | '['
-                | ']' => self.push_literal_atom(escaped),
+                b'\\' | b'.' | b'^' | b'$' | b'*' | b'+' | b'?' | b'(' | b')' | b'|' | b'{'
+                | b'}' | b'[' | b']' => self.push_literal_atom(escaped),
                 other => {
                     return Err(unsupported_construct(
                         self.flag,
                         self.dialect,
-                        format!("unsupported escape `\\{other}`"),
+                        format!("unsupported escape `{}`", escaped_display(other)),
                     ));
                 }
             }
@@ -286,15 +304,15 @@ impl<'a> GnuRegexScanner<'a> {
         let mut contents = String::new();
 
         loop {
-            let ch = self.next().ok_or_else(|| {
+            let byte = self.next().ok_or_else(|| {
                 malformed_regex(self.flag, self.dialect, "unterminated bounded repetition")
             })?;
 
-            if ch == '\\' {
+            if byte == b'\\' {
                 let escaped = self.next().ok_or_else(|| {
                     malformed_regex(self.flag, self.dialect, "unterminated bounded repetition")
                 })?;
-                if escaped == '}' {
+                if escaped == b'}' {
                     break;
                 }
                 return Err(malformed_regex(
@@ -304,7 +322,14 @@ impl<'a> GnuRegexScanner<'a> {
                 ));
             }
 
-            contents.push(ch);
+            if !byte.is_ascii() {
+                return Err(malformed_regex(
+                    self.flag,
+                    self.dialect,
+                    "malformed bounded repetition",
+                ));
+            }
+            contents.push(char::from(byte));
         }
 
         let normalized = normalize_repetition_bound(&contents).ok_or_else(|| {
@@ -322,38 +347,38 @@ impl<'a> GnuRegexScanner<'a> {
     fn translate_bracket_expression(&mut self) -> Result<(), Diagnostic> {
         self.translated.push('[');
 
-        if self.peek() == Some('^') {
+        if self.peek() == Some(b'^') {
             self.index += 1;
             self.translated.push('^');
         }
 
-        if self.peek() == Some(']') {
+        if self.peek() == Some(b']') {
             self.index += 1;
             self.translated.push(']');
         }
 
-        while let Some(ch) = self.next() {
-            match ch {
-                ']' => {
+        while let Some(byte) = self.next() {
+            match byte {
+                b']' => {
                     self.translated.push(']');
                     self.mark_atom();
                     return Ok(());
                 }
-                '[' => match self.peek() {
-                    Some(':') => {
+                b'[' => match self.peek() {
+                    Some(b':') => {
                         self.index += 1;
                         let name = self.take_posix_class_name()?;
                         let fragment = posix_named_class_fragment(self.flag, self.dialect, &name)?;
                         self.translated.push_str(fragment);
                     }
-                    Some('.') => {
+                    Some(b'.') => {
                         return Err(unsupported_construct(
                             self.flag,
                             self.dialect,
                             "POSIX collating symbols are out of scope",
                         ));
                     }
-                    Some('=') => {
+                    Some(b'=') => {
                         return Err(unsupported_construct(
                             self.flag,
                             self.dialect,
@@ -362,7 +387,7 @@ impl<'a> GnuRegexScanner<'a> {
                     }
                     _ => self.translated.push('['),
                 },
-                '\\' => {
+                b'\\' => {
                     if self.rules.emacs_syntax {
                         self.translated.push('\\');
                         self.translated.push('\\');
@@ -374,11 +399,10 @@ impl<'a> GnuRegexScanner<'a> {
                                 "unterminated bracket expression",
                             )
                         })?;
-                        self.translated.push('\\');
-                        self.translated.push(escaped);
+                        push_bracket_escaped_byte(&mut self.translated, escaped);
                     }
                 }
-                _ => self.translated.push(ch),
+                _ => push_bracket_literal_byte(&mut self.translated, byte),
             }
         }
 
@@ -393,7 +417,7 @@ impl<'a> GnuRegexScanner<'a> {
         let mut name = String::new();
 
         loop {
-            let ch = self.next().ok_or_else(|| {
+            let byte = self.next().ok_or_else(|| {
                 malformed_regex(
                     self.flag,
                     self.dialect,
@@ -401,12 +425,20 @@ impl<'a> GnuRegexScanner<'a> {
                 )
             })?;
 
-            if ch == ':' && self.peek() == Some(']') {
+            if byte == b':' && self.peek() == Some(b']') {
                 self.index += 1;
                 return Ok(name);
             }
 
-            name.push(ch);
+            if !byte.is_ascii() {
+                return Err(unsupported_construct(
+                    self.flag,
+                    self.dialect,
+                    "unsupported POSIX character class",
+                ));
+            }
+
+            name.push(char::from(byte));
         }
     }
 
@@ -444,40 +476,34 @@ impl<'a> GnuRegexScanner<'a> {
             self.can_repeat_atom = false;
             self.branch_start = false;
         } else {
-            self.push_literal_atom('^');
+            self.push_literal_atom(b'^');
         }
     }
 
     fn translate_emacs_dollar(&mut self) {
         if self.peek().is_none()
-            || (self.peek() == Some('\\') && matches!(self.peek_n(1), Some(')') | Some('|')))
+            || (self.peek() == Some(b'\\') && matches!(self.peek_n(1), Some(b')') | Some(b'|')))
         {
             self.translated.push('$');
             self.can_repeat_atom = false;
             self.branch_start = false;
         } else {
-            self.push_literal_atom('$');
+            self.push_literal_atom(b'$');
         }
     }
 
-    fn translate_contextual_postfix(&mut self, ch: char) {
+    fn translate_contextual_postfix(&mut self, byte: u8) {
         if self.can_repeat_atom {
-            self.translated.push(ch);
+            self.translated.push(char::from(byte));
             self.can_repeat_atom = false;
             self.branch_start = false;
         } else {
-            self.push_literal_atom(ch);
+            self.push_literal_atom(byte);
         }
     }
 
-    fn push_literal_atom(&mut self, ch: char) {
-        if matches!(
-            ch,
-            '.' | '^' | '$' | '|' | '(' | ')' | '[' | ']' | '{' | '}' | '*' | '+' | '?' | '\\'
-        ) {
-            self.translated.push('\\');
-        }
-        self.translated.push(ch);
+    fn push_literal_atom(&mut self, byte: u8) {
+        push_literal_regex_byte(&mut self.translated, byte);
         self.mark_atom();
     }
 
@@ -486,18 +512,66 @@ impl<'a> GnuRegexScanner<'a> {
         self.branch_start = false;
     }
 
-    fn next(&mut self) -> Option<char> {
-        let ch = self.chars.get(self.index).copied()?;
+    fn next(&mut self) -> Option<u8> {
+        let byte = self.bytes.get(self.index).copied()?;
         self.index += 1;
-        Some(ch)
+        Some(byte)
     }
 
-    fn peek(&self) -> Option<char> {
-        self.chars.get(self.index).copied()
+    fn peek(&self) -> Option<u8> {
+        self.bytes.get(self.index).copied()
     }
 
-    fn peek_n(&self, offset: usize) -> Option<char> {
-        self.chars.get(self.index + offset).copied()
+    fn peek_n(&self, offset: usize) -> Option<u8> {
+        self.bytes.get(self.index + offset).copied()
+    }
+}
+
+fn push_rust_pattern_byte(out: &mut String, byte: u8) {
+    match byte {
+        0x20..=0x7e => out.push(char::from(byte)),
+        other => push_hex_byte(out, other),
+    }
+}
+
+fn push_literal_regex_byte(out: &mut String, byte: u8) {
+    match byte {
+        b'.' | b'^' | b'$' | b'|' | b'(' | b')' | b'[' | b']' | b'{' | b'}' | b'*' | b'+'
+        | b'?' | b'\\' => {
+            out.push('\\');
+            out.push(char::from(byte));
+        }
+        0x20..=0x7e => out.push(char::from(byte)),
+        other => push_hex_byte(out, other),
+    }
+}
+
+fn push_bracket_literal_byte(out: &mut String, byte: u8) {
+    match byte {
+        0x20..=0x7e => out.push(char::from(byte)),
+        other => push_hex_byte(out, other),
+    }
+}
+
+fn push_bracket_escaped_byte(out: &mut String, byte: u8) {
+    match byte {
+        b'\\' | b']' | b'^' | b'-' => {
+            out.push('\\');
+            out.push(char::from(byte));
+        }
+        0x20..=0x7e => out.push(char::from(byte)),
+        other => push_hex_byte(out, other),
+    }
+}
+
+fn push_hex_byte(out: &mut String, byte: u8) {
+    write!(out, r"\x{:02X}", byte).unwrap();
+}
+
+fn escaped_display(byte: u8) -> String {
+    match byte {
+        0x20..=0x7e => format!(r"\{}", char::from(byte)),
+        _ => format!(r"\x{:02X}", byte),
     }
 }
 
@@ -573,6 +647,10 @@ fn malformed_regex(
 mod tests {
     use super::{RegexDialect, RegexMatcher};
     use std::ffi::OsStr;
+    #[cfg(unix)]
+    use std::ffi::OsString;
+    #[cfg(unix)]
+    use std::os::unix::ffi::OsStringExt;
 
     #[test]
     fn rust_mode_wraps_patterns_to_match_the_full_path() {
@@ -616,6 +694,32 @@ mod tests {
 
         assert!(matcher.is_match(OsStr::new("./name.txt")));
         assert!(!matcher.is_match(OsStr::new("./ .txt")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_utf8_patterns_compile_in_rust_and_gnu_facing_modes() {
+        let rust_pattern = OsString::from_vec(vec![b'.', b'*', b'/', b'f', b'o', b'o', 0xff]);
+        let rust_candidate = OsString::from_vec(vec![b'.', b'/', b'f', b'o', b'o', 0xff]);
+        let rust = RegexMatcher::compile(
+            "-regex",
+            RegexDialect::Rust,
+            rust_pattern.as_os_str(),
+            false,
+        )
+        .unwrap();
+        assert!(rust.is_match(rust_candidate.as_os_str()));
+
+        let gnu_pattern = OsString::from_vec(vec![b'.', b'*', b'/', b'b', b'a', b'r', 0xfe]);
+        let gnu_candidate = OsString::from_vec(vec![b'.', b'/', b'b', b'a', b'r', 0xfe]);
+        let gnu = RegexMatcher::compile(
+            "-regex",
+            RegexDialect::Emacs,
+            gnu_pattern.as_os_str(),
+            false,
+        )
+        .unwrap();
+        assert!(gnu.is_match(gnu_candidate.as_os_str()));
     }
 
     #[test]

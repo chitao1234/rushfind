@@ -85,6 +85,43 @@ fn non_utf8_candidate_paths_are_matched_without_lossy_conversion() {
     assert!(evaluate(&expr, &entry, FollowMode::Physical, &mut sink).unwrap());
 }
 
+#[cfg(unix)]
+#[test]
+fn rust_mode_accepts_non_utf8_literal_bytes_in_patterns() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let root = tempdir().unwrap();
+    let file_name = OsString::from_vec(vec![b'f', b'o', b'o', 0xff]);
+    let path = root.path().join(PathBuf::from(file_name));
+    fs::write(&path, "demo\n").unwrap();
+    let pattern = OsString::from_vec(vec![b'.', b'*', b'/', b'f', b'o', b'o', 0xff]);
+    let matcher =
+        RegexMatcher::compile("-regex", RegexDialect::Rust, pattern.as_os_str(), false).unwrap();
+
+    assert!(matcher.is_match(path.as_os_str()));
+}
+
+#[cfg(unix)]
+#[test]
+fn gnu_facing_dialects_accept_non_utf8_literal_bytes_in_patterns() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let root = tempdir().unwrap();
+    let file_name = OsString::from_vec(vec![b'b', b'a', b'r', 0xfe]);
+    let path = root.path().join(PathBuf::from(file_name));
+    fs::write(&path, "demo\n").unwrap();
+    let pattern = OsString::from_vec(vec![b'.', b'*', b'/', b'b', b'a', b'r', 0xfe]);
+    let matcher = RegexMatcher::compile(
+        "-regex",
+        RegexDialect::PosixExtended,
+        pattern.as_os_str(),
+        false,
+    )
+    .unwrap();
+
+    assert!(matcher.is_match(path.as_os_str()));
+}
+
 #[test]
 fn posix_basic_supports_bre_escaped_grouping_alternation_and_repetition() {
     let root = tempdir().unwrap();

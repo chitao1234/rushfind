@@ -86,19 +86,32 @@ fn unsupported_regextype_is_a_planning_error() {
 
 #[cfg(unix)]
 #[test]
-fn invalid_utf8_regex_pattern_is_a_planning_error() {
+fn non_utf8_regex_patterns_are_accepted_by_planning() {
     use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;
 
-    let argv = vec![
+    let rust_argv = vec![
         OsString::from("."),
+        OsString::from("-regextype"),
+        OsString::from("rust"),
         OsString::from("-regex"),
-        OsString::from_vec(vec![0xff, b'a', b'b']),
+        OsString::from_vec(vec![b'.', b'*', b'/', b'f', b'o', b'o', 0xff]),
     ];
-    let ast = parse_command(&argv).unwrap();
-    let error = plan_command(ast, 1).unwrap_err();
+    let rust_plan = plan_command(parse_command(&rust_argv).unwrap(), 1).unwrap();
+    assert_eq!(regex_dialects(&rust_plan.expr), vec![RegexDialect::Rust]);
 
-    assert!(error.message.contains("invalid UTF-8 regex pattern"));
+    let gnu_argv = vec![
+        OsString::from("."),
+        OsString::from("-regextype"),
+        OsString::from("posix-extended"),
+        OsString::from("-regex"),
+        OsString::from_vec(vec![b'.', b'*', b'/', b'f', b'o', b'o', 0xfe]),
+    ];
+    let gnu_plan = plan_command(parse_command(&gnu_argv).unwrap(), 1).unwrap();
+    assert_eq!(
+        regex_dialects(&gnu_plan.expr),
+        vec![RegexDialect::PosixExtended]
+    );
 }
 
 #[test]
