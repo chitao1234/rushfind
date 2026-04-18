@@ -488,12 +488,9 @@ mod tests {
             panic!("expected quit request");
         };
 
-        let complete = resume_entry_eval(
-            continuation,
-            ActionOutcome::quit(),
-            &EvalContext::default(),
-        )
-        .unwrap();
+        let complete =
+            resume_entry_eval(continuation, ActionOutcome::quit(), &EvalContext::default())
+                .unwrap();
 
         assert!(matches!(complete, EvalStep::Complete(outcome)
             if outcome.matched && outcome.status.is_stop_requested()));
