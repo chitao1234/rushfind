@@ -375,6 +375,47 @@ fn ordered_exec_plus_matches_gnu_find_exactly() {
 }
 
 #[test]
+fn ordered_quit_matches_gnu_find_exactly() {
+    let root = build_exec_tree();
+    let args_sets = vec![
+        vec![path_arg(root.path()), "-print".into(), "-quit".into()],
+        vec![path_arg(root.path()), "-quit".into(), "-print".into()],
+        vec![
+            path_arg(root.path()),
+            "-name".into(),
+            "beta.txt".into(),
+            "-quit".into(),
+            "-o".into(),
+            "-print".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-name".into(),
+            "beta.txt".into(),
+            "-print".into(),
+            "-quit".into(),
+            "-o".into(),
+            "-print".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-exec".into(),
+            "printf".into(),
+            "Q:%s\\n".into(),
+            "{}".into(),
+            "+".into(),
+            "-quit".into(),
+        ],
+    ];
+
+    for args in args_sets {
+        assert_matches_gnu_exact(&args);
+    }
+}
+
+#[test]
 fn reports_parse_errors_nonzero() {
     let output = Command::cargo_bin("findoxide")
         .unwrap()

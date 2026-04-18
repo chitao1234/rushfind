@@ -37,6 +37,12 @@ pub enum WalkEvent {
     Error(Diagnostic),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OrderedWalkDirective {
+    Continue,
+    Stop,
+}
+
 #[derive(Debug, Clone)]
 struct PendingPath {
     path: PathBuf,
@@ -149,7 +155,7 @@ pub(crate) fn walk_ordered<F, C>(
     emit: F,
 ) -> Result<(), Diagnostic>
 where
-    F: FnMut(WalkEvent) -> Result<(), Diagnostic>,
+    F: FnMut(WalkEvent) -> Result<OrderedWalkDirective, Diagnostic>,
     C: Fn(&EntryContext) -> Result<TraversalControl, Diagnostic>,
 {
     walk_ordered_with_backend(
@@ -171,7 +177,7 @@ fn walk_ordered_with_backend<F, C>(
     mut emit: F,
 ) -> Result<(), Diagnostic>
 where
-    F: FnMut(WalkEvent) -> Result<(), Diagnostic>,
+    F: FnMut(WalkEvent) -> Result<OrderedWalkDirective, Diagnostic>,
     C: Fn(&EntryContext) -> Result<TraversalControl, Diagnostic>,
 {
     let mut stack: Vec<OrderedFrame> = start_paths
@@ -202,12 +208,15 @@ where
                 entry,
                 ancestor_barriers,
             } => {
-                emit(WalkEvent::DirectoryComplete(scheduled_entry(
+                if emit(WalkEvent::DirectoryComplete(scheduled_entry(
                     entry,
                     next_sequence,
                     ancestor_barriers,
                     None,
-                )))?;
+                )))? == OrderedWalkDirective::Stop
+                {
+                    return Ok(());
+                }
                 next_sequence += 1;
                 continue;
             }
@@ -239,21 +248,27 @@ where
 
         match options.order {
             TraversalOrder::PreOrder => {
-                emit(WalkEvent::Entry(scheduled_entry(
+                if emit(WalkEvent::Entry(scheduled_entry(
                     entry.clone(),
                     next_sequence,
                     pending.ancestor_barriers.clone(),
                     None,
-                )))?;
+                )))? == OrderedWalkDirective::Stop
+                {
+                    return Ok(());
+                }
                 next_sequence += 1;
             }
             TraversalOrder::DepthFirstPostOrder if !is_directory => {
-                emit(WalkEvent::Entry(scheduled_entry(
+                if emit(WalkEvent::Entry(scheduled_entry(
                     entry.clone(),
                     next_sequence,
                     pending.ancestor_barriers.clone(),
                     None,
-                )))?;
+                )))? == OrderedWalkDirective::Stop
+                {
+                    return Ok(());
+                }
                 next_sequence += 1;
             }
             TraversalOrder::DepthFirstPostOrder => {}
@@ -270,12 +285,15 @@ where
             Ok(Some(result)) => result,
             Ok(None) => {
                 if options.order == TraversalOrder::DepthFirstPostOrder && is_directory {
-                    emit(WalkEvent::DirectoryComplete(scheduled_entry(
+                    if emit(WalkEvent::DirectoryComplete(scheduled_entry(
                         entry.clone(),
                         next_sequence,
                         pending.ancestor_barriers.clone(),
                         None,
-                    )))?;
+                    )))? == OrderedWalkDirective::Stop
+                    {
+                        return Ok(());
+                    }
                     next_sequence += 1;
                 }
                 continue;
@@ -291,12 +309,15 @@ where
             Err(error) => {
                 emit(WalkEvent::Error(error))?;
                 if options.order == TraversalOrder::DepthFirstPostOrder && is_directory {
-                    emit(WalkEvent::DirectoryComplete(scheduled_entry(
+                    if emit(WalkEvent::DirectoryComplete(scheduled_entry(
                         entry.clone(),
                         next_sequence,
                         pending.ancestor_barriers.clone(),
                         None,
-                    )))?;
+                    )))? == OrderedWalkDirective::Stop
+                    {
+                        return Ok(());
+                    }
                     next_sequence += 1;
                 }
                 continue;
@@ -861,7 +882,7 @@ fn loop_error(path: &Path) -> Diagnostic {
 #[cfg(test)]
 mod tests {
     use super::{
-        DiscoveredChild, PendingPath, WalkBackend, WalkEvent, read_children,
+        DiscoveredChild, OrderedWalkDirective, PendingPath, WalkBackend, WalkEvent, read_children,
         walk_ordered_with_backend, walk_parallel_with_backend,
     };
     use crate::diagnostics::Diagnostic;
@@ -908,7 +929,7 @@ mod tests {
                 if let WalkEvent::Entry(item) = event {
                     seen.push(item.entry.path);
                 }
-                Ok(())
+                Ok(OrderedWalkDirective::Continue)
             },
         )
         .unwrap();
@@ -1020,7 +1041,7 @@ mod tests {
                     }
                     WalkEvent::Error(error) => panic!("unexpected walk error: {error:?}"),
                 }
-                Ok(())
+                Ok(OrderedWalkDirective::Continue)
             },
         )
         .unwrap();

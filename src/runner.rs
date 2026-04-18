@@ -1,5 +1,5 @@
 use crate::diagnostics::Diagnostic;
-use crate::eval::{ActionSink, EvalContext, RuntimeStatus, evaluate_with_context};
+use crate::eval::{ActionSink, EvalContext, RuntimeStatus, evaluate_outcome_with_context};
 use crate::mounts::MountSnapshot;
 use crate::output::{BrokerMessage, spawn_broker};
 use crate::planner::{ExecutionMode, ExecutionPlan, RuntimeExpr, TraversalOrder};
@@ -8,7 +8,7 @@ use crate::runtime_pipeline::{
     resume_entry_eval,
 };
 use crate::traversal_control::{TraversalControl, evaluate_for_traversal_with_context};
-use crate::walker::{WalkEvent, walk_ordered, walk_parallel};
+use crate::walker::{OrderedWalkDirective, WalkEvent, walk_ordered, walk_parallel};
 use crossbeam_channel::unbounded;
 use std::io::Write;
 
@@ -93,13 +93,17 @@ where
                 WalkEvent::Entry(item) | WalkEvent::DirectoryComplete(item) => {
                     let entry = item.entry;
                     if entry.depth >= plan.traversal.min_depth {
-                        let _ = evaluate_with_context(
+                        let outcome = evaluate_outcome_with_context(
                             &plan.expr,
                             &entry,
                             plan.follow_mode,
                             &eval_context,
                             &mut sink,
                         )?;
+
+                        if outcome.status.is_stop_requested() {
+                            return Ok(OrderedWalkDirective::Stop);
+                        }
                     }
                 }
                 WalkEvent::Error(error) => {
@@ -107,7 +111,7 @@ where
                     sink.write_diagnostic(&format!("findoxide: {error}"))?;
                 }
             }
-            Ok(())
+            Ok(OrderedWalkDirective::Continue)
         },
     )?;
 
@@ -191,7 +195,7 @@ where
                         sink.write_diagnostic(&format!("findoxide: {error}"))?;
                     }
                 }
-                Ok(())
+                Ok(OrderedWalkDirective::Continue)
             },
         )?;
         drop(work_tx);
