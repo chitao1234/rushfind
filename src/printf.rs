@@ -1,3 +1,4 @@
+use crate::account::{group_name, user_name};
 use crate::diagnostics::Diagnostic;
 use crate::entry::{EntryContext, EntryKind};
 use crate::follow::FollowMode;
@@ -23,13 +24,24 @@ pub struct PrintfFieldFormat {
 pub enum PrintfDirectiveKind {
     Path,
     RelativePath,
+    StartPath,
     Basename,
     Dirname,
     Depth,
     FileType,
     Size,
     ModeOctal,
+    ModeSymbolic,
     LinkTarget,
+    Inode,
+    LinkCount,
+    Device,
+    Blocks512,
+    Blocks1024,
+    UserName,
+    UserId,
+    GroupName,
+    GroupId,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -136,13 +148,24 @@ fn parse_directive(
     let kind = match directive {
         b'p' => PrintfDirectiveKind::Path,
         b'P' => PrintfDirectiveKind::RelativePath,
+        b'H' => PrintfDirectiveKind::StartPath,
         b'f' => PrintfDirectiveKind::Basename,
         b'h' => PrintfDirectiveKind::Dirname,
         b'd' => PrintfDirectiveKind::Depth,
         b'y' => PrintfDirectiveKind::FileType,
         b's' => PrintfDirectiveKind::Size,
         b'm' => PrintfDirectiveKind::ModeOctal,
+        b'M' => PrintfDirectiveKind::ModeSymbolic,
         b'l' => PrintfDirectiveKind::LinkTarget,
+        b'i' => PrintfDirectiveKind::Inode,
+        b'n' => PrintfDirectiveKind::LinkCount,
+        b'D' => PrintfDirectiveKind::Device,
+        b'b' => PrintfDirectiveKind::Blocks512,
+        b'k' => PrintfDirectiveKind::Blocks1024,
+        b'u' => PrintfDirectiveKind::UserName,
+        b'U' => PrintfDirectiveKind::UserId,
+        b'g' => PrintfDirectiveKind::GroupName,
+        b'G' => PrintfDirectiveKind::GroupId,
         other => {
             return Err(Diagnostic::new(
                 format!("unsupported {flag} directive %{}", char::from(other)),
@@ -229,6 +252,9 @@ fn render_directive_bytes(
         PrintfDirectiveKind::RelativePath => {
             format_string_like(entry.relative_to_root()?.as_os_str().as_bytes(), directive.format)
         }
+        PrintfDirectiveKind::StartPath => {
+            format_string_like(entry.start_path().as_os_str().as_bytes(), directive.format)
+        }
         PrintfDirectiveKind::Basename => format_string_like(
             entry
                 .path
@@ -252,6 +278,13 @@ fn render_directive_bytes(
         PrintfDirectiveKind::ModeOctal => {
             format_mode_octal(entry.active_mode_bits(follow_mode)?, directive.format)
         }
+        PrintfDirectiveKind::ModeSymbolic => {
+            let mode = symbolic_mode_string(
+                entry.active_kind(follow_mode)?,
+                entry.active_mode_bits(follow_mode)?,
+            );
+            format_string_like(mode.as_bytes(), directive.format)
+        }
         PrintfDirectiveKind::LinkTarget => format_string_like(
             entry
                 .active_link_target(follow_mode)?
@@ -260,7 +293,52 @@ fn render_directive_bytes(
                 .as_bytes(),
             directive.format,
         ),
+        PrintfDirectiveKind::Inode => format_string_like(
+            entry.active_inode(follow_mode)?.to_string().as_bytes(),
+            directive.format,
+        ),
+        PrintfDirectiveKind::LinkCount => format_string_like(
+            entry.active_link_count(follow_mode)?.to_string().as_bytes(),
+            directive.format,
+        ),
+        PrintfDirectiveKind::Device => format_string_like(
+            entry.active_device(follow_mode)?.to_string().as_bytes(),
+            directive.format,
+        ),
+        PrintfDirectiveKind::Blocks512 => format_string_like(
+            entry.active_blocks(follow_mode)?.to_string().as_bytes(),
+            directive.format,
+        ),
+        PrintfDirectiveKind::Blocks1024 => {
+            let blocks = entry.active_blocks(follow_mode)?;
+            format_string_like(((blocks + 1) / 2).to_string().as_bytes(), directive.format)
+        }
+        PrintfDirectiveKind::UserName => {
+            let uid = entry.active_uid(follow_mode)?;
+            let name = user_name(uid)?;
+            format_string_like(name_or_id_bytes(name.as_deref(), uid).as_slice(), directive.format)
+        }
+        PrintfDirectiveKind::UserId => format_string_like(
+            entry.active_uid(follow_mode)?.to_string().as_bytes(),
+            directive.format,
+        ),
+        PrintfDirectiveKind::GroupName => {
+            let gid = entry.active_gid(follow_mode)?;
+            let name = group_name(gid)?;
+            format_string_like(name_or_id_bytes(name.as_deref(), gid).as_slice(), directive.format)
+        }
+        PrintfDirectiveKind::GroupId => format_string_like(
+            entry.active_gid(follow_mode)?.to_string().as_bytes(),
+            directive.format,
+        ),
     })
+}
+
+fn name_or_id_bytes(name: Option<&OsStr>, id: u32) -> Vec<u8> {
+    match name {
+        Some(name) => name.as_bytes().to_vec(),
+        None => id.to_string().into_bytes(),
+    }
 }
 
 fn pad_field(value: &[u8], width: Option<usize>, left_align: bool, pad: u8) -> Vec<u8> {
@@ -365,6 +443,39 @@ fn file_type_letter(kind: EntryKind) -> u8 {
     }
 }
 
+fn symbolic_mode_string(kind: EntryKind, mode: u32) -> String {
+    let mut value = String::with_capacity(10);
+    value.push(match kind {
+        EntryKind::File => '-',
+        EntryKind::Directory => 'd',
+        EntryKind::Symlink => 'l',
+        EntryKind::Block => 'b',
+        EntryKind::Character => 'c',
+        EntryKind::Fifo => 'p',
+        EntryKind::Socket => 's',
+        EntryKind::Unknown => 'U',
+    });
+    value.push(if mode & 0o400 != 0 { 'r' } else { '-' });
+    value.push(if mode & 0o200 != 0 { 'w' } else { '-' });
+    value.push(execute_char(mode, 0o100, 0o4000, 's', 'S'));
+    value.push(if mode & 0o040 != 0 { 'r' } else { '-' });
+    value.push(if mode & 0o020 != 0 { 'w' } else { '-' });
+    value.push(execute_char(mode, 0o010, 0o2000, 's', 'S'));
+    value.push(if mode & 0o004 != 0 { 'r' } else { '-' });
+    value.push(if mode & 0o002 != 0 { 'w' } else { '-' });
+    value.push(execute_char(mode, 0o001, 0o1000, 't', 'T'));
+    value
+}
+
+fn execute_char(mode: u32, exec_bit: u32, special_bit: u32, when_set: char, when_unset: char) -> char {
+    match (mode & exec_bit != 0, mode & special_bit != 0) {
+        (true, true) => when_set,
+        (false, true) => when_unset,
+        (true, false) => 'x',
+        (false, false) => '-',
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -374,8 +485,10 @@ mod tests {
     };
     use crate::entry::EntryContext;
     use crate::follow::FollowMode;
+    use std::sync::Arc;
     use std::ffi::OsStr;
     use std::fs;
+    use std::os::unix::fs::MetadataExt;
     use std::os::unix::fs::PermissionsExt;
     use tempfile::tempdir;
 
@@ -542,5 +655,42 @@ mod tests {
         let rendered = render_printf_bytes(&program, &entry, FollowMode::Physical).unwrap();
 
         assert_eq!(String::from_utf8(rendered).unwrap(), "[f][5][640][]");
+    }
+
+    #[test]
+    fn render_printf_bytes_supports_identity_ownership_and_mode_directives() {
+        let root = tempdir().unwrap();
+        fs::create_dir(root.path().join("dir")).unwrap();
+        fs::write(root.path().join("dir/file.txt"), "hello").unwrap();
+        fs::set_permissions(
+            root.path().join("dir/file.txt"),
+            fs::Permissions::from_mode(0o640),
+        )
+        .unwrap();
+
+        let entry = EntryContext::with_file_type_hint_and_root(
+            root.path().join("dir/file.txt"),
+            1,
+            false,
+            Arc::new(root.path().to_path_buf()),
+            None,
+        );
+        let program = compile_printf_program(
+            "-printf",
+            OsStr::new("[%H][%P][%i][%n][%D][%b][%k][%M][%u][%U][%g][%G]"),
+        )
+        .unwrap();
+        let rendered = render_printf_bytes(&program, &entry, FollowMode::Physical).unwrap();
+        let text = String::from_utf8(rendered).unwrap();
+        let metadata = fs::metadata(root.path().join("dir/file.txt")).unwrap();
+
+        assert!(text.contains(&format!("[{}]", root.path().display())));
+        assert!(text.contains("[dir/file.txt]"));
+        assert!(text.contains(&format!("[{}]", metadata.ino())));
+        assert!(text.contains(&format!("[{}]", metadata.nlink())));
+        assert!(text.contains(&format!("[{}]", metadata.dev())));
+        assert!(text.contains("[-rw-r-----]"));
+        assert!(text.contains(&format!("[{}]", metadata.uid())));
+        assert!(text.contains(&format!("[{}]", metadata.gid())));
     }
 }

@@ -243,6 +243,10 @@ impl EntryContext {
             .to_path_buf()
     }
 
+    pub fn start_path(&self) -> &Path {
+        self.root_path.as_path()
+    }
+
     pub fn physical_kind(&self) -> Result<EntryKind, Diagnostic> {
         if let Some(file_type) = self.data.physical_file_type_hint {
             return Ok(file_type_to_kind(file_type));
@@ -354,6 +358,10 @@ impl EntryContext {
 
     pub fn active_link_count(&self, follow_mode: FollowMode) -> Result<u64, Diagnostic> {
         Ok(self.active_metadata(follow_mode)?.nlink())
+    }
+
+    pub fn active_blocks(&self, follow_mode: FollowMode) -> Result<u64, Diagnostic> {
+        Ok(self.active_metadata(follow_mode)?.blocks())
     }
 
     pub fn access(&self, mode: AccessMode) -> Result<bool, Diagnostic> {

@@ -14,7 +14,7 @@ fn printf_counts_as_an_explicit_action_for_implicit_print_suppression() {
 fn rejects_unsupported_printf_directives_and_bad_format_sequences() {
     for (format, needle) in [
         ("%T", "unsupported -printf directive %T"),
-        ("%u", "unsupported -printf directive %u"),
+        ("%Y", "unsupported -printf directive %Y"),
         ("%", "malformed -printf format: trailing %"),
         ("\\x", "malformed -printf format: unsupported escape \\x"),
     ] {

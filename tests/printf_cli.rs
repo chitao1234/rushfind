@@ -1,7 +1,7 @@
 mod support;
 
 use std::fs;
-use std::os::unix::fs::{self as unix_fs, PermissionsExt};
+use std::os::unix::fs::{self as unix_fs, MetadataExt, PermissionsExt};
 use std::time::Duration;
 use support::{cargo_bin_output_with_timeout, path_arg};
 use tempfile::tempdir;
@@ -93,4 +93,35 @@ fn parallel_printf_replays_each_record_atomically() {
         let end = chunk[1].strip_prefix("END:").unwrap();
         begin == end
     }));
+}
+
+#[test]
+fn ordered_printf_renders_expanded_metadata_directives() {
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("dir")).unwrap();
+    fs::write(root.path().join("dir/file.txt"), "hello").unwrap();
+    fs::set_permissions(
+        root.path().join("dir/file.txt"),
+        fs::Permissions::from_mode(0o640),
+    )
+    .unwrap();
+
+    let output = cargo_bin_output_with_timeout(
+        &[
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-printf".into(),
+            "[%H][%P][%i][%n][%D][%b][%k][%M][%u][%U][%g][%G]\\n".into(),
+        ],
+        1,
+        Duration::from_secs(5),
+    );
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let metadata = fs::metadata(root.path().join("dir/file.txt")).unwrap();
+    assert!(stdout.contains(&format!("[{}]", root.path().display())));
+    assert!(stdout.contains("[dir/file.txt]"));
+    assert!(stdout.contains(&format!("[{}]", metadata.ino())));
+    assert!(stdout.contains("[-rw-r-----]"));
 }
