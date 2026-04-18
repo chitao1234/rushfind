@@ -54,6 +54,6 @@ impl GlobalControl {
     }
 
     pub(crate) fn workers_should_exit(&self) -> bool {
-        !self.accepts_new_work() && self.outstanding_tasks() == 0
+        self.outstanding_tasks() == 0
     }
 }
