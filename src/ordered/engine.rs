@@ -181,6 +181,7 @@ where
                                 request.action(),
                                 request.entry(),
                                 request.follow_mode(),
+                                &eval_context,
                             )?;
                             ready = resume_entry_eval(continuation, outcome, &eval_context)?;
                         }

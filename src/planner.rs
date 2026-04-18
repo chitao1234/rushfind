@@ -307,7 +307,7 @@ fn lower_expr(
         Expr::Predicate(predicate) => {
             lower_predicate(predicate, traversal, runtime, state, follow_mode)
         }
-        Expr::Action(action) => lower_action(action, state),
+        Expr::Action(action) => lower_action(action, runtime, state),
     }
 }
 
@@ -551,7 +551,11 @@ fn resolve_samefile_reference(
     Ok(FileIdentity::from_metadata(&metadata))
 }
 
-fn lower_action(action: Action, state: &mut PlanningState) -> Result<RuntimeExpr, Diagnostic> {
+fn lower_action(
+    action: Action,
+    runtime: &mut RuntimeRequirements,
+    state: &mut PlanningState,
+) -> Result<RuntimeExpr, Diagnostic> {
     state.saw_action = true;
 
     match action {
@@ -561,9 +565,13 @@ fn lower_action(action: Action, state: &mut PlanningState) -> Result<RuntimeExpr
         Action::Print0 => Ok(RuntimeExpr::Action(RuntimeAction::Output(
             OutputAction::Print0,
         ))),
-        Action::Printf { format } => Ok(RuntimeExpr::Action(RuntimeAction::Printf(
-            compile_printf_program("-printf", format.as_os_str())?,
-        ))),
+        Action::Printf { format } => {
+            let program = compile_printf_program("-printf", format.as_os_str())?;
+            if program.requires_mount_snapshot() {
+                runtime.mount_snapshot = true;
+            }
+            Ok(RuntimeExpr::Action(RuntimeAction::Printf(program)))
+        }
         Action::Quit => Ok(RuntimeExpr::Action(RuntimeAction::Quit)),
         Action::Exec { argv, batch: false } => Ok(RuntimeExpr::Action(
             RuntimeAction::ExecImmediate(compile_immediate_exec(&argv)),

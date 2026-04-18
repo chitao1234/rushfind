@@ -93,7 +93,7 @@ pub(crate) struct EvalOutcome {
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct EvalContext {
+pub struct EvalContext {
     mount_snapshot: Option<Arc<MountSnapshot>>,
 }
 
@@ -104,10 +104,10 @@ impl EvalContext {
         }
     }
 
-    fn mount_snapshot(&self) -> Result<&MountSnapshot, Diagnostic> {
+    pub(crate) fn mount_snapshot(&self) -> Result<&MountSnapshot, Diagnostic> {
         self.mount_snapshot.as_deref().ok_or_else(|| {
             Diagnostic::new(
-                "internal error: -fstype requires a mount snapshot runtime context",
+                "internal error: -fstype and -printf %F require a mount snapshot runtime context",
                 1,
             )
         })
@@ -130,6 +130,7 @@ pub trait ActionSink {
         action: &RuntimeAction,
         entry: &EntryContext,
         follow_mode: FollowMode,
+        context: &EvalContext,
     ) -> Result<ActionOutcome, Diagnostic>;
 }
 
@@ -148,8 +149,12 @@ pub(crate) fn evaluate_outcome_with_context(
                 request,
                 continuation,
             } => {
-                let outcome =
-                    sink.dispatch(request.action(), request.entry(), request.follow_mode())?;
+                let outcome = sink.dispatch(
+                    request.action(),
+                    request.entry(),
+                    request.follow_mode(),
+                    context,
+                )?;
                 step = resume_entry_eval(continuation, outcome, context)?;
             }
         }
@@ -314,7 +319,9 @@ mod tests {
     use crate::planner::{
         ExecutionPlan, OutputAction, RuntimeAction, RuntimeExpr, RuntimePredicate, plan_command,
     };
+    use crate::printf::compile_printf_program;
     use std::collections::VecDeque;
+    use std::ffi::OsStr;
     use std::ffi::OsString;
     use std::fs;
     use std::os::unix::fs as unix_fs;
@@ -331,6 +338,7 @@ mod tests {
             _action: &RuntimeAction,
             _entry: &EntryContext,
             _follow_mode: FollowMode,
+            _context: &EvalContext,
         ) -> Result<ActionOutcome, Diagnostic> {
             self.scripted
                 .pop_front()
@@ -601,6 +609,54 @@ mod tests {
 
         let error = evaluate_with_context(
             &RuntimeExpr::Predicate(RuntimePredicate::FsType("tmpfs".into())),
+            &entry,
+            FollowMode::Physical,
+            &EvalContext::default(),
+            &mut sink,
+        )
+        .unwrap_err();
+
+        assert!(error.message.contains("mount snapshot"));
+    }
+
+    #[test]
+    fn printf_fstype_action_uses_mount_snapshot_from_eval_context() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("file.txt");
+        fs::write(&path, "hello\n").unwrap();
+        let entry = EntryContext::new(path, 0, true);
+        let mount_id = entry.active_mount_id(FollowMode::Physical).unwrap();
+        let program = compile_printf_program("-printf", OsStr::new("%F")).unwrap();
+        let context = EvalContext::with_mount_snapshot(
+            MountSnapshot::from_mountinfo(&format!("{mount_id} 1 8:1 / / rw - tmpfs tmpfs rw\n"))
+                .unwrap(),
+        );
+        let mut sink = RecordingSink::default();
+
+        assert!(
+            evaluate_with_context(
+                &RuntimeExpr::Action(RuntimeAction::Printf(program)),
+                &entry,
+                FollowMode::Physical,
+                &context,
+                &mut sink,
+            )
+            .unwrap()
+        );
+        assert_eq!(sink.into_utf8(), "tmpfs");
+    }
+
+    #[test]
+    fn printf_fstype_action_without_mount_snapshot_context_is_a_runtime_error() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("file.txt");
+        fs::write(&path, "hello\n").unwrap();
+        let entry = EntryContext::new(path, 0, true);
+        let program = compile_printf_program("-printf", OsStr::new("%F")).unwrap();
+        let mut sink = RecordingSink::default();
+
+        let error = evaluate_with_context(
+            &RuntimeExpr::Action(RuntimeAction::Printf(program)),
             &entry,
             FollowMode::Physical,
             &EvalContext::default(),

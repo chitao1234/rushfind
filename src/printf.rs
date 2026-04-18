@@ -1,6 +1,7 @@
 use crate::account::{group_name, user_name};
 use crate::diagnostics::Diagnostic;
 use crate::entry::{EntryContext, EntryKind};
+use crate::eval::EvalContext;
 use crate::follow::FollowMode;
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
@@ -8,6 +9,20 @@ use std::os::unix::ffi::OsStrExt;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrintfProgram {
     pub atoms: Vec<PrintfAtom>,
+}
+
+impl PrintfProgram {
+    pub fn requires_mount_snapshot(&self) -> bool {
+        self.atoms.iter().any(|atom| {
+            matches!(
+                atom,
+                PrintfAtom::Directive(PrintfDirective {
+                    kind: PrintfDirectiveKind::FileSystemType,
+                    ..
+                })
+            )
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -42,6 +57,7 @@ pub enum PrintfDirectiveKind {
     UserId,
     GroupName,
     GroupId,
+    FileSystemType,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,9 +157,9 @@ fn parse_directive(
         format.precision = Some(parse_required_usize(flag, bytes, index)?);
     }
 
-    let directive = *bytes.get(*index).ok_or_else(|| {
-        Diagnostic::new(format!("malformed {flag} format: trailing %"), 1)
-    })?;
+    let directive = *bytes
+        .get(*index)
+        .ok_or_else(|| Diagnostic::new(format!("malformed {flag} format: trailing %"), 1))?;
 
     let kind = match directive {
         b'p' => PrintfDirectiveKind::Path,
@@ -166,6 +182,7 @@ fn parse_directive(
         b'U' => PrintfDirectiveKind::UserId,
         b'g' => PrintfDirectiveKind::GroupName,
         b'G' => PrintfDirectiveKind::GroupId,
+        b'F' => PrintfDirectiveKind::FileSystemType,
         other => {
             return Err(Diagnostic::new(
                 format!("unsupported {flag} directive %{}", char::from(other)),
@@ -217,23 +234,20 @@ fn parse_required_usize(flag: &str, bytes: &[u8], index: &mut usize) -> Result<u
         .map_err(|_| Diagnostic::new(format!("malformed {flag} format: invalid field width"), 1))
 }
 
-pub fn render_printf_bytes(
+pub(crate) fn render_printf_bytes(
     program: &PrintfProgram,
     entry: &EntryContext,
     follow_mode: FollowMode,
+    context: &EvalContext,
 ) -> Result<Vec<u8>, Diagnostic> {
     let mut rendered = Vec::new();
 
     for atom in &program.atoms {
         match atom {
             PrintfAtom::Literal(bytes) => rendered.extend_from_slice(bytes),
-            PrintfAtom::Directive(directive) => {
-                rendered.extend_from_slice(&render_directive_bytes(
-                    directive,
-                    entry,
-                    follow_mode,
-                )?)
-            }
+            PrintfAtom::Directive(directive) => rendered.extend_from_slice(
+                &render_directive_bytes(directive, entry, follow_mode, context)?,
+            ),
         }
     }
 
@@ -244,14 +258,16 @@ fn render_directive_bytes(
     directive: &PrintfDirective,
     entry: &EntryContext,
     follow_mode: FollowMode,
+    context: &EvalContext,
 ) -> Result<Vec<u8>, Diagnostic> {
     Ok(match directive.kind {
         PrintfDirectiveKind::Path => {
             format_string_like(entry.path.as_os_str().as_bytes(), directive.format)
         }
-        PrintfDirectiveKind::RelativePath => {
-            format_string_like(entry.relative_to_root()?.as_os_str().as_bytes(), directive.format)
-        }
+        PrintfDirectiveKind::RelativePath => format_string_like(
+            entry.relative_to_root()?.as_os_str().as_bytes(),
+            directive.format,
+        ),
         PrintfDirectiveKind::StartPath => {
             format_string_like(entry.start_path().as_os_str().as_bytes(), directive.format)
         }
@@ -268,9 +284,10 @@ fn render_directive_bytes(
             directive.format,
         ),
         PrintfDirectiveKind::Depth => format_depth(entry.depth, directive.format),
-        PrintfDirectiveKind::FileType => {
-            format_string_like(&[file_type_letter(entry.active_kind(follow_mode)?)], directive.format)
-        }
+        PrintfDirectiveKind::FileType => format_string_like(
+            &[file_type_letter(entry.active_kind(follow_mode)?)],
+            directive.format,
+        ),
         PrintfDirectiveKind::Size => format_string_like(
             entry.active_size(follow_mode)?.to_string().as_bytes(),
             directive.format,
@@ -316,7 +333,10 @@ fn render_directive_bytes(
         PrintfDirectiveKind::UserName => {
             let uid = entry.active_uid(follow_mode)?;
             let name = user_name(uid)?;
-            format_string_like(name_or_id_bytes(name.as_deref(), uid).as_slice(), directive.format)
+            format_string_like(
+                name_or_id_bytes(name.as_deref(), uid).as_slice(),
+                directive.format,
+            )
         }
         PrintfDirectiveKind::UserId => format_string_like(
             entry.active_uid(follow_mode)?.to_string().as_bytes(),
@@ -325,12 +345,26 @@ fn render_directive_bytes(
         PrintfDirectiveKind::GroupName => {
             let gid = entry.active_gid(follow_mode)?;
             let name = group_name(gid)?;
-            format_string_like(name_or_id_bytes(name.as_deref(), gid).as_slice(), directive.format)
+            format_string_like(
+                name_or_id_bytes(name.as_deref(), gid).as_slice(),
+                directive.format,
+            )
         }
         PrintfDirectiveKind::GroupId => format_string_like(
             entry.active_gid(follow_mode)?.to_string().as_bytes(),
             directive.format,
         ),
+        PrintfDirectiveKind::FileSystemType => {
+            let snapshot = context.mount_snapshot()?;
+            let mount_id = entry.active_mount_id(follow_mode)?;
+            let type_name = snapshot.type_for_mount_id(mount_id).ok_or_else(|| {
+                Diagnostic::new(
+                    format!("internal error: mount ID {mount_id} missing from mount snapshot"),
+                    1,
+                )
+            })?;
+            format_string_like(type_name.as_bytes(), directive.format)
+        }
     })
 }
 
@@ -467,7 +501,13 @@ fn symbolic_mode_string(kind: EntryKind, mode: u32) -> String {
     value
 }
 
-fn execute_char(mode: u32, exec_bit: u32, special_bit: u32, when_set: char, when_unset: char) -> char {
+fn execute_char(
+    mode: u32,
+    exec_bit: u32,
+    special_bit: u32,
+    when_set: char,
+    when_unset: char,
+) -> char {
     match (mode & exec_bit != 0, mode & special_bit != 0) {
         (true, true) => when_set,
         (false, true) => when_unset,
@@ -484,12 +524,13 @@ mod tests {
         render_printf_bytes,
     };
     use crate::entry::EntryContext;
+    use crate::eval::EvalContext;
     use crate::follow::FollowMode;
-    use std::sync::Arc;
     use std::ffi::OsStr;
     use std::fs;
     use std::os::unix::fs::MetadataExt;
     use std::os::unix::fs::PermissionsExt;
+    use std::sync::Arc;
     use tempfile::tempdir;
 
     #[test]
@@ -530,11 +571,9 @@ mod tests {
 
     #[test]
     fn compiler_parses_supported_field_formatting() {
-        let program = compile_printf_program(
-            "-printf",
-            OsStr::new("[%10p][%-10p][%.3p][%010d][%#10m]"),
-        )
-        .unwrap();
+        let program =
+            compile_printf_program("-printf", OsStr::new("[%10p][%-10p][%.3p][%010d][%#10m]"))
+                .unwrap();
 
         assert!(matches!(
             &program.atoms[1],
@@ -600,13 +639,46 @@ mod tests {
     fn compiler_rejects_malformed_field_formatting() {
         for (format, needle) in [
             ("%.", "malformed -printf format: expected digits after `.`"),
-            ("%-.p", "malformed -printf format: expected digits after `.`"),
+            (
+                "%-.p",
+                "malformed -printf format: expected digits after `.`",
+            ),
             ("%10", "malformed -printf format: trailing %"),
             ("%q", "unsupported -printf directive %q"),
         ] {
             let error = compile_printf_program("-printf", OsStr::new(format)).unwrap_err();
-            assert!(error.message.contains(needle), "{format} -> {}", error.message);
+            assert!(
+                error.message.contains(needle),
+                "{format} -> {}",
+                error.message
+            );
         }
+    }
+
+    #[test]
+    fn printf_with_fstype_directive_compiles() {
+        let program = compile_printf_program("-printf", OsStr::new("%F")).unwrap();
+
+        assert_eq!(program.atoms.len(), 1);
+    }
+
+    #[test]
+    fn printf_with_fstype_requires_mount_snapshot_context() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("file.txt");
+        fs::write(&path, "x").unwrap();
+        let entry = EntryContext::new(path, 0, true);
+        let program = compile_printf_program("-printf", OsStr::new("%F")).unwrap();
+
+        let error = render_printf_bytes(
+            &program,
+            &entry,
+            FollowMode::Physical,
+            &EvalContext::default(),
+        )
+        .unwrap_err();
+
+        assert!(error.message.contains("mount snapshot"));
     }
 
     #[test]
@@ -652,7 +724,13 @@ mod tests {
         let entry = EntryContext::new(path, 0, true);
 
         let program = compile_printf_program("-printf", OsStr::new("[%y][%s][%m][%l]")).unwrap();
-        let rendered = render_printf_bytes(&program, &entry, FollowMode::Physical).unwrap();
+        let rendered = render_printf_bytes(
+            &program,
+            &entry,
+            FollowMode::Physical,
+            &EvalContext::default(),
+        )
+        .unwrap();
 
         assert_eq!(String::from_utf8(rendered).unwrap(), "[f][5][640][]");
     }
@@ -680,7 +758,13 @@ mod tests {
             OsStr::new("[%H][%P][%i][%n][%D][%b][%k][%M][%u][%U][%g][%G]"),
         )
         .unwrap();
-        let rendered = render_printf_bytes(&program, &entry, FollowMode::Physical).unwrap();
+        let rendered = render_printf_bytes(
+            &program,
+            &entry,
+            FollowMode::Physical,
+            &EvalContext::default(),
+        )
+        .unwrap();
         let text = String::from_utf8(rendered).unwrap();
         let metadata = fs::metadata(root.path().join("dir/file.txt")).unwrap();
 

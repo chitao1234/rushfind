@@ -28,6 +28,20 @@ fn rejects_unsupported_printf_directives_and_bad_format_sequences() {
     }
 }
 
+#[test]
+fn printf_with_fstype_requests_mount_snapshot_runtime_support() {
+    let plan = plan_command(parse_command(&argv(&[".", "-printf", "%F\\n"])).unwrap(), 1).unwrap();
+
+    assert!(plan.runtime.mount_snapshot);
+}
+
+#[test]
+fn printf_without_fstype_keeps_mount_snapshot_disabled() {
+    let plan = plan_command(parse_command(&argv(&[".", "-printf", "%p\\n"])).unwrap(), 1).unwrap();
+
+    assert!(!plan.runtime.mount_snapshot);
+}
+
 fn contains_plain_print(expr: &RuntimeExpr) -> bool {
     match expr {
         RuntimeExpr::And(items) => items.iter().any(contains_plain_print),

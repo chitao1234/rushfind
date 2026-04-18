@@ -1,6 +1,6 @@
 use crate::diagnostics::Diagnostic;
 use crate::entry::EntryContext;
-use crate::eval::{ActionOutcome, ActionSink, RuntimeStatus};
+use crate::eval::{ActionOutcome, ActionSink, EvalContext, RuntimeStatus};
 use crate::follow::FollowMode;
 use crate::output::{BrokerMessage, StdoutSink, render_runtime_action_bytes};
 use crate::planner::RuntimeAction;
@@ -230,10 +230,11 @@ impl<W: std::io::Write, E: std::io::Write> ActionSink for OrderedActionSink<'_, 
         action: &RuntimeAction,
         entry: &EntryContext,
         follow_mode: FollowMode,
+        context: &EvalContext,
     ) -> Result<ActionOutcome, Diagnostic> {
         match action {
             RuntimeAction::Output(_) | RuntimeAction::Printf(_) => {
-                self.output.dispatch(action, entry, follow_mode)
+                self.output.dispatch(action, entry, follow_mode, context)
             }
             RuntimeAction::Quit => Ok(ActionOutcome::quit()),
             RuntimeAction::ExecImmediate(spec) => {
@@ -374,12 +375,18 @@ impl ParallelActionSink {
         action: &RuntimeAction,
         entry: &EntryContext,
         follow_mode: FollowMode,
+        context: &EvalContext,
     ) -> Result<ActionOutcome, Diagnostic> {
         match action {
             RuntimeAction::Output(_) | RuntimeAction::Printf(_) => {
                 send_broker_message(
                     &self.broker,
-                    BrokerMessage::Stdout(render_runtime_action_bytes(action, entry, follow_mode)?),
+                    BrokerMessage::Stdout(render_runtime_action_bytes(
+                        action,
+                        entry,
+                        follow_mode,
+                        context,
+                    )?),
                 )?;
                 Ok(ActionOutcome::matched_true())
             }
@@ -418,8 +425,9 @@ impl ActionSink for ParallelActionSink {
         action: &RuntimeAction,
         entry: &EntryContext,
         follow_mode: FollowMode,
+        context: &EvalContext,
     ) -> Result<ActionOutcome, Diagnostic> {
-        self.execute_action(action, entry, follow_mode)
+        self.execute_action(action, entry, follow_mode, context)
     }
 }
 
@@ -828,7 +836,7 @@ mod tests {
         build_batched_argv, compile_batched_exec, delete_path,
     };
     use crate::entry::EntryContext;
-    use crate::eval::ActionSink;
+    use crate::eval::{ActionSink, EvalContext};
     use crate::follow::FollowMode;
     use crate::planner::RuntimeAction;
     use crossbeam_channel::unbounded;
@@ -892,12 +900,14 @@ mod tests {
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         let mut sink = OrderedActionSink::new(&mut stdout, &mut stderr);
+        let context = EvalContext::default();
 
         let outcome = sink
             .dispatch(
                 &RuntimeAction::ExecBatched(spec),
                 &entry,
                 FollowMode::Physical,
+                &context,
             )
             .unwrap();
 
@@ -914,12 +924,14 @@ mod tests {
         let entry = EntryContext::new(PathBuf::from("placeholder"), 0, true);
         let (broker, _rx) = unbounded();
         let mut sink = ParallelActionSink::new(broker, 4).unwrap();
+        let context = EvalContext::default();
 
         let outcome = sink
             .dispatch(
                 &RuntimeAction::ExecBatched(spec),
                 &entry,
                 FollowMode::Physical,
+                &context,
             )
             .unwrap();
 
@@ -936,9 +948,15 @@ mod tests {
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         let mut sink = OrderedActionSink::new(&mut stdout, &mut stderr);
+        let context = EvalContext::default();
 
         let outcome = sink
-            .dispatch(&RuntimeAction::Delete, &missing, FollowMode::Physical)
+            .dispatch(
+                &RuntimeAction::Delete,
+                &missing,
+                FollowMode::Physical,
+                &context,
+            )
             .unwrap();
 
         assert!(!outcome.matched);

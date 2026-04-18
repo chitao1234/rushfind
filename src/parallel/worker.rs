@@ -96,10 +96,11 @@ impl ActionSink for WorkerActionSink {
         action: &RuntimeAction,
         entry: &EntryContext,
         follow_mode: FollowMode,
+        context: &EvalContext,
     ) -> Result<ActionOutcome, Diagnostic> {
         match action {
             RuntimeAction::Output(_) | RuntimeAction::Printf(_) => {
-                let bytes = render_runtime_action_bytes(action, entry, follow_mode)?;
+                let bytes = render_runtime_action_bytes(action, entry, follow_mode, context)?;
                 self.broker
                     .send(BrokerMessage::Stdout(bytes))
                     .map_err(|_| Diagnostic::new("internal error: v2 broker is unavailable", 1))?;
