@@ -106,6 +106,15 @@ impl Scheduler {
 
 #[cfg_attr(not(test), allow(dead_code))]
 impl WorkerHandle {
+    pub(crate) fn push_local(&mut self, task: ParallelTask, control: &GlobalControl) {
+        if !control.accepts_new_work() {
+            return;
+        }
+
+        control.task_spawned();
+        self.local.push(task);
+    }
+
     pub(crate) fn pop(&mut self) -> Option<ParallelTask> {
         self.pop_nonblocking()
     }
@@ -201,6 +210,73 @@ mod tests {
         control.task_finished();
 
         assert!(matches!(task, Some(ParallelTask::PreOrderRoot(_))));
+    }
+
+    #[test]
+    fn locally_published_task_counts_as_outstanding_work() {
+        let scheduler = Scheduler::new(1);
+        let control = GlobalControl::new();
+        let mut worker = scheduler.worker_handle(0);
+
+        worker.push_local(
+            ParallelTask::PreOrderRoot(PreOrderRootTask::for_path(PathBuf::from("child"), 1)),
+            &control,
+        );
+
+        assert_eq!(control.outstanding_tasks(), 1);
+    }
+
+    #[test]
+    fn worker_pops_locally_published_task_before_injected_work() {
+        let scheduler = Scheduler::new(1);
+        let control = GlobalControl::new();
+        let mut worker = scheduler.worker_handle(0);
+
+        scheduler.push_root(
+            ParallelTask::PreOrderRoot(PreOrderRootTask::for_path(PathBuf::from("root"), 0)),
+            &control,
+        );
+        worker.push_local(
+            ParallelTask::PreOrderRoot(PreOrderRootTask::for_path(PathBuf::from("child"), 1)),
+            &control,
+        );
+
+        let first = worker.pop();
+        let second = worker.pop();
+
+        assert!(matches!(
+            first,
+            Some(ParallelTask::PreOrderRoot(task)) if task.pending.path.ends_with("child")
+        ));
+        assert!(matches!(
+            second,
+            Some(ParallelTask::PreOrderRoot(task)) if task.pending.path.ends_with("root")
+        ));
+    }
+
+    #[test]
+    fn peer_can_steal_locally_published_task() {
+        let scheduler = Scheduler::new(2);
+        let control = GlobalControl::new();
+        let mut owner = scheduler.worker_handle(0);
+        let mut thief = scheduler.worker_handle(1);
+
+        owner.push_local(
+            ParallelTask::PostOrderResume(PostOrderResumeTask::for_path(
+                PathBuf::from("dir"),
+                1,
+                SubtreeBarrierId(9),
+                None,
+            )),
+            &control,
+        );
+
+        let stolen = thief.pop();
+
+        assert!(matches!(
+            stolen,
+            Some(ParallelTask::PostOrderResume(task)) if task.entry.path.ends_with("dir")
+        ));
     }
 
     #[test]
