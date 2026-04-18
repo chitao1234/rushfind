@@ -24,6 +24,21 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParallelExecutionPolicy {
+    PreOrderFastPath,
+    PostOrderSubtree,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ActionProfile {
+    pub has_local_immediate: bool,
+    pub has_local_batched: bool,
+    pub has_global_control: bool,
+    pub has_subtree_finalizer: bool,
+    pub has_ordered_only: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionPlan {
     pub start_paths: Vec<PathBuf>,
@@ -32,6 +47,8 @@ pub struct ExecutionPlan {
     pub runtime: RuntimeRequirements,
     pub expr: RuntimeExpr,
     pub mode: ExecutionMode,
+    pub parallel_policy: Option<ParallelExecutionPolicy>,
+    pub action_profile: ActionProfile,
     pub(crate) runtime_policy: RuntimePolicy,
     pub(crate) traversal_control: Option<RuntimeExpr>,
 }
@@ -177,12 +194,14 @@ pub fn plan_command_with_now(
             RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)),
         ])
     };
+    let action_profile = compute_action_profile(&expr);
 
     let mode = if workers <= 1 {
         ExecutionMode::OrderedSingle
     } else {
         ExecutionMode::ParallelRelaxed
     };
+    let parallel_policy = choose_parallel_policy(workers, traversal, action_profile);
     let runtime_policy = RuntimePolicy::derive(
         workers,
         traversal.order,
@@ -197,9 +216,58 @@ pub fn plan_command_with_now(
         runtime,
         expr,
         mode,
+        parallel_policy,
+        action_profile,
         runtime_policy,
         traversal_control,
     })
+}
+
+fn choose_parallel_policy(
+    workers: usize,
+    traversal: TraversalOptions,
+    action_profile: ActionProfile,
+) -> Option<ParallelExecutionPolicy> {
+    if workers <= 1 {
+        return None;
+    }
+
+    if traversal.order == TraversalOrder::DepthFirstPostOrder
+        || action_profile.has_subtree_finalizer
+    {
+        Some(ParallelExecutionPolicy::PostOrderSubtree)
+    } else {
+        Some(ParallelExecutionPolicy::PreOrderFastPath)
+    }
+}
+
+fn compute_action_profile(expr: &RuntimeExpr) -> ActionProfile {
+    let mut profile = ActionProfile::default();
+    populate_action_profile(expr, &mut profile);
+    profile
+}
+
+fn populate_action_profile(expr: &RuntimeExpr, profile: &mut ActionProfile) {
+    match expr {
+        RuntimeExpr::And(items) => {
+            for item in items {
+                populate_action_profile(item, profile);
+            }
+        }
+        RuntimeExpr::Or(left, right) => {
+            populate_action_profile(left, profile);
+            populate_action_profile(right, profile);
+        }
+        RuntimeExpr::Not(inner) => populate_action_profile(inner, profile),
+        RuntimeExpr::Action(action) => match action {
+            RuntimeAction::Output(_) | RuntimeAction::Printf(_) => {}
+            RuntimeAction::Quit => profile.has_global_control = true,
+            RuntimeAction::ExecImmediate(_) => profile.has_local_immediate = true,
+            RuntimeAction::ExecBatched(_) => profile.has_local_batched = true,
+            RuntimeAction::Delete => profile.has_subtree_finalizer = true,
+        },
+        RuntimeExpr::Predicate(_) | RuntimeExpr::Barrier => {}
+    }
 }
 
 fn resolve_follow_mode(global_options: &[GlobalOption]) -> FollowMode {
