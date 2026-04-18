@@ -19,9 +19,14 @@
 - Traversal controls: `-mindepth`, `-maxdepth`, `-depth`, `-prune`, `-xdev`, `-mount`
 - Output and mutation actions: `-print`, `-print0`, `-printf`, `-exec ... ;`, `-exec ... +`,
   `-delete`, `-quit`
-- `-printf` currently supports `%p`, `%P`, `%f`, `%h`, `%d`, `%y`, `%s`, `%m`, `%l`, `%%`, `\\`,
-  `\n`, `\t`, and `\0`
+- `-printf` currently supports `%p`, `%P`, `%H`, `%f`, `%h`, `%d`, `%y`, `%s`, `%m`, `%M`,
+  `%l`, `%i`, `%n`, `%D`, `%b`, `%k`, `%u`, `%U`, `%g`, `%G`, `%F`, `%%`, `\\`, `\n`, `\t`,
+  and `\0`
+- Supported `-printf` directives accept GNU-style field formatting with
+  `%[flags][width][.precision]directive`
 - Unsupported `-printf` directives fail during planning with explicit diagnostics
+- Time-format directives such as `%a`, `%c`, `%t`, `%A*`, `%C*`, and `%T*` remain unsupported in
+  this stage
 - Ordered single-worker mode stays GNU-oriented and remains a separate engine for supported
   structural traversal controls
 - Ordered single-worker mode matches GNU `-quit` behavior for the supported action set
