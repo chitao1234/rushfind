@@ -198,13 +198,21 @@ fn build_exec_tree() -> tempfile::TempDir {
 fn build_printf_tree() -> tempfile::TempDir {
     let root = tempdir().unwrap();
     fs::create_dir(root.path().join("dir")).unwrap();
+    fs::create_dir(root.path().join("nested")).unwrap();
     fs::write(root.path().join("dir/file.txt"), "hello").unwrap();
     fs::set_permissions(
         root.path().join("dir/file.txt"),
         fs::Permissions::from_mode(0o640),
     )
     .unwrap();
+    fs::hard_link(
+        root.path().join("dir/file.txt"),
+        root.path().join("dir/file-hard.txt"),
+    )
+    .unwrap();
     unix_fs::symlink("dir/file.txt", root.path().join("link.txt")).unwrap();
+    let sparse = fs::File::create(root.path().join("nested/sparse.bin")).unwrap();
+    sparse.set_len(8192).unwrap();
     root
 }
 
@@ -615,6 +623,48 @@ fn parallel_printf_subset_matches_gnu_find_as_sets() {
         path_arg(root.path()),
         "-printf".into(),
         "[%P][%f][%h][%d]\\n".into(),
+    ];
+
+    assert_matches_gnu_as_sets(&args);
+}
+
+#[test]
+fn ordered_printf_expanded_subset_matches_gnu_find_exactly() {
+    let root = build_printf_tree();
+    let args_sets = vec![
+        vec![
+            path_arg(root.path()),
+            "-printf".into(),
+            "[%H][%P][%i][%n][%D][%M]\\n".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-printf".into(),
+            "[%u][%U][%g][%G][%b][%k][%F]\\n".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "0".into(),
+            "-printf".into(),
+            "[%10i][%-10u][%.2F][%010d][%#10m]\\n".into(),
+        ],
+    ];
+
+    for args in args_sets {
+        assert_matches_gnu_exact(&args);
+    }
+}
+
+#[test]
+fn parallel_printf_expanded_subset_matches_gnu_find_as_sets() {
+    let root = build_printf_tree();
+    let args = vec![
+        path_arg(root.path()),
+        "-printf".into(),
+        "[%H][%P][%i][%n][%D][%b][%k][%M][%u][%U][%g][%G][%F]\\n".into(),
     ];
 
     assert_matches_gnu_as_sets(&args);
