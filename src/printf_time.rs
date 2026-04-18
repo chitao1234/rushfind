@@ -15,8 +15,7 @@ const WEEKDAYS_FULL: [&[u8]; 7] = [
     b"Saturday",
 ];
 const MONTHS_ABBR: [&[u8]; 12] = [
-    b"Jan", b"Feb", b"Mar", b"Apr", b"May", b"Jun", b"Jul", b"Aug", b"Sep", b"Oct", b"Nov",
-    b"Dec",
+    b"Jan", b"Feb", b"Mar", b"Apr", b"May", b"Jun", b"Jul", b"Aug", b"Sep", b"Oct", b"Nov", b"Dec",
 ];
 const MONTHS_FULL: [&[u8]; 12] = [
     b"January",
@@ -82,12 +81,17 @@ impl ResolvedTimeParts {
 }
 
 #[allow(dead_code)]
-pub(crate) fn resolve_local_time_parts(timestamp: Timestamp) -> Result<ResolvedTimeParts, Diagnostic> {
+pub(crate) fn resolve_local_time_parts(
+    timestamp: Timestamp,
+) -> Result<ResolvedTimeParts, Diagnostic> {
     let raw = timestamp.seconds as libc::time_t;
     let mut local = MaybeUninit::<libc::tm>::uninit();
     let ptr = unsafe { libc::localtime_r(&raw, local.as_mut_ptr()) };
     if ptr.is_null() {
-        return Err(Diagnostic::new("failed to resolve local time for -printf", 1));
+        return Err(Diagnostic::new(
+            "failed to resolve local time for -printf",
+            1,
+        ));
     }
 
     let local = unsafe { local.assume_init() };
@@ -158,7 +162,9 @@ pub(crate) fn render_selector_bytes(
                 seconds_with_fraction(parts.local.tm_sec, parts.timestamp.nanos)
             )
             .into_bytes()),
-            b'u' => Ok(weekday_monday_one(parts.local.tm_wday).to_string().into_bytes()),
+            b'u' => Ok(weekday_monday_one(parts.local.tm_wday)
+                .to_string()
+                .into_bytes()),
             b'U' | b'W' => Ok(render_week_number(parts, byte).into_bytes()),
             b'w' => Ok(parts.local.tm_wday.to_string().into_bytes()),
             b'Y' => Ok(format!("{:04}", parts.local.tm_year + 1900).into_bytes()),
@@ -240,8 +246,11 @@ fn render_iso_date(parts: &ResolvedTimeParts) -> Vec<u8> {
 }
 
 fn render_iso_week_fields(parts: &ResolvedTimeParts, selector: u8) -> Result<Vec<u8>, Diagnostic> {
-    let (iso_year, iso_week) =
-        iso_week_year(parts.local.tm_year + 1900, parts.local.tm_yday + 1, parts.local.tm_wday);
+    let (iso_year, iso_week) = iso_week_year(
+        parts.local.tm_year + 1900,
+        parts.local.tm_yday + 1,
+        parts.local.tm_wday,
+    );
     match selector {
         b'g' => Ok(format!("{:02}", iso_year % 100).into_bytes()),
         b'G' => Ok(format!("{iso_year:04}").into_bytes()),

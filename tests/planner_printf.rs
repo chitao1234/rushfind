@@ -13,7 +13,7 @@ fn printf_counts_as_an_explicit_action_for_implicit_print_suppression() {
 #[test]
 fn rejects_unsupported_printf_directives_and_bad_format_sequences() {
     for (format, needle) in [
-        ("%T", "unsupported -printf directive %T"),
+        ("%T", "missing selector for %T"),
         ("%Y", "unsupported -printf directive %Y"),
         ("%", "malformed -printf format: trailing %"),
         ("\\x", "malformed -printf format: unsupported escape \\x"),
@@ -30,8 +30,11 @@ fn rejects_unsupported_printf_directives_and_bad_format_sequences() {
 
 #[test]
 fn printf_time_directives_count_as_supported_explicit_actions() {
-    let plan =
-        plan_command(parse_command(&argv(&[".", "-printf", "[%a][%T+]\\n"])).unwrap(), 1).unwrap();
+    let plan = plan_command(
+        parse_command(&argv(&[".", "-printf", "[%a][%T+]\\n"])).unwrap(),
+        1,
+    )
+    .unwrap();
     assert!(!contains_plain_print(&plan.expr));
     assert!(!plan.runtime.mount_snapshot);
 }

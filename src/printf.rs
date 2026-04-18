@@ -474,7 +474,9 @@ fn render_directive_bytes(
         }
         PrintfDirectiveKind::FullTimestamp(family) => {
             match resolve_cached_time_parts(state, family, entry, follow_mode)? {
-                Some(parts) => format_string_like(&render_full_time_bytes(parts)?, directive.format),
+                Some(parts) => {
+                    format_string_like(&render_full_time_bytes(parts)?, directive.format)
+                }
                 None => format_string_like(b"", directive.format),
             }
         }
@@ -815,9 +817,11 @@ mod tests {
 
     #[test]
     fn compiler_parses_full_and_family_time_directives() {
-        let program =
-            compile_printf_program("-printf", OsStr::new("[%a][%c][%t][%B][%AY][%C@][%T+][%BY]"))
-                .unwrap();
+        let program = compile_printf_program(
+            "-printf",
+            OsStr::new("[%a][%c][%t][%B][%AY][%C@][%T+][%BY]"),
+        )
+        .unwrap();
 
         assert!(matches!(
             &program.atoms[1],

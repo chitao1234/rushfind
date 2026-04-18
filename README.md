@@ -20,13 +20,17 @@
 - Output and mutation actions: `-print`, `-print0`, `-printf`, `-exec ... ;`, `-exec ... +`,
   `-delete`, `-quit`
 - `-printf` currently supports `%p`, `%P`, `%H`, `%f`, `%h`, `%d`, `%y`, `%s`, `%m`, `%M`,
-  `%l`, `%i`, `%n`, `%D`, `%b`, `%k`, `%u`, `%U`, `%g`, `%G`, `%F`, `%%`, `\\`, `\n`, `\t`,
-  and `\0`
+  `%l`, `%i`, `%n`, `%D`, `%b`, `%k`, `%u`, `%U`, `%g`, `%G`, `%F`, `%a`, `%c`, `%t`, `%B`,
+  `%A*`, `%C*`, `%T*`, `%B*`, `%%`, `\\`, `\n`, `\t`, and `\0`
 - Supported `-printf` directives accept GNU-style field formatting with
   `%[flags][width][.precision]directive`
+- Time-oriented `-printf` directives render in the process local timezone while freezing textual
+  names to C-locale spellings in this stage
+- GNU special time selectors `%A@`, `%C@`, `%T@`, `%B@`, `%A+`, `%C+`, `%T+`, and `%B+` are
+  supported
 - Unsupported `-printf` directives fail during planning with explicit diagnostics
-- Time-format directives such as `%a`, `%c`, `%t`, `%A*`, `%C*`, and `%T*` remain unsupported in
-  this stage
+- Birth-time `-printf` directives keep Linux-first `statx` behavior even on hosts where local GNU
+  `find` does not expose equivalent `%B*` output
 - Ordered single-worker mode stays GNU-oriented and remains a separate engine for supported
   structural traversal controls
 - Ordered single-worker mode matches GNU `-quit` behavior for the supported action set

@@ -781,7 +781,6 @@ fn ordered_printf_time_directives_match_gnu_find_exactly() {
     for args in args_sets {
         assert_matches_gnu_exact_with_env(&args);
     }
-
 }
 
 #[test]
