@@ -2,7 +2,7 @@ mod support;
 
 use std::fs;
 use std::time::Duration;
-use support::{cargo_bin_output_with_timeout, path_arg};
+use support::{cargo_bin_output_with_engine, cargo_bin_output_with_timeout, path_arg};
 use tempfile::tempdir;
 
 #[test]
@@ -128,4 +128,28 @@ fn parallel_depth_delete_keeps_descendant_before_parent_behavior_with_multiple_e
 
     assert_eq!(output.status.code(), Some(0));
     assert!(!root.path().join("dir").exists());
+}
+
+#[test]
+fn parallel_v2_delete_removes_the_same_tree_shape_under_the_override() {
+    let root = tempdir().unwrap();
+    let tree = root.path().join("tree");
+    fs::create_dir(&tree).unwrap();
+    fs::create_dir(tree.join("nested")).unwrap();
+    fs::write(tree.join("nested/file.txt"), "child\n").unwrap();
+
+    let output = cargo_bin_output_with_engine(
+        &[
+            path_arg(&tree),
+            "-mindepth".into(),
+            "1".into(),
+            "-delete".into(),
+        ],
+        4,
+        "v2",
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(fs::read_dir(&tree).unwrap().next().is_none());
 }
