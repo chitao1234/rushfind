@@ -129,7 +129,11 @@ fn ordered_fprint_destination_is_visible_when_created_inside_the_tree() {
     );
 
     assert_eq!(output.status.code(), Some(0));
-    assert!(String::from_utf8(output.stdout).unwrap().contains("seen.txt"));
+    assert!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .contains("seen.txt")
+    );
 }
 
 #[test]

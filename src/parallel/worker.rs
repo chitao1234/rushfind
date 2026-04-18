@@ -125,7 +125,8 @@ impl ActionSink for WorkerActionSink {
                 destination,
                 program,
             } => {
-                let bytes = crate::printf::render_printf_bytes(program, entry, follow_mode, context)?;
+                let bytes =
+                    crate::printf::render_printf_bytes(program, entry, follow_mode, context)?;
                 self.file_outputs.write_record(*destination, &bytes)?;
                 Ok(ActionOutcome::matched_true())
             }

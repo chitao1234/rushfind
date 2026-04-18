@@ -255,7 +255,8 @@ impl<W: std::io::Write, E: std::io::Write> ActionSink for OrderedActionSink<'_, 
                 destination,
                 program,
             } => {
-                let bytes = crate::printf::render_printf_bytes(program, entry, follow_mode, context)?;
+                let bytes =
+                    crate::printf::render_printf_bytes(program, entry, follow_mode, context)?;
                 self.file_outputs.write_record(*destination, &bytes)?;
                 Ok(ActionOutcome::matched_true())
             }
@@ -413,12 +414,12 @@ impl ParallelActionSink {
                 )?;
                 Ok(ActionOutcome::matched_true())
             }
-            RuntimeAction::FilePrint { .. } | RuntimeAction::FilePrintf { .. } => Err(
-                Diagnostic::new(
+            RuntimeAction::FilePrint { .. } | RuntimeAction::FilePrintf { .. } => {
+                Err(Diagnostic::new(
                     "internal error: file-backed output actions are not wired into parallel execution yet",
                     1,
-                ),
-            ),
+                ))
+            }
             RuntimeAction::Quit => Ok(ActionOutcome::quit()),
             RuntimeAction::ExecImmediate(spec) => run_immediate_parallel(
                 spec,

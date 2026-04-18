@@ -9,14 +9,7 @@ use support::argv;
 fn fprint_family_suppresses_implicit_print_and_deduplicates_destinations() {
     let plan = plan_command(
         parse_command(&argv(&[
-            ".",
-            "-fprint",
-            "out.txt",
-            "-fprintf",
-            "out.txt",
-            "[%p]\\n",
-            "-fprint0",
-            "nul.bin",
+            ".", "-fprint", "out.txt", "-fprintf", "out.txt", "[%p]\\n", "-fprint0", "nul.bin",
         ]))
         .unwrap(),
         1,

@@ -17,8 +17,8 @@
   and `-0.75`
 - Symlink-content predicates: `-lname`, `-ilname`
 - Traversal controls: `-mindepth`, `-maxdepth`, `-depth`, `-prune`, `-xdev`, `-mount`
-- Output and mutation actions: `-print`, `-print0`, `-printf`, `-exec ... ;`, `-exec ... +`,
-  `-delete`, `-quit`
+- Output and mutation actions: `-print`, `-print0`, `-printf`, `-fprint`, `-fprint0`,
+  `-fprintf`, `-exec ... ;`, `-exec ... +`, `-delete`, `-quit`
 - `-printf` currently supports `%p`, `%P`, `%H`, `%f`, `%h`, `%d`, `%y`, `%s`, `%m`, `%M`,
   `%l`, `%i`, `%n`, `%D`, `%b`, `%k`, `%u`, `%U`, `%g`, `%G`, `%F`, `%a`, `%c`, `%t`, `%B`,
   `%A*`, `%C*`, `%T*`, `%B*`, `%%`, `\\`, `\n`, `\t`, and `\0`
@@ -34,9 +34,13 @@
 - Ordered single-worker mode stays GNU-oriented and remains a separate engine for supported
   structural traversal controls
 - Ordered single-worker mode matches GNU `-quit` behavior for the supported action set
+- File-backed print actions eagerly create or truncate their destinations at startup, even when
+  the action is never reached dynamically or no entry matches
 - Relaxed-order parallel mode is subtree-scheduled and worker-owned, may emit side effects out of
   order, guarantees prune subtree boundaries in pre-order traversal, and does not promise GNU
   sibling ordering
+- Relaxed-order parallel `-fprint*` writes are atomic per destination file but do not promise
+  traversal order within that file
 - Relaxed-order parallel mode treats `-quit` as cancellation: no new subtree tasks are published
   after it is observed, already granted work may still finish, and buffered `-exec ... +` batches
   still flush
