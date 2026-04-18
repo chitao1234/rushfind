@@ -1,6 +1,6 @@
 use crate::account::{group_name, user_name};
 use crate::diagnostics::Diagnostic;
-use crate::entry::{EntryContext, EntryKind};
+use crate::entry::{EntryContext, EntryKind, PrintfTargetKind};
 use crate::eval::EvalContext;
 use crate::follow::FollowMode;
 use crate::printf_time::{
@@ -68,6 +68,7 @@ pub enum PrintfDirectiveKind {
     Dirname,
     Depth,
     FileType,
+    FileTypeFollow,
     Size,
     ModeOctal,
     ModeSymbolic,
@@ -255,6 +256,7 @@ fn parse_directive(
         b'h' => PrintfDirectiveKind::Dirname,
         b'd' => PrintfDirectiveKind::Depth,
         b'y' => PrintfDirectiveKind::FileType,
+        b'Y' => PrintfDirectiveKind::FileTypeFollow,
         b's' => PrintfDirectiveKind::Size,
         b'm' => PrintfDirectiveKind::ModeOctal,
         b'M' => PrintfDirectiveKind::ModeSymbolic,
@@ -454,6 +456,15 @@ fn render_directive_bytes(
             &[file_type_letter(entry.active_kind(follow_mode)?)],
             directive.format,
         ),
+        PrintfDirectiveKind::FileTypeFollow => {
+            let byte = match entry.printf_target_kind(follow_mode)? {
+                PrintfTargetKind::Kind(kind) => file_type_letter(kind),
+                PrintfTargetKind::Loop => b'L',
+                PrintfTargetKind::Missing => b'N',
+                PrintfTargetKind::OtherError => b'?',
+            };
+            format_string_like(&[byte], directive.format)
+        }
         PrintfDirectiveKind::Size => format_string_like(
             entry.active_size(follow_mode)?.to_string().as_bytes(),
             directive.format,

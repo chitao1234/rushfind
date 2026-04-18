@@ -14,7 +14,6 @@ fn printf_counts_as_an_explicit_action_for_implicit_print_suppression() {
 fn rejects_unsupported_printf_directives_and_bad_format_sequences() {
     for (format, needle) in [
         ("%T", "missing selector for %T"),
-        ("%Y", "unsupported -printf directive %Y"),
         ("%", "malformed -printf format: trailing %"),
     ] {
         let error =
@@ -54,6 +53,13 @@ fn printf_backslash_c_is_accepted_during_planning() {
 
     assert!(!contains_plain_print(&plan.expr));
     assert!(plan.startup_warnings.is_empty());
+}
+
+#[test]
+fn printf_percent_upper_y_is_a_supported_directive() {
+    let plan = plan_command(parse_command(&argv(&[".", "-printf", "%Y\\n"])).unwrap(), 1).unwrap();
+
+    assert!(!contains_plain_print(&plan.expr));
 }
 
 #[test]

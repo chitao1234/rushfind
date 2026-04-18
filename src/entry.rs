@@ -26,6 +26,14 @@ pub enum EntryKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrintfTargetKind {
+    Kind(EntryKind),
+    Loop,
+    Missing,
+    OtherError,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccessMode {
     Read,
     Write,
@@ -441,6 +449,27 @@ impl EntryContext {
         }
 
         self.physical_kind()
+    }
+
+    pub fn printf_target_kind(
+        &self,
+        follow_mode: FollowMode,
+    ) -> Result<PrintfTargetKind, Diagnostic> {
+        let active_kind = self.active_kind(follow_mode)?;
+        if active_kind != EntryKind::Symlink {
+            return Ok(PrintfTargetKind::Kind(active_kind));
+        }
+
+        match self.data.reader.metadata(&self.path) {
+            Ok(metadata) => Ok(PrintfTargetKind::Kind(file_type_to_kind(
+                metadata.file_type(),
+            ))),
+            Err(error) => Ok(match error.raw_os_error() {
+                Some(libc::ELOOP) => PrintfTargetKind::Loop,
+                Some(libc::ENOENT) => PrintfTargetKind::Missing,
+                _ => PrintfTargetKind::OtherError,
+            }),
+        }
     }
 
     pub fn active_directory_identity(

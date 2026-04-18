@@ -216,6 +216,17 @@ fn build_printf_tree() -> tempfile::TempDir {
     root
 }
 
+fn build_printf_target_type_tree() -> tempfile::TempDir {
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("dir")).unwrap();
+    fs::write(root.path().join("file.txt"), "hello").unwrap();
+    unix_fs::symlink("file.txt", root.path().join("file-link")).unwrap();
+    unix_fs::symlink("dir", root.path().join("dir-link")).unwrap();
+    unix_fs::symlink("missing", root.path().join("missing-link")).unwrap();
+    unix_fs::symlink("loop", root.path().join("loop")).unwrap();
+    root
+}
+
 fn build_regex_tree() -> tempfile::TempDir {
     let root = tempdir().unwrap();
     fs::create_dir(root.path().join("src")).unwrap();
@@ -872,6 +883,38 @@ fn parallel_printf_literal_escape_subset_matches_gnu_find_as_sets() {
         "f".into(),
         "-printf".into(),
         "[%f][\\101][\\t][\\040]\\n".into(),
+    ];
+
+    assert_matches_gnu_as_sets(&args);
+}
+
+#[test]
+fn ordered_printf_target_type_matches_gnu_find_exactly() {
+    let root = build_printf_target_type_tree();
+    let args = vec![
+        path_arg(root.path()),
+        "-mindepth".into(),
+        "1".into(),
+        "-maxdepth".into(),
+        "1".into(),
+        "-printf".into(),
+        "[%f][%y][%Y]\\n".into(),
+    ];
+
+    assert_matches_gnu_exact(&args);
+}
+
+#[test]
+fn parallel_printf_target_type_matches_gnu_find_as_sets() {
+    let root = build_printf_target_type_tree();
+    let args = vec![
+        path_arg(root.path()),
+        "-mindepth".into(),
+        "1".into(),
+        "-maxdepth".into(),
+        "1".into(),
+        "-printf".into(),
+        "[%f][%y][%Y]\\n".into(),
     ];
 
     assert_matches_gnu_as_sets(&args);

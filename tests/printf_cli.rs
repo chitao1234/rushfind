@@ -189,6 +189,39 @@ fn ordered_fprintf_decodes_gnu_literal_escapes_and_honors_backslash_c_per_action
 }
 
 #[test]
+fn ordered_printf_renders_symlink_target_type_directive() {
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("dir")).unwrap();
+    fs::write(root.path().join("file.txt"), "hello").unwrap();
+    unix_fs::symlink("file.txt", root.path().join("file-link")).unwrap();
+    unix_fs::symlink("dir", root.path().join("dir-link")).unwrap();
+    unix_fs::symlink("missing", root.path().join("missing-link")).unwrap();
+    unix_fs::symlink("loop", root.path().join("loop")).unwrap();
+
+    let output = cargo_bin_output_with_timeout(
+        &[
+            path_arg(root.path()),
+            "-mindepth".into(),
+            "1".into(),
+            "-maxdepth".into(),
+            "1".into(),
+            "-printf".into(),
+            "%f:%y:%Y\\n".into(),
+        ],
+        1,
+        Duration::from_secs(5),
+    );
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("file.txt:f:f"));
+    assert!(stdout.contains("dir:d:d"));
+    assert!(stdout.contains("file-link:l:f"));
+    assert!(stdout.contains("dir-link:l:d"));
+    assert!(stdout.contains("missing-link:l:N"));
+    assert!(stdout.contains("loop:l:L"));
+}
+
+#[test]
 fn parallel_printf_replays_each_record_atomically() {
     let root = tempdir().unwrap();
     fs::write(root.path().join("alpha.txt"), "a\n").unwrap();
