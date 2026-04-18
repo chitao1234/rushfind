@@ -46,3 +46,28 @@ pub fn cargo_bin_output_with_timeout(
         }
     }
 }
+
+pub fn cargo_bin_output_with_engine(
+    args: &[OsString],
+    workers: usize,
+    engine: &str,
+    timeout: Duration,
+) -> Output {
+    let mut child = Command::new(cargo_bin("findoxide"))
+        .env("FINDOXIDE_WORKERS", workers.to_string())
+        .env("FINDOXIDE_PARALLEL_ENGINE", engine)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    match child.wait_timeout(timeout).unwrap() {
+        Some(_) => child.wait_with_output().unwrap(),
+        None => {
+            child.kill().unwrap();
+            let _ = child.wait();
+            panic!("findoxide did not exit within {:?}", timeout);
+        }
+    }
+}

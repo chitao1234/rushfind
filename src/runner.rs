@@ -1,7 +1,9 @@
 use crate::diagnostics::Diagnostic;
 use crate::eval::EvalContext;
 use crate::mounts::MountSnapshot;
-use crate::planner::{ExecutionMode, ExecutionPlan, RuntimeExpr, TraversalOrder};
+use crate::planner::{
+    ExecutionMode, ExecutionPlan, ParallelExecutionPolicy, RuntimeExpr, TraversalOrder,
+};
 use crate::traversal_control::{TraversalControl, evaluate_for_traversal_with_context};
 use std::io::Write;
 
@@ -22,10 +24,26 @@ where
 {
     match plan.mode {
         ExecutionMode::OrderedSingle => crate::ordered::run_ordered_plan(plan, stdout, stderr),
-        ExecutionMode::ParallelRelaxed => {
-            crate::parallel::run_parallel_legacy(plan, stdout, stderr)
-        }
+        ExecutionMode::ParallelRelaxed => match parallel_engine_override().as_deref() {
+            Some("v2") if can_use_parallel_v2_output_fast_path(plan) => {
+                crate::parallel::run_parallel_v2(plan, stdout, stderr)
+            }
+            _ => crate::parallel::run_parallel_legacy(plan, stdout, stderr),
+        },
     }
+}
+
+fn parallel_engine_override() -> Option<String> {
+    std::env::var("FINDOXIDE_PARALLEL_ENGINE").ok()
+}
+
+fn can_use_parallel_v2_output_fast_path(plan: &ExecutionPlan) -> bool {
+    plan.parallel_policy == Some(ParallelExecutionPolicy::PreOrderFastPath)
+        && !plan.action_profile.has_local_immediate
+        && !plan.action_profile.has_local_batched
+        && !plan.action_profile.has_global_control
+        && !plan.action_profile.has_subtree_finalizer
+        && !plan.action_profile.has_ordered_only
 }
 
 pub(crate) fn traversal_control_for_entry(
