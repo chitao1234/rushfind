@@ -95,7 +95,10 @@ fn ordered_print_and_fprint_surfaces_preserve_non_utf8_paths() {
         Duration::from_secs(5),
     );
     assert_eq!(fprint0.status.code(), Some(0));
-    assert_eq!(fs::read(&out_bin).unwrap(), [path_bytes(&file), vec![0]].concat());
+    assert_eq!(
+        fs::read(&out_bin).unwrap(),
+        [path_bytes(&file), vec![0]].concat()
+    );
 }
 
 #[test]
