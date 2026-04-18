@@ -281,13 +281,13 @@ fn finish_with_outcome(
             parent,
         } => {
             let accumulated = accumulated.merge(outcome.status);
-            if !outcome.matched {
+            if !outcome.matched || accumulated.is_stop_requested() {
                 return finish_with_outcome(
                     *parent,
                     entry,
                     follow_mode,
                     EvalOutcome {
-                        matched: false,
+                        matched: outcome.matched,
                         status: accumulated,
                     },
                     context,
@@ -321,7 +321,7 @@ fn finish_with_outcome(
             )
         }
         EvalContinuation::AfterOrLeft { right, parent } => {
-            if outcome.matched {
+            if outcome.matched || outcome.status.is_stop_requested() {
                 return finish_with_outcome(*parent, entry, follow_mode, outcome, context);
             }
 
@@ -468,6 +468,35 @@ mod tests {
         .unwrap();
 
         assert!(matches!(complete, EvalStep::Complete(outcome) if outcome.matched));
+    }
+
+    #[test]
+    fn quit_action_stops_after_the_current_and_chain() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("file.txt");
+        fs::write(&path, "hello\n").unwrap();
+        let entry = EntryContext::new(path, 0, true);
+        let expr = RuntimeExpr::And(vec![
+            RuntimeExpr::Action(RuntimeAction::Quit),
+            RuntimeExpr::Predicate(RuntimePredicate::False),
+        ]);
+
+        let step =
+            begin_entry_eval(&expr, &entry, FollowMode::Physical, &EvalContext::default()).unwrap();
+
+        let EvalStep::PendingAction { continuation, .. } = step else {
+            panic!("expected quit request");
+        };
+
+        let complete = resume_entry_eval(
+            continuation,
+            ActionOutcome::quit(),
+            &EvalContext::default(),
+        )
+        .unwrap();
+
+        assert!(matches!(complete, EvalStep::Complete(outcome)
+            if outcome.matched && outcome.status.is_stop_requested()));
     }
 
     #[test]

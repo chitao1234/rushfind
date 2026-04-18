@@ -87,6 +87,7 @@ fn collect(expr: &RuntimeExpr, labels: &mut Vec<&'static str>) {
         RuntimeExpr::Action(action) => labels.push(match action {
             RuntimeAction::Output(_) => "print",
             RuntimeAction::Printf(_) => "printf",
+            RuntimeAction::Quit => "quit",
             RuntimeAction::ExecImmediate(_) => "exec:semicolon",
             RuntimeAction::ExecBatched(_) => "exec:batch",
             RuntimeAction::Delete => "delete",

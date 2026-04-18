@@ -235,6 +235,7 @@ impl<W: std::io::Write, E: std::io::Write> ActionSink for OrderedActionSink<'_, 
             RuntimeAction::Output(_) | RuntimeAction::Printf(_) => {
                 self.output.dispatch(action, entry, follow_mode)
             }
+            RuntimeAction::Quit => Ok(ActionOutcome::quit()),
             RuntimeAction::ExecImmediate(spec) => {
                 run_immediate_ordered(spec, entry.path.as_path(), self.stderr).map(action_success)
             }
@@ -389,6 +390,7 @@ impl ParallelActionSink {
                 )?;
                 Ok(ActionOutcome::matched_true())
             }
+            RuntimeAction::Quit => Ok(ActionOutcome::quit()),
             RuntimeAction::ExecImmediate(spec) => run_immediate_parallel(
                 spec,
                 entry.path.as_path(),

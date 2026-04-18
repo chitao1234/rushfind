@@ -122,6 +122,7 @@ pub enum OutputAction {
 pub enum RuntimeAction {
     Output(OutputAction),
     Printf(PrintfProgram),
+    Quit,
     ExecImmediate(ImmediateExecAction),
     ExecBatched(BatchedExecAction),
     Delete,
@@ -495,6 +496,7 @@ fn lower_action(action: Action, state: &mut PlanningState) -> Result<RuntimeExpr
         Action::Printf { format } => Ok(RuntimeExpr::Action(RuntimeAction::Printf(
             compile_printf_program("-printf", format.as_os_str())?,
         ))),
+        Action::Quit => Ok(RuntimeExpr::Action(RuntimeAction::Quit)),
         Action::Exec { argv, batch: false } => Ok(RuntimeExpr::Action(
             RuntimeAction::ExecImmediate(compile_immediate_exec(&argv)),
         )),

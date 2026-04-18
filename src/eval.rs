@@ -32,6 +32,13 @@ impl RuntimeStatus {
         }
     }
 
+    pub(crate) fn stop_requested() -> Self {
+        Self {
+            had_action_failures: false,
+            control: RuntimeControl::StopRequested,
+        }
+    }
+
     pub(crate) fn merge(self, other: Self) -> Self {
         Self {
             had_action_failures: self.had_action_failures || other.had_action_failures,
@@ -46,6 +53,10 @@ impl RuntimeStatus {
 
     pub(crate) fn had_action_failures(self) -> bool {
         self.had_action_failures
+    }
+
+    pub(crate) fn is_stop_requested(self) -> bool {
+        self.control == RuntimeControl::StopRequested
     }
 }
 
@@ -65,6 +76,13 @@ impl ActionOutcome {
 
     pub(crate) fn matched_true() -> Self {
         Self::new(true)
+    }
+
+    pub(crate) fn quit() -> Self {
+        Self {
+            matched: true,
+            status: RuntimeStatus::stop_requested(),
+        }
     }
 }
 
