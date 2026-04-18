@@ -1,13 +1,13 @@
 use crate::diagnostics::Diagnostic;
 use crate::parallel::broker::{BrokerMessage, spawn_broker};
 use crate::parallel::control::GlobalControl;
-use crate::parallel::postorder::walk_parallel;
+use crate::parallel::postorder::{BarrierTable, walk_parallel};
 use crate::parallel::scheduler::Scheduler;
 use crate::parallel::task::{ParallelTask, PreOrderRootTask};
 use crate::parallel::worker::{
     WorkerActionSink, WorkerReport, process_entry_preorder_fast_path, run_parallel_worker,
 };
-use crate::planner::{ExecutionPlan, TraversalOrder};
+use crate::planner::ExecutionPlan;
 use crate::runner::{RunSummary, build_eval_context, traversal_control_for_entry};
 use crate::walker::WalkEvent;
 use crossbeam_channel::{bounded, unbounded};
@@ -23,14 +23,10 @@ where
     W: Write + Send,
     E: Write + Send,
 {
-    if plan.traversal.order == TraversalOrder::DepthFirstPostOrder {
-        return run_parallel_postorder_event_stream(plan, stdout, stderr);
-    }
-
-    run_parallel_preorder_scheduler(plan, stdout, stderr)
+    run_parallel_scheduler(plan, stdout, stderr)
 }
 
-fn run_parallel_preorder_scheduler<W, E>(
+fn run_parallel_scheduler<W, E>(
     plan: &ExecutionPlan,
     stdout: &mut W,
     stderr: &mut E,
@@ -43,6 +39,7 @@ where
     let worker_count = plan.runtime_policy.requested_workers.max(1);
     let control = Arc::new(GlobalControl::new());
     let scheduler = Arc::new(Scheduler::new(worker_count));
+    let barriers = Arc::new(BarrierTable::default());
 
     std::thread::scope(|scope| -> Result<RunSummary, Diagnostic> {
         let (broker, broker_handle) = spawn_broker(scope, stdout, stderr);
@@ -59,6 +56,7 @@ where
         for worker_index in 0..worker_count {
             let worker_handle = scheduler.worker_handle(worker_index);
             let scheduler = scheduler.clone();
+            let barriers = barriers.clone();
             let control = control.clone();
             let broker = broker.clone();
             let plan = plan.clone();
@@ -68,6 +66,7 @@ where
                 run_parallel_worker(
                     worker_handle,
                     scheduler,
+                    barriers,
                     control,
                     broker,
                     plan,
@@ -123,6 +122,7 @@ where
     })
 }
 
+#[allow(dead_code)]
 fn run_parallel_postorder_event_stream<W, E>(
     plan: &ExecutionPlan,
     stdout: &mut W,
