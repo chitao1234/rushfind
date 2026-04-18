@@ -70,6 +70,7 @@ pub enum PrintfDirectiveKind {
     FileType,
     FileTypeFollow,
     Size,
+    Sparseness,
     ModeOctal,
     ModeSymbolic,
     LinkTarget,
@@ -258,6 +259,7 @@ fn parse_directive(
         b'y' => PrintfDirectiveKind::FileType,
         b'Y' => PrintfDirectiveKind::FileTypeFollow,
         b's' => PrintfDirectiveKind::Size,
+        b'S' => PrintfDirectiveKind::Sparseness,
         b'm' => PrintfDirectiveKind::ModeOctal,
         b'M' => PrintfDirectiveKind::ModeSymbolic,
         b'l' => PrintfDirectiveKind::LinkTarget,
@@ -469,6 +471,13 @@ fn render_directive_bytes(
             entry.active_size(follow_mode)?.to_string().as_bytes(),
             directive.format,
         ),
+        PrintfDirectiveKind::Sparseness => {
+            let text = format_sparseness_ascii(
+                entry.active_size(follow_mode)?,
+                entry.active_blocks(follow_mode)?,
+            );
+            format_string_like(text.as_bytes(), directive.format)
+        }
         PrintfDirectiveKind::ModeOctal => {
             format_mode_octal(entry.active_mode_bits(follow_mode)?, directive.format)
         }
@@ -649,6 +658,49 @@ fn format_mode_octal(mode: u32, format: PrintfFieldFormat) -> Vec<u8> {
     format_numeric_value(digits, None, format)
 }
 
+fn format_sparseness_ascii(size: u64, blocks: u64) -> String {
+    if size == 0 {
+        return "1".to_string();
+    }
+
+    let value = (blocks as f64 * 512.0) / size as f64;
+    format_six_sigfigs_ascii(value)
+}
+
+fn format_six_sigfigs_ascii(value: f64) -> String {
+    if value == 0.0 {
+        return "0".to_string();
+    }
+
+    let exponent = value.abs().log10().floor() as i32;
+    if exponent >= 6 || exponent < -4 {
+        return trim_ascii_float(format!("{value:.5e}"));
+    }
+
+    let precision = (5 - exponent).max(0) as usize;
+    trim_ascii_float(format!("{value:.precision$}", precision = precision))
+}
+
+fn trim_ascii_float(text: String) -> String {
+    match text.split_once('e') {
+        Some((mantissa, exponent)) => {
+            format!("{}e{}", trim_ascii_decimal(mantissa), exponent)
+        }
+        None => trim_ascii_decimal(&text),
+    }
+}
+
+fn trim_ascii_decimal(text: &str) -> String {
+    let mut out = text.to_string();
+    while out.contains('.') && out.ends_with('0') {
+        out.pop();
+    }
+    if out.ends_with('.') {
+        out.pop();
+    }
+    out
+}
+
 fn format_numeric_value(
     mut digits: Vec<u8>,
     sign: Option<u8>,
@@ -751,7 +803,7 @@ mod tests {
     use super::{
         PrintfAtom, PrintfDirective, PrintfDirectiveKind, PrintfFieldFormat, PrintfTimeFamily,
         PrintfTimeSelector, compile_printf_program, format_depth, format_mode_octal,
-        format_string_like, render_printf_bytes,
+        format_sparseness_ascii, format_string_like, render_printf_bytes,
     };
     use crate::entry::EntryContext;
     use crate::eval::EvalContext;
@@ -919,6 +971,16 @@ mod tests {
         let compiled = compile_printf_program("-printf", OsStr::new("A\\cB")).unwrap();
         assert!(matches!(compiled.program.atoms[0], PrintfAtom::Literal(_)));
         assert!(matches!(compiled.program.atoms[1], PrintfAtom::Stop));
+    }
+
+    #[test]
+    fn format_sparseness_ascii_matches_gnu_host_samples() {
+        assert_eq!(format_sparseness_ascii(0, 0), "1");
+        assert_eq!(format_sparseness_ascii(1, 8), "4096");
+        assert_eq!(format_sparseness_ascii(3, 8), "1365.33");
+        assert_eq!(format_sparseness_ascii(5000, 16), "1.6384");
+        assert_eq!(format_sparseness_ascii(8192, 8), "0.5");
+        assert_eq!(format_sparseness_ascii(8192, 0), "0");
     }
 
     #[test]

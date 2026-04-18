@@ -63,6 +63,13 @@ fn printf_percent_upper_y_is_a_supported_directive() {
 }
 
 #[test]
+fn printf_percent_upper_s_is_a_supported_directive() {
+    let plan = plan_command(parse_command(&argv(&[".", "-printf", "%S\\n"])).unwrap(), 1).unwrap();
+
+    assert!(!contains_plain_print(&plan.expr));
+}
+
+#[test]
 fn printf_time_directives_count_as_supported_explicit_actions() {
     let plan = plan_command(
         parse_command(&argv(&[".", "-printf", "[%a][%T+]\\n"])).unwrap(),

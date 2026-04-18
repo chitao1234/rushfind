@@ -1,6 +1,7 @@
 mod support;
 
 use std::fs;
+use std::io::{Seek, SeekFrom, Write};
 use std::os::unix::fs::{self as unix_fs, MetadataExt, PermissionsExt};
 use std::process::Command;
 use std::time::Duration;
@@ -219,6 +220,42 @@ fn ordered_printf_renders_symlink_target_type_directive() {
     assert!(stdout.contains("dir-link:l:d"));
     assert!(stdout.contains("missing-link:l:N"));
     assert!(stdout.contains("loop:l:L"));
+}
+
+#[test]
+fn ordered_printf_renders_sparseness_for_dense_and_sparse_files() {
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("zero"), []).unwrap();
+    fs::write(root.path().join("one"), b"x").unwrap();
+    fs::write(root.path().join("tiny"), b"xyz").unwrap();
+    fs::write(root.path().join("fivek"), vec![b'x'; 5000]).unwrap();
+    let mut holey = fs::File::create(root.path().join("holey")).unwrap();
+    holey.seek(SeekFrom::Start(8191)).unwrap();
+    holey.write_all(b"x").unwrap();
+    let trunc8k = fs::File::create(root.path().join("trunc8k")).unwrap();
+    trunc8k.set_len(8192).unwrap();
+
+    let output = cargo_bin_output_with_timeout(
+        &[
+            path_arg(root.path()),
+            "-mindepth".into(),
+            "1".into(),
+            "-maxdepth".into(),
+            "1".into(),
+            "-printf".into(),
+            "%f:%s:%b:%S\\n".into(),
+        ],
+        1,
+        Duration::from_secs(5),
+    );
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("zero:0:0:1"));
+    assert!(stdout.contains("one:1:8:4096"));
+    assert!(stdout.contains("tiny:3:8:1365.33"));
+    assert!(stdout.contains("fivek:5000:16:1.6384"));
+    assert!(stdout.contains("holey:8192:8:0.5"));
+    assert!(stdout.contains("trunc8k:8192:0:0"));
 }
 
 #[test]

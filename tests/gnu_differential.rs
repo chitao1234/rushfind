@@ -5,6 +5,7 @@ use findoxide::birth::read_birth_time;
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fs;
+use std::io::{Seek, SeekFrom, Write};
 use std::os::unix::fs::{self as unix_fs, MetadataExt, PermissionsExt};
 use std::path::Path;
 use std::process::Command;
@@ -224,6 +225,20 @@ fn build_printf_target_type_tree() -> tempfile::TempDir {
     unix_fs::symlink("dir", root.path().join("dir-link")).unwrap();
     unix_fs::symlink("missing", root.path().join("missing-link")).unwrap();
     unix_fs::symlink("loop", root.path().join("loop")).unwrap();
+    root
+}
+
+fn build_printf_sparseness_tree() -> tempfile::TempDir {
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("zero"), []).unwrap();
+    fs::write(root.path().join("one"), b"x").unwrap();
+    fs::write(root.path().join("tiny"), b"xyz").unwrap();
+    fs::write(root.path().join("fivek"), vec![b'x'; 5000]).unwrap();
+    let mut holey = fs::File::create(root.path().join("holey")).unwrap();
+    holey.seek(SeekFrom::Start(8191)).unwrap();
+    holey.write_all(b"x").unwrap();
+    let trunc8k = fs::File::create(root.path().join("trunc8k")).unwrap();
+    trunc8k.set_len(8192).unwrap();
     root
 }
 
@@ -915,6 +930,38 @@ fn parallel_printf_target_type_matches_gnu_find_as_sets() {
         "1".into(),
         "-printf".into(),
         "[%f][%y][%Y]\\n".into(),
+    ];
+
+    assert_matches_gnu_as_sets(&args);
+}
+
+#[test]
+fn ordered_printf_sparseness_matches_gnu_find_exactly() {
+    let root = build_printf_sparseness_tree();
+    let args = vec![
+        path_arg(root.path()),
+        "-mindepth".into(),
+        "1".into(),
+        "-maxdepth".into(),
+        "1".into(),
+        "-printf".into(),
+        "[%f][%s][%b][%S]\\n".into(),
+    ];
+
+    assert_matches_gnu_exact(&args);
+}
+
+#[test]
+fn parallel_printf_sparseness_matches_gnu_find_as_sets() {
+    let root = build_printf_sparseness_tree();
+    let args = vec![
+        path_arg(root.path()),
+        "-mindepth".into(),
+        "1".into(),
+        "-maxdepth".into(),
+        "1".into(),
+        "-printf".into(),
+        "[%f][%s][%b][%S]\\n".into(),
     ];
 
     assert_matches_gnu_as_sets(&args);
