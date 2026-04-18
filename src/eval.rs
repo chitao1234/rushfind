@@ -626,7 +626,9 @@ mod tests {
         fs::write(&path, "hello\n").unwrap();
         let entry = EntryContext::new(path, 0, true);
         let mount_id = entry.active_mount_id(FollowMode::Physical).unwrap();
-        let program = compile_printf_program("-printf", OsStr::new("%F")).unwrap();
+        let program = compile_printf_program("-printf", OsStr::new("%F"))
+            .unwrap()
+            .program;
         let context = EvalContext::with_mount_snapshot(
             MountSnapshot::from_mountinfo(&format!("{mount_id} 1 8:1 / / rw - tmpfs tmpfs rw\n"))
                 .unwrap(),
@@ -652,7 +654,9 @@ mod tests {
         let path = root.path().join("file.txt");
         fs::write(&path, "hello\n").unwrap();
         let entry = EntryContext::new(path, 0, true);
-        let program = compile_printf_program("-printf", OsStr::new("%F")).unwrap();
+        let program = compile_printf_program("-printf", OsStr::new("%F"))
+            .unwrap()
+            .program;
         let mut sink = RecordingSink::default();
 
         let error = evaluate_with_context(

@@ -47,6 +47,7 @@ pub struct ExecutionPlan {
     pub follow_mode: FollowMode,
     pub traversal: TraversalOptions,
     pub runtime: RuntimeRequirements,
+    pub startup_warnings: Vec<String>,
     pub file_outputs: Vec<PlannedFileOutput>,
     pub expr: RuntimeExpr,
     pub mode: ExecutionMode,
@@ -189,6 +190,7 @@ pub fn plan_command_with_now(
         saw_action: false,
         saw_delete: false,
         next_exec_batch_id: 0,
+        startup_warnings: Vec::new(),
         file_outputs: Vec::new(),
         file_output_ids: BTreeMap::new(),
     };
@@ -227,6 +229,7 @@ pub fn plan_command_with_now(
         follow_mode,
         traversal,
         runtime,
+        startup_warnings: state.startup_warnings.clone(),
         file_outputs: state.file_outputs.clone(),
         expr,
         mode,
@@ -541,6 +544,7 @@ struct PlanningState {
     saw_action: bool,
     saw_delete: bool,
     next_exec_batch_id: ExecBatchId,
+    startup_warnings: Vec<String>,
     file_outputs: Vec<PlannedFileOutput>,
     file_output_ids: BTreeMap<PathBuf, FileOutputId>,
 }
@@ -599,11 +603,12 @@ fn lower_action(
             OutputAction::Print0,
         ))),
         Action::Printf { format } => {
-            let program = compile_printf_program("-printf", format.as_os_str())?;
-            if program.requires_mount_snapshot() {
+            let compiled = compile_printf_program("-printf", format.as_os_str())?;
+            if compiled.program.requires_mount_snapshot() {
                 runtime.mount_snapshot = true;
             }
-            Ok(RuntimeExpr::Action(RuntimeAction::Printf(program)))
+            state.startup_warnings.extend(compiled.warnings);
+            Ok(RuntimeExpr::Action(RuntimeAction::Printf(compiled.program)))
         }
         Action::FPrint { path } => Ok(RuntimeExpr::Action(RuntimeAction::FilePrint {
             destination: register_file_output(state, path),
@@ -614,13 +619,14 @@ fn lower_action(
             terminator: FileOutputTerminator::Nul,
         })),
         Action::FPrintf { path, format } => {
-            let program = compile_printf_program("-fprintf", format.as_os_str())?;
-            if program.requires_mount_snapshot() {
+            let compiled = compile_printf_program("-fprintf", format.as_os_str())?;
+            if compiled.program.requires_mount_snapshot() {
                 runtime.mount_snapshot = true;
             }
+            state.startup_warnings.extend(compiled.warnings);
             Ok(RuntimeExpr::Action(RuntimeAction::FilePrintf {
                 destination: register_file_output(state, path),
-                program,
+                program: compiled.program,
             }))
         }
         Action::Quit => Ok(RuntimeExpr::Action(RuntimeAction::Quit)),

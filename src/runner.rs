@@ -11,6 +11,17 @@ pub struct RunSummary {
     pub had_action_failures: bool,
 }
 
+pub(crate) fn write_startup_warnings<E: Write>(
+    warnings: &[String],
+    stderr: &mut E,
+) -> Result<(), Diagnostic> {
+    for warning in warnings {
+        writeln!(stderr, "{warning}")
+            .map_err(|error| Diagnostic::new(format!("failed to write stderr: {error}"), 1))?;
+    }
+    Ok(())
+}
+
 pub fn run_plan<W, E>(
     plan: &ExecutionPlan,
     stdout: &mut W,
@@ -20,6 +31,7 @@ where
     W: Write + Send,
     E: Write + Send,
 {
+    write_startup_warnings(&plan.startup_warnings, stderr)?;
     match plan.mode {
         ExecutionMode::OrderedSingle => crate::ordered::run_ordered_plan(plan, stdout, stderr),
         ExecutionMode::ParallelRelaxed => crate::parallel::run_parallel(plan, stdout, stderr),
@@ -59,7 +71,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::build_eval_context_with_loader;
+    use super::{build_eval_context_with_loader, write_startup_warnings};
     use crate::follow::FollowMode;
     use crate::ordered::engine::ordered_evaluator_workers;
     use crate::parser::parse_command;
@@ -83,6 +95,7 @@ mod tests {
                 order: TraversalOrder::PreOrder,
             },
             runtime: RuntimeRequirements { mount_snapshot },
+            startup_warnings: Vec::new(),
             file_outputs: Vec::new(),
             expr: RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)),
             mode: ExecutionMode::OrderedSingle,
@@ -141,6 +154,25 @@ mod tests {
         assert_eq!(
             ordered_evaluator_workers(&plan),
             plan.runtime_policy.evaluation_workers
+        );
+    }
+
+    #[test]
+    fn write_startup_warnings_emits_each_warning_on_its_own_line() {
+        let mut stderr = Vec::new();
+        write_startup_warnings(
+            &[
+                "findoxide: warning: unrecognized escape `\\q'".into(),
+                "findoxide: warning: unrecognized escape `\\x'".into(),
+            ],
+            &mut stderr,
+        )
+        .unwrap();
+
+        assert_eq!(
+            String::from_utf8(stderr).unwrap(),
+            "findoxide: warning: unrecognized escape `\\q'\n\
+             findoxide: warning: unrecognized escape `\\x'\n"
         );
     }
 }

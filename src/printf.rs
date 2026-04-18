@@ -14,6 +14,12 @@ pub struct PrintfProgram {
     pub atoms: Vec<PrintfAtom>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledPrintfProgram {
+    pub program: PrintfProgram,
+    pub warnings: Vec<String>,
+}
+
 impl PrintfProgram {
     pub fn requires_mount_snapshot(&self) -> bool {
         self.atoms.iter().any(|atom| {
@@ -93,12 +99,17 @@ pub struct PrintfDirective {
 pub enum PrintfAtom {
     Literal(Vec<u8>),
     Directive(PrintfDirective),
+    Stop,
 }
 
-pub fn compile_printf_program(flag: &str, format: &OsStr) -> Result<PrintfProgram, Diagnostic> {
+pub fn compile_printf_program(
+    flag: &str,
+    format: &OsStr,
+) -> Result<CompiledPrintfProgram, Diagnostic> {
     let bytes = format.as_encoded_bytes();
     let mut atoms = Vec::new();
     let mut literal = Vec::new();
+    let mut warnings = Vec::new();
     let mut index = 0;
 
     while index < bytes.len() {
@@ -123,25 +134,14 @@ pub fn compile_printf_program(flag: &str, format: &OsStr) -> Result<PrintfProgra
             }
             b'\\' => {
                 index += 1;
-                let escaped = *bytes.get(index).ok_or_else(|| {
-                    Diagnostic::new(format!("malformed {flag} format: trailing \\"), 1)
-                })?;
-
-                literal.push(match escaped {
-                    b'\\' => b'\\',
-                    b'n' => b'\n',
-                    b't' => b'\t',
-                    b'0' => b'\0',
-                    other => {
-                        return Err(Diagnostic::new(
-                            format!(
-                                "malformed {flag} format: unsupported escape \\{}",
-                                char::from(other)
-                            ),
-                            1,
-                        ));
-                    }
-                });
+                parse_escape(
+                    flag,
+                    bytes,
+                    &mut index,
+                    &mut atoms,
+                    &mut literal,
+                    &mut warnings,
+                )?;
             }
             byte => literal.push(byte),
         }
@@ -153,7 +153,65 @@ pub fn compile_printf_program(flag: &str, format: &OsStr) -> Result<PrintfProgra
         atoms.push(PrintfAtom::Literal(literal));
     }
 
-    Ok(PrintfProgram { atoms })
+    Ok(CompiledPrintfProgram {
+        program: PrintfProgram { atoms },
+        warnings,
+    })
+}
+
+fn parse_escape(
+    flag: &str,
+    bytes: &[u8],
+    index: &mut usize,
+    atoms: &mut Vec<PrintfAtom>,
+    literal: &mut Vec<u8>,
+    warnings: &mut Vec<String>,
+) -> Result<(), Diagnostic> {
+    let escaped = *bytes
+        .get(*index)
+        .ok_or_else(|| Diagnostic::new(format!("malformed {flag} format: trailing \\"), 1))?;
+
+    match escaped {
+        b'a' => literal.push(0x07),
+        b'b' => literal.push(0x08),
+        b'c' => {
+            if !literal.is_empty() {
+                atoms.push(PrintfAtom::Literal(std::mem::take(literal)));
+            }
+            atoms.push(PrintfAtom::Stop);
+        }
+        b'f' => literal.push(0x0c),
+        b'n' => literal.push(b'\n'),
+        b'r' => literal.push(b'\r'),
+        b't' => literal.push(b'\t'),
+        b'v' => literal.push(0x0b),
+        b'\\' => literal.push(b'\\'),
+        b'0'..=b'7' => literal.push(parse_octal_escape(bytes, index, escaped)),
+        other => {
+            warnings.push(format!(
+                "findoxide: warning: unrecognized escape `\\{}'",
+                char::from(other)
+            ));
+            literal.extend_from_slice(&[b'\\', other]);
+        }
+    }
+
+    Ok(())
+}
+
+fn parse_octal_escape(bytes: &[u8], index: &mut usize, first: u8) -> u8 {
+    let mut value = u16::from(first - b'0');
+    for _ in 0..2 {
+        let Some(next) = bytes.get(*index + 1).copied() else {
+            break;
+        };
+        if !(b'0'..=b'7').contains(&next) {
+            break;
+        }
+        *index += 1;
+        value = (value * 8) + u16::from(next - b'0');
+    }
+    value as u8
 }
 
 fn parse_directive(
@@ -354,6 +412,7 @@ pub(crate) fn render_printf_bytes(
             PrintfAtom::Directive(directive) => rendered.extend_from_slice(
                 &render_directive_bytes(directive, entry, follow_mode, context, &mut state)?,
             ),
+            PrintfAtom::Stop => break,
         }
     }
 
@@ -697,7 +756,8 @@ mod tests {
     fn compiler_accepts_the_full_stage_subset() {
         let program =
             compile_printf_program("-printf", OsStr::new("%p %P %f %h %d %y %s %m %l %%\\n"))
-                .unwrap();
+                .unwrap()
+                .program;
 
         assert!(program.atoms.iter().any(|atom| matches!(
             atom,
@@ -733,7 +793,8 @@ mod tests {
     fn compiler_parses_supported_field_formatting() {
         let program =
             compile_printf_program("-printf", OsStr::new("[%10p][%-10p][%.3p][%010d][%#10m]"))
-                .unwrap();
+                .unwrap()
+                .program;
 
         assert!(matches!(
             &program.atoms[1],
@@ -821,7 +882,8 @@ mod tests {
             "-printf",
             OsStr::new("[%a][%c][%t][%B][%AY][%C@][%T+][%BY]"),
         )
-        .unwrap();
+        .unwrap()
+        .program;
 
         assert!(matches!(
             &program.atoms[1],
@@ -861,7 +923,9 @@ mod tests {
 
     #[test]
     fn compiler_treats_percent_b_without_a_selector_as_full_birth_time() {
-        let program = compile_printf_program("-printf", OsStr::new("[%B][%BY]")).unwrap();
+        let program = compile_printf_program("-printf", OsStr::new("[%B][%BY]"))
+            .unwrap()
+            .program;
 
         assert!(matches!(
             &program.atoms[1],
@@ -902,7 +966,9 @@ mod tests {
 
     #[test]
     fn printf_with_fstype_directive_compiles() {
-        let program = compile_printf_program("-printf", OsStr::new("%F")).unwrap();
+        let program = compile_printf_program("-printf", OsStr::new("%F"))
+            .unwrap()
+            .program;
 
         assert_eq!(program.atoms.len(), 1);
     }
@@ -913,7 +979,9 @@ mod tests {
         let path = root.path().join("file.txt");
         fs::write(&path, "x").unwrap();
         let entry = EntryContext::new(path, 0, true);
-        let program = compile_printf_program("-printf", OsStr::new("%F")).unwrap();
+        let program = compile_printf_program("-printf", OsStr::new("%F"))
+            .unwrap()
+            .program;
 
         let error = render_printf_bytes(
             &program,
@@ -968,7 +1036,9 @@ mod tests {
         fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
         let entry = EntryContext::new(path, 0, true);
 
-        let program = compile_printf_program("-printf", OsStr::new("[%y][%s][%m][%l]")).unwrap();
+        let program = compile_printf_program("-printf", OsStr::new("[%y][%s][%m][%l]"))
+            .unwrap()
+            .program;
         let rendered = render_printf_bytes(
             &program,
             &entry,
@@ -1002,7 +1072,8 @@ mod tests {
             "-printf",
             OsStr::new("[%H][%P][%i][%n][%D][%b][%k][%M][%u][%U][%g][%G]"),
         )
-        .unwrap();
+        .unwrap()
+        .program;
         let rendered = render_printf_bytes(
             &program,
             &entry,

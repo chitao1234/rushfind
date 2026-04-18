@@ -16,7 +16,6 @@ fn rejects_unsupported_printf_directives_and_bad_format_sequences() {
         ("%T", "missing selector for %T"),
         ("%Y", "unsupported -printf directive %Y"),
         ("%", "malformed -printf format: trailing %"),
-        ("\\x", "malformed -printf format: unsupported escape \\x"),
     ] {
         let error =
             plan_command(parse_command(&argv(&[".", "-printf", format])).unwrap(), 1).unwrap_err();
@@ -26,6 +25,35 @@ fn rejects_unsupported_printf_directives_and_bad_format_sequences() {
             error.message
         );
     }
+}
+
+#[test]
+fn printf_unknown_escapes_lower_successfully_and_collect_startup_warnings() {
+    let plan = plan_command(
+        parse_command(&argv(&[".", "-printf", r"X\qY\xZ"])).unwrap(),
+        1,
+    )
+    .unwrap();
+
+    assert_eq!(plan.startup_warnings.len(), 2);
+    assert!(
+        plan.startup_warnings[0].contains("warning: unrecognized escape `\\q'"),
+        "{:?}",
+        plan.startup_warnings
+    );
+    assert!(
+        plan.startup_warnings[1].contains("warning: unrecognized escape `\\x'"),
+        "{:?}",
+        plan.startup_warnings
+    );
+}
+
+#[test]
+fn printf_backslash_c_is_accepted_during_planning() {
+    let plan = plan_command(parse_command(&argv(&[".", "-printf", r"A\cB"])).unwrap(), 1).unwrap();
+
+    assert!(!contains_plain_print(&plan.expr));
+    assert!(plan.startup_warnings.is_empty());
 }
 
 #[test]
