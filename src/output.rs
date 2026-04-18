@@ -6,6 +6,7 @@ use crate::planner::{OutputAction, RuntimeAction};
 use crate::printf::render_printf_bytes;
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use std::io::Write;
+use std::os::unix::ffi::OsStrExt;
 use std::thread::{Scope, ScopedJoinHandle};
 
 #[derive(Debug)]
@@ -51,11 +52,13 @@ fn broker_loop<W: Write, E: Write>(
 }
 
 pub fn render_output_bytes(action: OutputAction, entry: &EntryContext) -> Vec<u8> {
-    let rendered = entry.path.to_string_lossy();
+    let mut bytes = entry.path.as_os_str().as_bytes().to_vec();
     match action {
-        OutputAction::Print => format!("{rendered}\n").into_bytes(),
+        OutputAction::Print => {
+            bytes.push(b'\n');
+            bytes
+        }
         OutputAction::Print0 => {
-            let mut bytes = rendered.as_bytes().to_vec();
             bytes.push(0);
             bytes
         }

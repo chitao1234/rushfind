@@ -2,6 +2,7 @@ use crate::diagnostics::Diagnostic;
 use crate::entry::EntryContext;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
+use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -20,11 +21,13 @@ pub enum FileOutputTerminator {
 }
 
 pub fn render_file_print_bytes(entry: &EntryContext, terminator: FileOutputTerminator) -> Vec<u8> {
-    let rendered = entry.path.to_string_lossy();
+    let mut bytes = entry.path.as_os_str().as_bytes().to_vec();
     match terminator {
-        FileOutputTerminator::Newline => format!("{rendered}\n").into_bytes(),
+        FileOutputTerminator::Newline => {
+            bytes.push(b'\n');
+            bytes
+        }
         FileOutputTerminator::Nul => {
-            let mut bytes = rendered.as_bytes().to_vec();
             bytes.push(0);
             bytes
         }
