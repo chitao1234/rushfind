@@ -36,6 +36,21 @@ pub struct PrintfFieldFormat {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrintfTimeFamily {
+    Access,
+    Change,
+    Modification,
+    Birth,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrintfTimeSelector {
+    Byte(u8),
+    EpochSeconds,
+    GnuPlus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrintfDirectiveKind {
     Path,
     RelativePath,
@@ -58,6 +73,11 @@ pub enum PrintfDirectiveKind {
     GroupName,
     GroupId,
     FileSystemType,
+    FullTimestamp(PrintfTimeFamily),
+    TimestampPart {
+        family: PrintfTimeFamily,
+        selector: PrintfTimeSelector,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,6 +182,11 @@ fn parse_directive(
         .ok_or_else(|| Diagnostic::new(format!("malformed {flag} format: trailing %"), 1))?;
 
     let kind = match directive {
+        b'a' => PrintfDirectiveKind::FullTimestamp(PrintfTimeFamily::Access),
+        b'c' => PrintfDirectiveKind::FullTimestamp(PrintfTimeFamily::Change),
+        b't' => PrintfDirectiveKind::FullTimestamp(PrintfTimeFamily::Modification),
+        b'B' => parse_birth_directive(flag, bytes, index)?,
+        b'A' | b'C' | b'T' => parse_time_family_directive(flag, directive, bytes, index)?,
         b'p' => PrintfDirectiveKind::Path,
         b'P' => PrintfDirectiveKind::RelativePath,
         b'H' => PrintfDirectiveKind::StartPath,
@@ -192,6 +217,83 @@ fn parse_directive(
     };
 
     Ok(PrintfDirective { kind, format })
+}
+
+fn parse_birth_directive(
+    flag: &str,
+    bytes: &[u8],
+    index: &mut usize,
+) -> Result<PrintfDirectiveKind, Diagnostic> {
+    match bytes.get(*index + 1).copied() {
+        Some(next) if is_time_selector_lead_byte(next) => {
+            let selector = parse_time_selector_byte(next).ok_or_else(|| {
+                Diagnostic::new(
+                    format!("unsupported {flag} time selector %B{}", char::from(next)),
+                    1,
+                )
+            })?;
+            *index += 1;
+            Ok(PrintfDirectiveKind::TimestampPart {
+                family: PrintfTimeFamily::Birth,
+                selector,
+            })
+        }
+        _ => Ok(PrintfDirectiveKind::FullTimestamp(PrintfTimeFamily::Birth)),
+    }
+}
+
+fn parse_time_family_directive(
+    flag: &str,
+    directive: u8,
+    bytes: &[u8],
+    index: &mut usize,
+) -> Result<PrintfDirectiveKind, Diagnostic> {
+    let family = match directive {
+        b'A' => PrintfTimeFamily::Access,
+        b'C' => PrintfTimeFamily::Change,
+        b'T' => PrintfTimeFamily::Modification,
+        _ => unreachable!("caller restricts directive"),
+    };
+
+    let selector_byte = bytes.get(*index + 1).copied().ok_or_else(|| {
+        Diagnostic::new(
+            format!(
+                "malformed {flag} format: missing selector for %{}",
+                char::from(directive)
+            ),
+            1,
+        )
+    })?;
+    let selector = parse_time_selector_byte(selector_byte).ok_or_else(|| {
+        Diagnostic::new(
+            format!(
+                "unsupported {flag} time selector %{}{}",
+                char::from(directive),
+                char::from(selector_byte)
+            ),
+            1,
+        )
+    })?;
+    *index += 1;
+
+    Ok(PrintfDirectiveKind::TimestampPart { family, selector })
+}
+
+fn is_time_selector_lead_byte(byte: u8) -> bool {
+    byte.is_ascii_alphabetic() || matches!(byte, b'@' | b'+')
+}
+
+fn parse_time_selector_byte(byte: u8) -> Option<PrintfTimeSelector> {
+    match byte {
+        b'@' => Some(PrintfTimeSelector::EpochSeconds),
+        b'+' => Some(PrintfTimeSelector::GnuPlus),
+        b'a' | b'A' | b'b' | b'B' | b'c' | b'd' | b'D' | b'F' | b'g' | b'G' | b'h' | b'H'
+        | b'I' | b'j' | b'm' | b'M' | b'p' | b'r' | b'S' | b't' | b'T' | b'u' | b'U' | b'V'
+        | b'w' | b'W' | b'x' | b'X' | b'y' | b'Y' | b'z' | b'Z' => {
+            Some(PrintfTimeSelector::Byte(byte))
+        }
+        _ => None,
+    }
 }
 
 fn parse_optional_usize(
@@ -365,6 +467,12 @@ fn render_directive_bytes(
             })?;
             format_string_like(type_name.as_bytes(), directive.format)
         }
+        PrintfDirectiveKind::FullTimestamp(_) | PrintfDirectiveKind::TimestampPart { .. } => {
+            return Err(Diagnostic::new(
+                "internal error: time -printf rendering is not implemented yet",
+                1,
+            ));
+        }
     })
 }
 
@@ -519,9 +627,9 @@ fn execute_char(
 #[cfg(test)]
 mod tests {
     use super::{
-        PrintfAtom, PrintfDirective, PrintfDirectiveKind, PrintfFieldFormat,
-        compile_printf_program, format_depth, format_mode_octal, format_string_like,
-        render_printf_bytes,
+        PrintfAtom, PrintfDirective, PrintfDirectiveKind, PrintfFieldFormat, PrintfTimeFamily,
+        PrintfTimeSelector, compile_printf_program, format_depth, format_mode_octal,
+        format_string_like, render_printf_bytes,
     };
     use crate::entry::EntryContext;
     use crate::eval::EvalContext;
@@ -645,6 +753,89 @@ mod tests {
             ),
             ("%10", "malformed -printf format: trailing %"),
             ("%q", "unsupported -printf directive %q"),
+        ] {
+            let error = compile_printf_program("-printf", OsStr::new(format)).unwrap_err();
+            assert!(
+                error.message.contains(needle),
+                "{format} -> {}",
+                error.message
+            );
+        }
+    }
+
+    #[test]
+    fn compiler_parses_full_and_family_time_directives() {
+        let program =
+            compile_printf_program("-printf", OsStr::new("[%a][%c][%t][%B][%AY][%C@][%T+][%BY]"))
+                .unwrap();
+
+        assert!(matches!(
+            &program.atoms[1],
+            PrintfAtom::Directive(PrintfDirective {
+                kind: PrintfDirectiveKind::FullTimestamp(PrintfTimeFamily::Access),
+                ..
+            })
+        ));
+        assert!(matches!(
+            &program.atoms[7],
+            PrintfAtom::Directive(PrintfDirective {
+                kind: PrintfDirectiveKind::FullTimestamp(PrintfTimeFamily::Birth),
+                ..
+            })
+        ));
+        assert!(matches!(
+            &program.atoms[9],
+            PrintfAtom::Directive(PrintfDirective {
+                kind: PrintfDirectiveKind::TimestampPart {
+                    family: PrintfTimeFamily::Access,
+                    selector: PrintfTimeSelector::Byte(b'Y'),
+                },
+                ..
+            })
+        ));
+        assert!(matches!(
+            &program.atoms[11],
+            PrintfAtom::Directive(PrintfDirective {
+                kind: PrintfDirectiveKind::TimestampPart {
+                    family: PrintfTimeFamily::Change,
+                    selector: PrintfTimeSelector::EpochSeconds,
+                },
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn compiler_treats_percent_b_without_a_selector_as_full_birth_time() {
+        let program = compile_printf_program("-printf", OsStr::new("[%B][%BY]")).unwrap();
+
+        assert!(matches!(
+            &program.atoms[1],
+            PrintfAtom::Directive(PrintfDirective {
+                kind: PrintfDirectiveKind::FullTimestamp(PrintfTimeFamily::Birth),
+                ..
+            })
+        ));
+        assert!(matches!(
+            &program.atoms[3],
+            PrintfAtom::Directive(PrintfDirective {
+                kind: PrintfDirectiveKind::TimestampPart {
+                    family: PrintfTimeFamily::Birth,
+                    selector: PrintfTimeSelector::Byte(b'Y'),
+                },
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn compiler_rejects_missing_or_unknown_time_selectors() {
+        for (format, needle) in [
+            ("%A", "missing selector for %A"),
+            ("%C", "missing selector for %C"),
+            ("%T", "missing selector for %T"),
+            ("%Aq", "unsupported -printf time selector %Aq"),
+            ("%T~", "unsupported -printf time selector %T~"),
         ] {
             let error = compile_printf_program("-printf", OsStr::new(format)).unwrap_err();
             assert!(

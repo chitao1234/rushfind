@@ -29,6 +29,31 @@ fn rejects_unsupported_printf_directives_and_bad_format_sequences() {
 }
 
 #[test]
+fn printf_time_directives_count_as_supported_explicit_actions() {
+    let plan =
+        plan_command(parse_command(&argv(&[".", "-printf", "[%a][%T+]\\n"])).unwrap(), 1).unwrap();
+    assert!(!contains_plain_print(&plan.expr));
+    assert!(!plan.runtime.mount_snapshot);
+}
+
+#[test]
+fn rejects_unknown_or_malformed_printf_time_directives() {
+    for (format, needle) in [
+        ("%A", "missing selector for %A"),
+        ("%Cq", "unsupported -printf time selector %Cq"),
+        ("%T~", "unsupported -printf time selector %T~"),
+    ] {
+        let error =
+            plan_command(parse_command(&argv(&[".", "-printf", format])).unwrap(), 1).unwrap_err();
+        assert!(
+            error.message.contains(needle),
+            "{format} -> {}",
+            error.message
+        );
+    }
+}
+
+#[test]
 fn printf_with_fstype_requests_mount_snapshot_runtime_support() {
     let plan = plan_command(parse_command(&argv(&[".", "-printf", "%F\\n"])).unwrap(), 1).unwrap();
 
