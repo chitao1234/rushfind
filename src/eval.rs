@@ -99,6 +99,7 @@ pub struct EvalContext {
 }
 
 impl EvalContext {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn with_now(now: Timestamp) -> Self {
         Self {
             mount_snapshot: None,
@@ -106,6 +107,7 @@ impl EvalContext {
         }
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn with_mount_snapshot(snapshot: MountSnapshot) -> Self {
         Self {
             mount_snapshot: Some(Arc::new(snapshot)),

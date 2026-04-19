@@ -240,7 +240,7 @@ impl<W: std::io::Write, E: std::io::Write> ActionSink for OrderedActionSink<'_, 
         context: &EvalContext,
     ) -> Result<ActionOutcome, Diagnostic> {
         match action {
-            RuntimeAction::Output(_) | RuntimeAction::Printf(_) => {
+            RuntimeAction::Output(_) | RuntimeAction::Printf(_) | RuntimeAction::Ls => {
                 self.output.dispatch(action, entry, follow_mode, context)
             }
             RuntimeAction::FilePrint {
@@ -260,10 +260,11 @@ impl<W: std::io::Write, E: std::io::Write> ActionSink for OrderedActionSink<'_, 
                 self.file_outputs.write_record(*destination, &bytes)?;
                 Ok(ActionOutcome::matched_true())
             }
-            RuntimeAction::Ls | RuntimeAction::FileLs { .. } => Err(Diagnostic::new(
-                "internal error: ls actions are not wired into ordered execution yet",
-                1,
-            )),
+            RuntimeAction::FileLs { destination } => {
+                let bytes = crate::ls::render_ls_record(entry, follow_mode, context)?;
+                self.file_outputs.write_record(*destination, &bytes)?;
+                Ok(ActionOutcome::matched_true())
+            }
             RuntimeAction::Quit => Ok(ActionOutcome::quit()),
             RuntimeAction::ExecImmediate(spec) => {
                 run_immediate_ordered(spec, entry.path.as_path(), self.stderr).map(action_success)

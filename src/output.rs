@@ -74,6 +74,7 @@ pub(crate) fn render_runtime_action_bytes(
     match action {
         RuntimeAction::Output(output) => Ok(render_output_bytes(*output, entry)),
         RuntimeAction::Printf(program) => render_printf_bytes(program, entry, follow_mode, context),
+        RuntimeAction::Ls => crate::ls::render_ls_record(entry, follow_mode, context),
         _ => Err(Diagnostic::new(
             "internal error: runtime action does not render to stdout bytes",
             1,
@@ -99,7 +100,7 @@ impl<'a, W: Write> ActionSink for StdoutSink<'a, W> {
         follow_mode: FollowMode,
         context: &EvalContext,
     ) -> Result<ActionOutcome, Diagnostic> {
-        let (RuntimeAction::Output(_) | RuntimeAction::Printf(_)) = action else {
+        let (RuntimeAction::Output(_) | RuntimeAction::Printf(_) | RuntimeAction::Ls) = action else {
             return Err(Diagnostic::new(
                 "internal error: plain stdout sink cannot execute runtime actions",
                 1,
@@ -137,7 +138,7 @@ impl ActionSink for RecordingSink {
         follow_mode: FollowMode,
         context: &EvalContext,
     ) -> Result<ActionOutcome, Diagnostic> {
-        let (RuntimeAction::Output(_) | RuntimeAction::Printf(_)) = action else {
+        let (RuntimeAction::Output(_) | RuntimeAction::Printf(_) | RuntimeAction::Ls) = action else {
             return Err(Diagnostic::new(
                 "internal error: recording sink cannot execute runtime actions",
                 1,
