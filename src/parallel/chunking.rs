@@ -50,6 +50,10 @@ impl ChunkAccumulator {
         self.local_stack.append(&mut self.spill_buffer);
     }
 
+    pub(crate) fn take_spilled_chunks(&mut self) -> Vec<Vec<PendingPath>> {
+        std::mem::take(&mut self.spilled_chunks)
+    }
+
     pub(crate) fn finish(mut self) -> ChunkPlan {
         if !self.spill_buffer.is_empty() {
             self.spilled_chunks.push(std::mem::take(&mut self.spill_buffer));

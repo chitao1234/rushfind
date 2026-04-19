@@ -9,14 +9,21 @@ use crate::file_output::SharedFileOutputs;
 use crate::follow::FollowMode;
 use crate::parallel::batch::WorkerBatchState;
 use crate::parallel::broker::BrokerMessage;
+use crate::parallel::chunking::{
+    ChunkAccumulator, DEFAULT_SPILL_CHUNK_SIZE, DEFAULT_SPLIT_CHILD_THRESHOLD,
+};
 use crate::parallel::control::GlobalControl;
 use crate::parallel::postorder::BarrierTable;
 use crate::parallel::scheduler::{Scheduler, WorkerHandle};
-use crate::parallel::task::{ParallelTask, PostOrderResumeTask, PreOrderRootTask};
+use crate::parallel::task::{
+    ParallelTask, PostOrderResumeTask, PreOrderRootTask, SiblingChunkTask,
+};
 use crate::planner::{ExecutionPlan, RuntimeAction, TraversalOrder};
 use crate::runner::traversal_control_for_entry;
 use crate::runtime_pipeline::SubtreeBarrierId;
-use crate::walker::{FsWalkBackend, PendingPath, WalkBackend, should_descend_directory};
+use crate::walker::{
+    DiscoveredChild, FsWalkBackend, PendingPath, WalkBackend, should_descend_directory,
+};
 use crossbeam_channel::Sender;
 use std::path::Path;
 use std::sync::Arc;
@@ -207,10 +214,24 @@ pub(crate) fn run_parallel_worker(
                     )
                 }
             }
-            ParallelTask::SiblingChunk(_) => Err(Diagnostic::new(
-                "internal error: sibling chunk tasks are not executable yet",
-                1,
-            )),
+            ParallelTask::SiblingChunk(task) => {
+                if task.completion_barrier.is_some() {
+                    Err(Diagnostic::new(
+                        "internal error: postorder sibling chunk tasks are not executable yet",
+                        1,
+                    ))
+                } else {
+                    run_preorder_pending_batch(
+                        &plan,
+                        &backend,
+                        task.pending,
+                        &mut worker,
+                        &eval_context,
+                        &mut sink,
+                        &mut had_runtime_errors,
+                    )
+                }
+            }
             ParallelTask::PostOrderResume(task) => run_postorder_resume(
                 &plan,
                 task,
@@ -266,8 +287,63 @@ fn run_preorder_root_serial(
     sink: &mut WorkerActionSink,
     had_runtime_errors: &mut bool,
 ) -> Result<RuntimeStatus, Diagnostic> {
+    run_preorder_pending_batch(
+        plan,
+        backend,
+        vec![root.pending],
+        worker,
+        context,
+        sink,
+        had_runtime_errors,
+    )
+}
+
+fn publish_preorder_sibling_chunks(
+    chunks: Vec<Vec<PendingPath>>,
+    worker: &mut WorkerHandle,
+    control: &GlobalControl,
+) {
+    for pending in chunks {
+        worker.push_local(
+            ParallelTask::SiblingChunk(SiblingChunkTask {
+                pending,
+                completion_barrier: None,
+            }),
+            control,
+        );
+    }
+}
+
+fn discovered_child_to_pending(
+    child: DiscoveredChild,
+    pending: &PendingPath,
+    child_ancestry: &[crate::identity::FileIdentity],
+    root_device: Option<u64>,
+) -> PendingPath {
+    PendingPath {
+        path: child.path,
+        root_path: pending.root_path.clone(),
+        depth: pending.depth + 1,
+        is_command_line_root: false,
+        physical_file_type_hint: child.physical_file_type_hint,
+        ancestry: child_ancestry.to_vec(),
+        ancestor_barriers: pending.ancestor_barriers.clone(),
+        root_device,
+        parent_completion: None,
+    }
+}
+
+fn run_preorder_pending_batch(
+    plan: &ExecutionPlan,
+    backend: &dyn WalkBackend,
+    initial: Vec<PendingPath>,
+    worker: &mut WorkerHandle,
+    context: &EvalContext,
+    sink: &mut WorkerActionSink,
+    had_runtime_errors: &mut bool,
+) -> Result<RuntimeStatus, Diagnostic> {
     let mut status = RuntimeStatus::default();
-    let mut stack = vec![root.pending];
+    let mut stack = initial.into_iter().rev().collect::<Vec<_>>();
 
     while let Some(pending) = stack.pop() {
         if sink.control.quit_seen() || sink.control.fatal_error_seen() {
@@ -331,48 +407,46 @@ fn run_preorder_root_serial(
             continue;
         };
 
-        let (children, diagnostics) = match backend.read_children(&pending.path) {
-            Ok(result) => result,
-            Err(error) => {
-                sink.emit_runtime_error(error)?;
-                *had_runtime_errors = true;
-                continue;
-            }
-        };
-
-        for error in diagnostics {
-            sink.emit_runtime_error(error)?;
-            *had_runtime_errors = true;
-        }
-
-        let mut discovered = children
-            .into_iter()
-            .map(|child| PendingPath {
-                path: child.path,
-                root_path: pending.root_path.clone(),
-                depth: pending.depth + 1,
-                is_command_line_root: false,
-                physical_file_type_hint: child.physical_file_type_hint,
-                ancestry: child_ancestry.clone(),
-                ancestor_barriers: pending.ancestor_barriers.clone(),
-                root_device,
-                parent_completion: None,
-            })
-            .collect::<Vec<_>>();
-
-        if discovered.len() >= SPLIT_CHILD_THRESHOLD && sink.control.accepts_new_work() {
-            let spill = discovered.split_off(1);
-            for pending_child in spill {
-                worker.push_local(
-                    ParallelTask::PreOrderRoot(PreOrderRootTask {
-                        pending: pending_child,
-                    }),
-                    sink.control.as_ref(),
+        let mut chunks =
+            ChunkAccumulator::new(DEFAULT_SPLIT_CHILD_THRESHOLD, DEFAULT_SPILL_CHUNK_SIZE);
+        let mut emitted_error = None;
+        backend.visit_children(&pending.path, &mut |item| match item {
+            Ok(child) => {
+                chunks.push(
+                    discovered_child_to_pending(child, &pending, &child_ancestry, root_device),
+                    sink.control.accepts_new_work(),
                 );
+                if sink.control.accepts_new_work() {
+                    publish_preorder_sibling_chunks(
+                        chunks.take_spilled_chunks(),
+                        worker,
+                        sink.control.as_ref(),
+                    );
+                }
             }
+            Err(error) => {
+                if let Err(emit_error) = sink.emit_runtime_error(error) {
+                    emitted_error = Some(emit_error);
+                }
+                *had_runtime_errors = true;
+            }
+        })?;
+
+        if let Some(error) = emitted_error {
+            return Err(error);
         }
 
-        for child in discovered.into_iter().rev() {
+        if sink.control.quit_seen() {
+            chunks.observe_quit();
+        }
+
+        let chunk_plan = chunks.finish();
+        publish_preorder_sibling_chunks(
+            chunk_plan.spilled_chunks,
+            worker,
+            sink.control.as_ref(),
+        );
+        for child in chunk_plan.local_stack.into_iter().rev() {
             stack.push(child);
         }
     }
@@ -666,4 +740,58 @@ fn notify_parent_barrier(
         worker.push_local(ParallelTask::PostOrderResume(resume), control);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{WorkerActionSink, run_preorder_root_serial};
+    use crate::eval::{EvalContext, RuntimeStatus};
+    use crate::file_output::SharedFileOutputs;
+    use crate::parallel::control::GlobalControl;
+    use crate::parallel::scheduler::Scheduler;
+    use crate::parallel::task::{ParallelTask, PreOrderRootTask};
+    use crate::parser::parse_command;
+    use crate::planner::plan_command;
+    use crate::walker::FsWalkBackend;
+    use crossbeam_channel::unbounded;
+    use std::ffi::OsString;
+    use std::fs;
+    use std::sync::Arc;
+    use tempfile::tempdir;
+
+    #[test]
+    fn preorder_wide_directory_publishes_sibling_chunk_tasks() {
+        let root = tempdir().unwrap();
+        for index in 0..40 {
+            fs::create_dir(root.path().join(format!("dir-{index:02}"))).unwrap();
+        }
+
+        let argv = vec![
+            root.path().as_os_str().to_os_string(),
+            OsString::from("-false"),
+        ];
+        let plan = plan_command(parse_command(&argv).unwrap(), 4).unwrap();
+        let scheduler = Scheduler::new(1);
+        let mut worker = scheduler.worker_handle(0);
+        let control = Arc::new(GlobalControl::new());
+        let (broker, _rx) = unbounded();
+        let file_outputs = SharedFileOutputs::open_all(&[]).unwrap();
+        let mut sink = WorkerActionSink::new(control.clone(), broker, file_outputs);
+        let mut had_runtime_errors = false;
+
+        let status = run_preorder_root_serial(
+            &plan,
+            &FsWalkBackend,
+            PreOrderRootTask::for_path(root.path().to_path_buf(), 0),
+            &mut worker,
+            &EvalContext::default(),
+            &mut sink,
+            &mut had_runtime_errors,
+        )
+        .unwrap();
+
+        assert_eq!(status, RuntimeStatus::default());
+        assert!(!had_runtime_errors);
+        assert!(matches!(worker.pop(), Some(ParallelTask::SiblingChunk(_))));
+    }
 }
