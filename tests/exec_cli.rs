@@ -4,7 +4,7 @@ use assert_cmd::cargo::CommandCargoExt;
 use std::fs;
 use std::process::Command;
 use std::time::Duration;
-use support::{cargo_bin_output_with_timeout, path_arg};
+use support::{cargo_bin_output_with_input_timeout, cargo_bin_output_with_timeout, path_arg};
 use tempfile::tempdir;
 
 #[test]
@@ -359,6 +359,111 @@ fn execdir_rejects_unsafe_path_before_traversal_side_effects_even_for_absolute_c
             .unwrap()
             .contains("unsafe PATH for `-execdir`")
     );
+}
+
+#[test]
+fn ordered_ok_yes_runs_child_and_exits_zero() {
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("a.txt"), "a\n").unwrap();
+
+    let output = cargo_bin_output_with_input_timeout(
+        &[
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-ok".into(),
+            "printf".into(),
+            "RUN:%s\\n".into(),
+            "{}".into(),
+            ";".into(),
+        ],
+        1,
+        b"yes\n",
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(String::from_utf8(output.stdout).unwrap().contains("RUN:"));
+    assert!(String::from_utf8(output.stderr).unwrap().contains("? "));
+}
+
+#[test]
+fn ordered_ok_eof_still_prints_prompt_and_skips_child() {
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("a.txt"), "a\n").unwrap();
+
+    let output = cargo_bin_output_with_input_timeout(
+        &[
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-ok".into(),
+            "printf".into(),
+            "RUN:%s\\n".into(),
+            "{}".into(),
+            ";".into(),
+        ],
+        1,
+        b"",
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8(output.stderr).unwrap().contains("? "));
+}
+
+#[test]
+fn ordered_okdir_yes_uses_parent_cwd_and_dot_slash_basename() {
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("dir")).unwrap();
+    fs::write(root.path().join("dir/file.txt"), "x\n").unwrap();
+
+    let output = cargo_bin_output_with_input_timeout(
+        &[
+            path_arg(root.path()),
+            "-name".into(),
+            "file.txt".into(),
+            "-okdir".into(),
+            "sh".into(),
+            "-c".into(),
+            "pwd; printf '%s\\n' \"$1\"".into(),
+            "sh".into(),
+            "{}".into(),
+            ";".into(),
+        ],
+        1,
+        b"y\n",
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.lines().any(|line| line.ends_with("/dir")));
+    assert!(stdout.lines().any(|line| line == "./file.txt"));
+}
+
+#[test]
+fn okdir_rejects_unsafe_path_before_prompting() {
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("file.txt"), "x\n").unwrap();
+
+    let output = support::cargo_bin_output_with_env_timeout(
+        &[
+            path_arg(root.path()),
+            "-okdir".into(),
+            "/bin/true".into(),
+            "{}".into(),
+            ";".into(),
+        ],
+        1,
+        &[("PATH", ".:/usr/bin:/bin")],
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8(output.stderr).unwrap().contains("unsafe PATH"));
 }
 
 #[test]

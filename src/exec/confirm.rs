@@ -1,6 +1,5 @@
 use crate::diagnostics::Diagnostic;
 use crate::exec::PreparedExecCommand;
-use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, Write};
@@ -90,7 +89,10 @@ impl PromptCoordinator {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn for_tests(scripted_replies: Vec<Vec<u8>>) -> Self {
+        use std::collections::VecDeque;
+
         struct ScriptedPromptChannel {
             replies: VecDeque<Vec<u8>>,
         }

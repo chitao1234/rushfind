@@ -6,6 +6,7 @@ pub mod planner;
 use assert_cmd::cargo::cargo_bin;
 use std::collections::BTreeSet;
 use std::ffi::OsString;
+use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 use std::time::Duration;
@@ -83,6 +84,36 @@ pub fn cargo_bin_output_with_env_timeout(
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
+
+    match child.wait_timeout(timeout).unwrap() {
+        Some(_) => child.wait_with_output().unwrap(),
+        None => {
+            child.kill().unwrap();
+            let _ = child.wait();
+            panic!("findoxide did not exit within {:?}", timeout);
+        }
+    }
+}
+
+pub fn cargo_bin_output_with_input_timeout(
+    args: &[OsString],
+    workers: usize,
+    input: &[u8],
+    timeout: Duration,
+) -> Output {
+    let mut command = Command::new(cargo_bin("findoxide"));
+    command
+        .env("FINDOXIDE_WORKERS", workers.to_string())
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = command.spawn().unwrap();
+    if !input.is_empty() {
+        child.stdin.as_mut().unwrap().write_all(input).unwrap();
+    }
+    drop(child.stdin.take());
 
     match child.wait_timeout(timeout).unwrap() {
         Some(_) => child.wait_with_output().unwrap(),
