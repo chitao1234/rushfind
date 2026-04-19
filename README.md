@@ -1,8 +1,17 @@
 # rushfind
 
-`rushfind` is a fresh Rust implementation of Unix `find` that targets GNU `find` syntax while adding a parallel traversal engine. The installed binary is `rfd`.
+Find for the occupātus.
 
-## v0 and stage-14 scope
+`rushfind` is a Rust implementation of Unix `find` that targets GNU `find` syntax while adding a parallel traversal engine. The installed binary is `rfd`.
+
+## License
+
+`rushfind` is licensed under either of the following, at your option:
+
+- MIT
+- Apache-2.0
+
+## Current scope
 
 - GNU-style argv parsing
 - Global follow-mode options: `-P`, `-H`, `-L`
@@ -26,7 +35,7 @@
 - Supported `-printf` directives accept GNU-style field formatting with
   `%[flags][width][.precision]directive`
 - Time-oriented `-printf` directives render in the process local timezone while freezing textual
-  names to C-locale spellings in this stage
+  names to C-locale spellings in the current implementation
 - GNU special time selectors `%A@`, `%C@`, `%T@`, `%B@`, `%A+`, `%C+`, `%T+`, and `%B+` are
   supported
 - Unsupported `-printf` directives fail during planning with explicit diagnostics
@@ -59,15 +68,15 @@
 - In depth mode, `-prune` remains boolean-true in expression flow but does not block descendant
   traversal
 - Relaxed-order parallel mode preserves descendant-before-parent completion for depth-mode actions
-- `-fstype` is Linux-first in this stage
+- `-fstype` is Linux-first in the current implementation
 - `-fstype` type names come from `/proc/self/mountinfo`
 - Requested filesystem types are resolved against the set known at command startup
 - Commands that do not use `-fstype` do not read mount-table state
 - Access predicates use kernel access checks and intentionally can differ from `-perm`
 - Access predicates use real-ID GNU `access(2)` semantics and are not mode-bit emulation
 - When available, the access predicate path uses `faccessat`, with `access(2)` as the fallback
-- `-xdev` and `-mount` are normalized as traversal-wide structural limits in this stage rather
-  than GNU-style positional controls
+- `-xdev` and `-mount` are normalized as traversal-wide structural limits in the current
+  implementation rather than GNU-style positional controls
 - Internal performance substrate: lazy entry data access and cheap-first planning for pure read-only `-a` chains
 - `-newerXY` supports Linux-first birth-time forms and a strict literal-time subset:
   `@<unix-seconds>[.frac]`, `YYYY-MM-DD`, and `YYYY-MM-DD[ T]HH:MM[:SS][.frac][Z|±HH[:MM]]`
@@ -84,7 +93,7 @@ Use the `RUSHFIND_WORKERS` environment variable to control execution mode:
 - `RUSHFIND_WORKERS=1` keeps traversal/output close to GNU ordering
 - `RUSHFIND_WORKERS=4` enables the worker-owned relaxed-order parallel engine by default
 
-## Regex benchmark stage
+## Current regex benchmark harness
 
 Use the regex benchmark harness when you want end-to-end ordered versus parallel comparisons on
 regex-heavy workloads:
@@ -104,9 +113,9 @@ regex-heavy, and PCRE2-fallback-heavy command families.
 - `-L` follows symlinks logically during traversal
 - Followed-directory traversal is loop-safe and reports a runtime error instead of recursing forever
 
-## Unsupported in stage 14
+## Unsupported currently
 
-Stage 14 supports `-exec ... ;`, `-exec ... +`, `-execdir ... ;`, `-execdir ... +`,
-`-ok ... ;`, `-okdir ... ;`, and `-delete`.
+The current implementation supports `-exec ... ;`, `-exec ... +`, `-execdir ... ;`,
+`-execdir ... +`, `-ok ... ;`, `-okdir ... ;`, and `-delete`.
 
 `-ok ... +` and `-okdir ... +` remain unsupported.
