@@ -879,6 +879,22 @@ mod tests {
     }
 
     #[test]
+    fn emacs_followup_backreferences_force_pcre2_fallback() {
+        let expr = parse_gnu_regex("-regex", RegexDialect::Emacs, br".*/\(.\)\1").unwrap();
+
+        assert_eq!(expr.capture_count(), 1);
+        assert_eq!(choose_backend(&expr), RegexBackendKind::Pcre2);
+    }
+
+    #[test]
+    fn emacs_followup_mixed_alternation_and_backreference_force_pcre2_fallback() {
+        let expr = parse_gnu_regex("-regex", RegexDialect::Emacs, br".*/\(ab\|cd\)\1").unwrap();
+
+        assert_eq!(expr.capture_count(), 1);
+        assert_eq!(choose_backend(&expr), RegexBackendKind::Pcre2);
+    }
+
+    #[test]
     fn gnu_foundation_boundary_escapes_force_pcre2_fallback() {
         let expr = parse_gnu_regex("-regex", RegexDialect::PosixExtended, br".*/\<foo\>").unwrap();
 

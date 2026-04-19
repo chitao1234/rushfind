@@ -361,6 +361,33 @@ mod tests {
     }
 
     #[test]
+    fn emacs_followup_backreferences_use_pcre2_backend() {
+        let matcher =
+            RegexMatcher::compile("-regex", RegexDialect::Emacs, OsStr::new(r".*/\(.\)\1"), false)
+                .unwrap();
+
+        assert_eq!(matcher.backend_kind(), RegexBackendKind::Pcre2);
+        assert!(matcher.is_match(OsStr::new("./aa")).unwrap());
+        assert!(!matcher.is_match(OsStr::new("./ab")).unwrap());
+    }
+
+    #[test]
+    fn emacs_followup_mixed_group_and_backreference_match() {
+        let matcher = RegexMatcher::compile(
+            "-regex",
+            RegexDialect::Emacs,
+            OsStr::new(r".*/\(ab\|cd\)\1"),
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(matcher.backend_kind(), RegexBackendKind::Pcre2);
+        assert!(matcher.is_match(OsStr::new("./abab")).unwrap());
+        assert!(matcher.is_match(OsStr::new("./cdcd")).unwrap());
+        assert!(!matcher.is_match(OsStr::new("./abcd")).unwrap());
+    }
+
+    #[test]
     fn gnu_foundation_boundary_escapes_use_pcre2_backend() {
         let matcher = RegexMatcher::compile(
             "-regex",

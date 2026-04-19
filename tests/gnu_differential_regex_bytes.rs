@@ -132,3 +132,32 @@ fn regex_foundation_matrix_gnu_and_pcre2_preserve_non_utf8_subject_matching() {
         assert!(!fox.stdout.is_empty(), "args: {:?}", args);
     }
 }
+
+fn build_non_utf8_emacs_tree() -> tempfile::TempDir {
+    let root = tempdir().unwrap();
+    fs::write(root.path().join(path_from_bytes(b"pair-\xff\xff")), "repeat\n").unwrap();
+    fs::write(root.path().join(path_from_bytes(b"pair-\xff\xfe")), "mixed\n").unwrap();
+    fs::write(root.path().join("pair-ascii"), "ascii\n").unwrap();
+    root
+}
+
+#[test]
+fn regex_emacs_followup_matrix_emacs_literal_byte_patterns_match_gnu_for_non_utf8_operands() {
+    let root = build_non_utf8_emacs_tree();
+    let args = vec![
+        path_arg(root.path()),
+        "-maxdepth".into(),
+        "1".into(),
+        "-regextype".into(),
+        "emacs".into(),
+        "-regex".into(),
+        os(b".*/pair-\xff\xff"),
+        "-print0".into(),
+    ];
+
+    let gnu = run_gnu(&args);
+    let fox = run_fox(&args);
+    assert_eq!(fox.status.code(), gnu.status.code(), "args: {:?}", args);
+    assert_eq!(fox.stdout, gnu.stdout, "args: {:?}", args);
+    assert_eq!(fox.stderr, gnu.stderr, "args: {:?}", args);
+}

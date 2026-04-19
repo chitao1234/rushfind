@@ -164,6 +164,19 @@ fn gnu_foundation_planning_accepts_backreferences_and_gnu_escapes() {
     }
 }
 
+#[test]
+fn emacs_followup_planning_accepts_backreferences() {
+    for pattern in [r".*/\(.\)\1", r".*/\(ab\|cd\)\1"] {
+        let plan = plan_command(
+            parse_command(&argv(&[".", "-regextype", "emacs", "-regex", pattern])).unwrap(),
+            1,
+        )
+        .unwrap();
+
+        assert_eq!(regex_dialects(&plan.expr), vec![RegexDialect::Emacs]);
+    }
+}
+
 fn regex_dialects(expr: &RuntimeExpr) -> Vec<RegexDialect> {
     let mut out = Vec::new();
     collect_regex_dialects(expr, &mut out);

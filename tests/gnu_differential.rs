@@ -2460,3 +2460,76 @@ fn regex_foundation_matrix_parallel_gnu_extensions_match_gnu_find_as_sets() {
 
     assert_matches_gnu_as_sets(&args);
 }
+
+fn build_emacs_regex_followup_tree() -> tempfile::TempDir {
+    let root = tempdir().unwrap();
+    for name in ["a", "aa", "ab", "a^b", "abab", "abcd", "cdcd"] {
+        fs::write(root.path().join(name), "x\n").unwrap();
+    }
+    root
+}
+
+#[test]
+fn regex_emacs_followup_matrix_ordered_matches_gnu_find_exactly() {
+    let root = build_emacs_regex_followup_tree();
+    let args_sets = vec![
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-mindepth".into(),
+            "1".into(),
+            "-regextype".into(),
+            "emacs".into(),
+            "-regex".into(),
+            r".*/\(.\)\1".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-mindepth".into(),
+            "1".into(),
+            "-regextype".into(),
+            "emacs".into(),
+            "-regex".into(),
+            r".*/\(ab\|cd\)\1".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-mindepth".into(),
+            "1".into(),
+            "-regextype".into(),
+            "emacs".into(),
+            "-regex".into(),
+            r".*/\(a+\|a\^b\)".into(),
+        ],
+    ];
+
+    for args in args_sets {
+        assert_matches_gnu_exact(&args);
+    }
+}
+
+#[test]
+fn regex_emacs_followup_matrix_parallel_matches_gnu_find_as_sets() {
+    let root = build_emacs_regex_followup_tree();
+    let args = vec![
+        path_arg(root.path()),
+        "(".into(),
+        "-regextype".into(),
+        "emacs".into(),
+        "-regex".into(),
+        r".*/\(.\)\1".into(),
+        "-o".into(),
+        "-regextype".into(),
+        "emacs".into(),
+        "-regex".into(),
+        r".*/\(a+\|a\^b\)".into(),
+        ")".into(),
+    ];
+
+    assert_matches_gnu_as_sets(&args);
+}

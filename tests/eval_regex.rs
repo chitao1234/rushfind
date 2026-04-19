@@ -267,6 +267,71 @@ fn gnu_foundation_bre_and_ere_backreferences_match() {
 }
 
 #[test]
+fn emacs_followup_backreferences_match_through_eval() {
+    let root = tempdir().unwrap();
+    let repeated = root.path().join("aa");
+    let non_repeated = root.path().join("ab");
+    fs::write(&repeated, "aa\n").unwrap();
+    fs::write(&non_repeated, "ab\n").unwrap();
+
+    let expr = RuntimeExpr::Predicate(RuntimePredicate::Regex(
+        RegexMatcher::compile(
+            "-regex",
+            RegexDialect::Emacs,
+            OsStr::new(r".*/\(.\)\1"),
+            false,
+        )
+        .unwrap(),
+    ));
+    let mut sink = RecordingSink::default();
+
+    assert!(
+        evaluate(
+            &expr,
+            &entry_for(&repeated, 0),
+            FollowMode::Physical,
+            &mut sink,
+        )
+        .unwrap()
+    );
+    assert!(
+        !evaluate(
+            &expr,
+            &entry_for(&non_repeated, 0),
+            FollowMode::Physical,
+            &mut sink,
+        )
+        .unwrap()
+    );
+}
+
+#[test]
+fn emacs_followup_mixed_alternation_and_backreference_match_through_eval() {
+    let root = tempdir().unwrap();
+    let abab = root.path().join("abab");
+    let cdcd = root.path().join("cdcd");
+    let abcd = root.path().join("abcd");
+    fs::write(&abab, "abab\n").unwrap();
+    fs::write(&cdcd, "cdcd\n").unwrap();
+    fs::write(&abcd, "abcd\n").unwrap();
+
+    let expr = RuntimeExpr::Predicate(RuntimePredicate::Regex(
+        RegexMatcher::compile(
+            "-regex",
+            RegexDialect::Emacs,
+            OsStr::new(r".*/\(ab\|cd\)\1"),
+            false,
+        )
+        .unwrap(),
+    ));
+    let mut sink = RecordingSink::default();
+
+    assert!(evaluate(&expr, &entry_for(&abab, 0), FollowMode::Physical, &mut sink).unwrap());
+    assert!(evaluate(&expr, &entry_for(&cdcd, 0), FollowMode::Physical, &mut sink).unwrap());
+    assert!(!evaluate(&expr, &entry_for(&abcd, 0), FollowMode::Physical, &mut sink).unwrap());
+}
+
+#[test]
 fn gnu_foundation_bre_and_ere_gnu_escapes_match() {
     let word = RegexMatcher::compile(
         "-regex",
