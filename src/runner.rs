@@ -3,7 +3,9 @@ use crate::eval::EvalContext;
 use crate::mounts::MountSnapshot;
 use crate::planner::{ExecutionMode, ExecutionPlan, RuntimeExpr, TraversalOrder};
 use crate::traversal_control::{TraversalControl, evaluate_for_traversal_with_context};
+use std::ffi::OsStr;
 use std::io::Write;
+use std::os::unix::ffi::OsStrExt;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct RunSummary {
@@ -22,6 +24,27 @@ pub(crate) fn write_startup_warnings<E: Write>(
     Ok(())
 }
 
+pub(crate) fn validate_execdir_path_value(path: &OsStr) -> Result<(), Diagnostic> {
+    for entry in path.as_bytes().split(|byte| *byte == b':') {
+        if entry.is_empty() || entry[0] != b'/' {
+            return Err(Diagnostic::new(
+                "unsafe PATH for `-execdir`: PATH entries must be absolute and non-empty",
+                1,
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_startup_requirements(plan: &ExecutionPlan) -> Result<(), Diagnostic> {
+    if !plan.runtime.execdir_requires_safe_path {
+        return Ok(());
+    }
+
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    validate_execdir_path_value(path.as_os_str())
+}
+
 pub fn run_plan<W, E>(
     plan: &ExecutionPlan,
     stdout: &mut W,
@@ -31,6 +54,7 @@ where
     W: Write + Send,
     E: Write + Send,
 {
+    validate_startup_requirements(plan)?;
     write_startup_warnings(&plan.startup_warnings, stderr)?;
     match plan.mode {
         ExecutionMode::OrderedSingle => crate::ordered::run_ordered_plan(plan, stdout, stderr),
@@ -74,7 +98,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{build_eval_context_with_loader, write_startup_warnings};
+    use super::{
+        build_eval_context_with_loader, validate_execdir_path_value, write_startup_warnings,
+    };
     use crate::follow::FollowMode;
     use crate::ordered::engine::ordered_evaluator_workers;
     use crate::parser::parse_command;
@@ -84,7 +110,7 @@ mod tests {
     };
     use crate::runtime_policy::RuntimePolicy;
     use crate::time::Timestamp;
-    use std::ffi::OsString;
+    use std::ffi::{OsStr, OsString};
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -101,6 +127,7 @@ mod tests {
             runtime: RuntimeRequirements {
                 mount_snapshot,
                 evaluation_now: Timestamp::new(0, 0),
+                execdir_requires_safe_path: false,
             },
             startup_warnings: Vec::new(),
             file_outputs: Vec::new(),
@@ -181,5 +208,16 @@ mod tests {
             "findoxide: warning: unrecognized escape `\\q'\n\
              findoxide: warning: unrecognized escape `\\x'\n"
         );
+    }
+
+    #[test]
+    fn execdir_path_validation_rejects_relative_and_empty_entries() {
+        assert!(validate_execdir_path_value(OsStr::new("/usr/bin:/bin")).is_ok());
+        assert!(validate_execdir_path_value(OsStr::new("")).is_err());
+        assert!(validate_execdir_path_value(OsStr::new(".:/usr/bin")).is_err());
+        assert!(validate_execdir_path_value(OsStr::new("bin:/usr/bin")).is_err());
+        assert!(validate_execdir_path_value(OsStr::new(":/usr/bin")).is_err());
+        assert!(validate_execdir_path_value(OsStr::new("/usr/bin:")).is_err());
+        assert!(validate_execdir_path_value(OsStr::new("/usr/bin::/bin")).is_err());
     }
 }

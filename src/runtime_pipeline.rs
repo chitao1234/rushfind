@@ -382,9 +382,10 @@ mod tests {
         fs::write(&path, "hello\n").unwrap();
         let entry = EntryContext::new(path, 0, true);
         let expr = RuntimeExpr::And(vec![
-            RuntimeExpr::Action(RuntimeAction::ExecImmediate(compile_immediate_exec(&[
-                "false".into(),
-            ]))),
+            RuntimeExpr::Action(RuntimeAction::ExecImmediate(compile_immediate_exec(
+                crate::exec::ExecSemantics::Normal,
+                &["false".into()],
+            ))),
             RuntimeExpr::Predicate(RuntimePredicate::True),
         ]);
 

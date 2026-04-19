@@ -1,8 +1,9 @@
 mod support;
 
+use findoxide::exec::ExecSemantics;
 use findoxide::parser::parse_command;
 use findoxide::planner::{RuntimeAction, plan_command};
-use support::{action_labels, argv};
+use support::{action_labels, argv, contains_action};
 
 #[test]
 fn lowers_exec_semicolon_and_plus_into_distinct_runtime_actions() {
@@ -64,9 +65,48 @@ fn batched_exec_requires_one_final_standalone_placeholder() {
 }
 
 #[test]
-fn execdir_ok_and_okdir_remain_unsupported() {
+fn lowers_exec_and_execdir_into_distinct_semantics() {
+    let plan = plan_command(
+        parse_command(&argv(&[
+            ".", "-exec", "echo", "{}", ";", "-execdir", "echo", "{}", ";", "-execdir", "printf",
+            "%s\\n", "{}", "+",
+        ]))
+        .unwrap(),
+        1,
+    )
+    .unwrap();
+
+    assert!(contains_action(&plan.expr, |action| matches!(
+        action,
+        RuntimeAction::ExecImmediate(spec) if spec.semantics == ExecSemantics::Normal
+    )));
+    assert!(contains_action(&plan.expr, |action| matches!(
+        action,
+        RuntimeAction::ExecImmediate(spec) if spec.semantics == ExecSemantics::DirLocal
+    )));
+    assert!(contains_action(&plan.expr, |action| matches!(
+        action,
+        RuntimeAction::ExecBatched(spec) if spec.semantics == ExecSemantics::DirLocal
+    )));
+    assert!(plan.runtime.execdir_requires_safe_path);
+}
+
+#[test]
+fn execdir_plus_keeps_the_existing_final_placeholder_rule() {
+    for args in [
+        vec![".", "-execdir", "echo", "pre{}post", "+"],
+        vec![".", "-execdir", "echo", "{}", "{}", "+"],
+        vec![".", "-execdir", "echo", "{}", "tail", "+"],
+        vec![".", "-execdir", "echo", "+"],
+    ] {
+        let error = plan_command(parse_command(&argv(&args)).unwrap(), 1).unwrap_err();
+        assert!(error.message.contains("`-execdir ... +`"));
+    }
+}
+
+#[test]
+fn ok_and_okdir_remain_unsupported() {
     for (args, needle) in [
-        (vec![".", "-execdir", "echo", "{}", ";"], "-execdir"),
         (vec![".", "-ok", "echo", "{}", ";"], "-ok"),
         (vec![".", "-okdir", "echo", "{}", ";"], "-okdir"),
     ] {

@@ -2,7 +2,7 @@ use crate::account::{resolve_group_id, resolve_user_id};
 use crate::ast::{Action, CommandAst, Expr, FileTypeFilter, GlobalOption, Predicate};
 use crate::diagnostics::Diagnostic;
 use crate::exec::{
-    BatchedExecAction, ExecBatchId, ImmediateExecAction, compile_batched_exec,
+    BatchedExecAction, ExecBatchId, ExecSemantics, ImmediateExecAction, compile_batched_exec,
     compile_immediate_exec,
 };
 use crate::file_output::{FileOutputId, FileOutputTerminator, PlannedFileOutput};
@@ -61,6 +61,7 @@ pub struct ExecutionPlan {
 pub struct RuntimeRequirements {
     pub mount_snapshot: bool,
     pub evaluation_now: Timestamp,
+    pub execdir_requires_safe_path: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -188,6 +189,7 @@ pub fn plan_command_with_now(
     let mut runtime = RuntimeRequirements {
         mount_snapshot: false,
         evaluation_now: now,
+        execdir_requires_safe_path: false,
     };
     let mut state = PlanningState {
         temporal: TemporalPlanningState {
@@ -645,16 +647,29 @@ fn lower_action(
         })),
         Action::Quit => Ok(RuntimeExpr::Action(RuntimeAction::Quit)),
         Action::Exec { argv, batch: false } => Ok(RuntimeExpr::Action(
-            RuntimeAction::ExecImmediate(compile_immediate_exec(&argv)),
+            RuntimeAction::ExecImmediate(compile_immediate_exec(ExecSemantics::Normal, &argv)),
         )),
         Action::Exec { argv, batch: true } => {
             let id = state.next_exec_batch_id;
             state.next_exec_batch_id += 1;
             Ok(RuntimeExpr::Action(RuntimeAction::ExecBatched(
-                compile_batched_exec(id, &argv)?,
+                compile_batched_exec(id, ExecSemantics::Normal, &argv)?,
             )))
         }
-        Action::ExecDir { .. } => Err(Diagnostic::unsupported("unsupported: -execdir")),
+        Action::ExecDir { argv, batch: false } => {
+            runtime.execdir_requires_safe_path = true;
+            Ok(RuntimeExpr::Action(RuntimeAction::ExecImmediate(
+                compile_immediate_exec(ExecSemantics::DirLocal, &argv),
+            )))
+        }
+        Action::ExecDir { argv, batch: true } => {
+            runtime.execdir_requires_safe_path = true;
+            let id = state.next_exec_batch_id;
+            state.next_exec_batch_id += 1;
+            Ok(RuntimeExpr::Action(RuntimeAction::ExecBatched(
+                compile_batched_exec(id, ExecSemantics::DirLocal, &argv)?,
+            )))
+        }
         Action::Ok { .. } => Err(Diagnostic::unsupported("unsupported: -ok")),
         Action::OkDir { .. } => Err(Diagnostic::unsupported("unsupported: -okdir")),
         Action::Delete => {

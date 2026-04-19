@@ -10,8 +10,9 @@ pub use child::SpillBuffer;
 pub use ordered::OrderedActionSink;
 pub use parallel::ParallelActionSink;
 pub use template::{
-    BatchedExecAction, ExecBatchId, ExecTemplateSegment, ImmediateExecAction, build_batched_argv,
-    compile_batched_exec, compile_immediate_exec, render_immediate_argv,
+    BatchedExecAction, ExecBatchId, ExecSemantics, ExecTemplateSegment, ImmediateExecAction,
+    PreparedExecCommand, batched_path_cost, build_batched_argv, build_immediate_command,
+    compile_batched_exec, compile_immediate_exec, execdir_cwd, render_immediate_argv,
 };
 
 pub(crate) use batch::fixed_batch_cost;
@@ -21,8 +22,9 @@ pub(crate) use delete::delete_path;
 #[cfg(test)]
 mod tests {
     use super::{
-        BatchLimit, OrderedActionSink, ParallelActionSink, PendingBatch, SpillBuffer,
-        build_batched_argv, compile_batched_exec, delete_path,
+        BatchLimit, ExecSemantics, OrderedActionSink, ParallelActionSink, PendingBatch,
+        SpillBuffer, build_batched_argv, compile_batched_exec, compile_immediate_exec, delete_path,
+        fixed_batch_cost, render_immediate_argv,
     };
     use crate::entry::EntryContext;
     use crate::eval::{ActionSink, EvalContext};
@@ -31,11 +33,12 @@ mod tests {
     use crossbeam_channel::unbounded;
     use std::io::Write;
     use std::os::unix::fs as unix_fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn batch_sizer_flushes_before_crossing_the_limit() {
-        let spec = compile_batched_exec(7, &["echo".into(), "{}".into()]).unwrap();
+        let spec =
+            compile_batched_exec(7, ExecSemantics::Normal, &["echo".into(), "{}".into()]).unwrap();
         let mut batch = PendingBatch::new(spec, BatchLimit::for_tests(16), 0);
 
         assert_eq!(batch.push("aa".as_ref()).unwrap(), None);
@@ -54,11 +57,62 @@ mod tests {
 
     #[test]
     fn render_batched_argv_appends_paths_after_the_fixed_prefix() {
-        let spec =
-            compile_batched_exec(3, &["printf".into(), "%s\\n".into(), "{}".into()]).unwrap();
-        let argv = build_batched_argv(&spec, &[PathBuf::from("a"), PathBuf::from("b")]);
+        let spec = compile_batched_exec(
+            3,
+            ExecSemantics::Normal,
+            &["printf".into(), "%s\\n".into(), "{}".into()],
+        )
+        .unwrap();
+        let prepared =
+            build_batched_argv(&spec, &[PathBuf::from("a"), PathBuf::from("b")]).unwrap();
 
-        assert_eq!(argv, vec!["printf", "%s\\n", "a", "b"]);
+        assert_eq!(prepared.cwd, None);
+        assert_eq!(prepared.argv, vec!["printf", "%s\\n", "a", "b"]);
+    }
+
+    #[test]
+    fn execdir_rendering_uses_gnu_dot_slash_basename() {
+        let spec =
+            compile_immediate_exec(ExecSemantics::DirLocal, &["printf".into(), "X{}Y".into()]);
+
+        assert_eq!(
+            render_immediate_argv(&spec, Path::new("dir/file.txt")),
+            vec!["printf", "X./file.txtY"]
+        );
+    }
+
+    #[test]
+    fn execdir_batched_argv_uses_dot_slash_paths_and_common_directory() {
+        let spec = compile_batched_exec(
+            11,
+            ExecSemantics::DirLocal,
+            &["printf".into(), "%s\\n".into(), "{}".into()],
+        )
+        .unwrap();
+
+        let prepared =
+            build_batched_argv(&spec, &[PathBuf::from("dir/a"), PathBuf::from("dir/b")]).unwrap();
+
+        assert_eq!(prepared.cwd, Some(PathBuf::from("dir")));
+        assert_eq!(prepared.argv, vec!["printf", "%s\\n", "./a", "./b"]);
+    }
+
+    #[test]
+    fn execdir_batch_cost_uses_rendered_dot_slash_path_length() {
+        let spec = compile_batched_exec(13, ExecSemantics::DirLocal, &["echo".into(), "{}".into()])
+            .unwrap();
+        let mut batch = PendingBatch::new(
+            spec.clone(),
+            BatchLimit::for_tests(18),
+            fixed_batch_cost(&spec),
+        );
+
+        assert_eq!(batch.push("dir/abcdef".as_ref()).unwrap(), None);
+        let flushed = batch
+            .push("dir/ghijkl".as_ref())
+            .unwrap()
+            .expect("expected flush");
+        assert_eq!(flushed.paths, vec![PathBuf::from("dir/abcdef")]);
     }
 
     #[test]
@@ -84,7 +138,8 @@ mod tests {
 
     #[test]
     fn ordered_flush_reports_batched_false_as_action_failure() {
-        let spec = compile_batched_exec(7, &["false".into(), "{}".into()]).unwrap();
+        let spec =
+            compile_batched_exec(7, ExecSemantics::Normal, &["false".into(), "{}".into()]).unwrap();
         let entry = EntryContext::new(PathBuf::from("placeholder"), 0, true);
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
@@ -109,7 +164,8 @@ mod tests {
 
     #[test]
     fn parallel_flush_reports_batched_false_as_action_failure() {
-        let spec = compile_batched_exec(9, &["false".into(), "{}".into()]).unwrap();
+        let spec =
+            compile_batched_exec(9, ExecSemantics::Normal, &["false".into(), "{}".into()]).unwrap();
         let entry = EntryContext::new(PathBuf::from("placeholder"), 0, true);
         let (broker, _rx) = unbounded();
         let mut sink = ParallelActionSink::new(broker, 4).unwrap();

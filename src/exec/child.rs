@@ -1,19 +1,20 @@
 use crate::diagnostics::Diagnostic;
 use crate::output::BrokerMessage;
 use crossbeam_channel::Sender;
-use std::ffi::OsString;
 use std::io::{self, Read, Seek, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
 use super::batch::ReadyBatch;
-use super::template::{ImmediateExecAction, build_batched_argv, render_immediate_argv};
+use super::template::{
+    ImmediateExecAction, PreparedExecCommand, build_batched_argv, build_immediate_command,
+};
 
 pub(super) fn run_ready_batch<E: Write>(
     ready: &ReadyBatch,
     stderr: &mut E,
 ) -> Result<bool, Diagnostic> {
-    run_ordered_batch(build_batched_argv(&ready.spec, &ready.paths), stderr)
+    run_ordered_command(build_batched_argv(&ready.spec, &ready.paths)?, stderr)
 }
 
 pub(super) fn run_immediate_ordered<E: Write>(
@@ -21,41 +22,25 @@ pub(super) fn run_immediate_ordered<E: Write>(
     path: &Path,
     stderr: &mut E,
 ) -> Result<bool, Diagnostic> {
-    let argv = render_immediate_argv(spec, path);
-    let Some(program) = argv.first() else {
-        return Err(Diagnostic::new(
-            "internal error: immediate exec action missing command",
-            1,
-        ));
-    };
-
-    let mut command = Command::new(program);
-    command.args(&argv[1..]);
-    command.stdin(Stdio::inherit());
-    command.stdout(Stdio::inherit());
-    command.stderr(Stdio::inherit());
-
-    match command.status() {
-        Ok(status) => Ok(status.success()),
-        Err(error) => {
-            writeln!(stderr, "findoxide: {}: {error}", program.to_string_lossy()).map_err(
-                |io_error| Diagnostic::new(format!("failed to write stderr: {io_error}"), 1),
-            )?;
-            Ok(false)
-        }
-    }
+    run_ordered_command(build_immediate_command(spec, path), stderr)
 }
 
-fn run_ordered_batch<E: Write>(argv: Vec<OsString>, stderr: &mut E) -> Result<bool, Diagnostic> {
-    let Some(program) = argv.first() else {
+fn run_ordered_command<E: Write>(
+    command_spec: PreparedExecCommand,
+    stderr: &mut E,
+) -> Result<bool, Diagnostic> {
+    let Some(program) = command_spec.argv.first() else {
         return Err(Diagnostic::new(
-            "internal error: batched exec action missing command",
+            "internal error: exec action missing command",
             1,
         ));
     };
 
     let mut command = Command::new(program);
-    command.args(&argv[1..]);
+    command.args(&command_spec.argv[1..]);
+    if let Some(cwd) = command_spec.cwd.as_ref() {
+        command.current_dir(cwd);
+    }
     command.stdin(Stdio::inherit());
     command.stdout(Stdio::inherit());
     command.stderr(Stdio::inherit());
@@ -77,7 +62,7 @@ pub(crate) fn run_immediate_parallel(
     broker: &Sender<BrokerMessage>,
     spill_threshold: usize,
 ) -> Result<bool, Diagnostic> {
-    run_parallel_command(render_immediate_argv(spec, path), broker, spill_threshold)
+    run_parallel_command(build_immediate_command(spec, path), broker, spill_threshold)
 }
 
 pub(crate) fn run_parallel_ready_batch(
@@ -86,18 +71,18 @@ pub(crate) fn run_parallel_ready_batch(
     spill_threshold: usize,
 ) -> Result<bool, Diagnostic> {
     run_parallel_command(
-        build_batched_argv(&ready.spec, &ready.paths),
+        build_batched_argv(&ready.spec, &ready.paths)?,
         broker,
         spill_threshold,
     )
 }
 
 fn run_parallel_command(
-    argv: Vec<OsString>,
+    command_spec: PreparedExecCommand,
     broker: &Sender<BrokerMessage>,
     spill_threshold: usize,
 ) -> Result<bool, Diagnostic> {
-    let Some(program) = argv.first() else {
+    let Some(program) = command_spec.argv.first() else {
         return Err(Diagnostic::new(
             "internal error: exec action missing command",
             1,
@@ -105,7 +90,10 @@ fn run_parallel_command(
     };
 
     let mut command = Command::new(program);
-    command.args(&argv[1..]);
+    command.args(&command_spec.argv[1..]);
+    if let Some(cwd) = command_spec.cwd.as_ref() {
+        command.current_dir(cwd);
+    }
     command.stdin(Stdio::null());
     command.stdout(Stdio::piped());
     command.stderr(Stdio::piped());
