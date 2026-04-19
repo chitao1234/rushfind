@@ -62,6 +62,7 @@ pub struct RuntimeRequirements {
     pub mount_snapshot: bool,
     pub evaluation_now: Timestamp,
     pub execdir_requires_safe_path: bool,
+    pub messages_locale_required: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,6 +192,7 @@ pub fn plan_command_with_now(
         mount_snapshot: false,
         evaluation_now: now,
         execdir_requires_safe_path: false,
+        messages_locale_required: false,
     };
     let mut state = PlanningState {
         temporal: TemporalPlanningState {
@@ -673,13 +675,17 @@ fn lower_action(
                 compile_batched_exec(id, ExecSemantics::DirLocal, &argv)?,
             )))
         }
-        Action::Ok { argv, batch: false } => Ok(RuntimeExpr::Action(RuntimeAction::ExecPrompt(
-            compile_immediate_exec(ExecSemantics::Normal, &argv),
-        ))),
+        Action::Ok { argv, batch: false } => {
+            runtime.messages_locale_required = true;
+            Ok(RuntimeExpr::Action(RuntimeAction::ExecPrompt(
+                compile_immediate_exec(ExecSemantics::Normal, &argv),
+            )))
+        }
         Action::Ok { batch: true, .. } => {
             Err(Diagnostic::parse("`-ok` only supports the `;` terminator"))
         }
         Action::OkDir { argv, batch: false } => {
+            runtime.messages_locale_required = true;
             runtime.execdir_requires_safe_path = true;
             Ok(RuntimeExpr::Action(RuntimeAction::ExecPrompt(
                 compile_immediate_exec(ExecSemantics::DirLocal, &argv),

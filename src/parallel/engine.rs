@@ -1,6 +1,7 @@
 use crate::diagnostics::Diagnostic;
 use crate::exec::PromptCoordinator;
 use crate::file_output::SharedFileOutputs;
+use crate::messages_locale::MessagesLocale;
 use crate::parallel::broker::spawn_broker;
 use crate::parallel::control::GlobalControl;
 use crate::parallel::postorder::BarrierTable;
@@ -17,6 +18,7 @@ pub(crate) fn run_parallel_v2<W, E>(
     plan: &ExecutionPlan,
     stdout: &mut W,
     stderr: &mut E,
+    _messages_locale: Option<MessagesLocale>,
 ) -> Result<RunSummary, Diagnostic>
 where
     W: Write + Send,

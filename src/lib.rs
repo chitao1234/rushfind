@@ -13,6 +13,7 @@ pub mod follow;
 pub mod identity;
 pub mod literal_time;
 pub mod ls;
+pub(crate) mod messages_locale;
 pub(crate) mod mounts;
 pub mod numeric;
 pub mod optimizer;

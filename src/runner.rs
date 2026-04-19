@@ -1,5 +1,6 @@
 use crate::diagnostics::Diagnostic;
 use crate::eval::EvalContext;
+use crate::messages_locale::{MessagesLocale, resolve_messages_locale};
 use crate::mounts::MountSnapshot;
 use crate::planner::{ExecutionMode, ExecutionPlan, RuntimeExpr, TraversalOrder};
 use crate::traversal_control::{TraversalControl, evaluate_for_traversal_with_context};
@@ -55,10 +56,15 @@ where
     E: Write + Send,
 {
     validate_startup_requirements(plan)?;
+    let messages_locale = build_messages_locale(plan)?;
     write_startup_warnings(&plan.startup_warnings, stderr)?;
     match plan.mode {
-        ExecutionMode::OrderedSingle => crate::ordered::run_ordered_plan(plan, stdout, stderr),
-        ExecutionMode::ParallelRelaxed => crate::parallel::run_parallel(plan, stdout, stderr),
+        ExecutionMode::OrderedSingle => {
+            crate::ordered::run_ordered_plan(plan, stdout, stderr, messages_locale)
+        }
+        ExecutionMode::ParallelRelaxed => {
+            crate::parallel::run_parallel(plan, stdout, stderr, messages_locale)
+        }
     }
 }
 
@@ -77,6 +83,26 @@ pub(crate) fn traversal_control_for_entry(
 
 pub(crate) fn build_eval_context(plan: &ExecutionPlan) -> Result<EvalContext, Diagnostic> {
     build_eval_context_with_loader(plan, MountSnapshot::load_proc_self_mountinfo)
+}
+
+pub(crate) fn build_messages_locale(
+    plan: &ExecutionPlan,
+) -> Result<Option<MessagesLocale>, Diagnostic> {
+    build_messages_locale_with(plan, resolve_messages_locale)
+}
+
+pub(crate) fn build_messages_locale_with<F>(
+    plan: &ExecutionPlan,
+    resolve_messages: F,
+) -> Result<Option<MessagesLocale>, Diagnostic>
+where
+    F: FnOnce() -> Result<MessagesLocale, Diagnostic>,
+{
+    if !plan.runtime.messages_locale_required {
+        return Ok(None);
+    }
+
+    resolve_messages().map(Some)
 }
 
 pub(crate) fn build_eval_context_with_loader<F>(
@@ -99,7 +125,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        build_eval_context_with_loader, validate_execdir_path_value, write_startup_warnings,
+        build_eval_context_with_loader, build_messages_locale_with, validate_execdir_path_value,
+        write_startup_warnings,
     };
     use crate::follow::FollowMode;
     use crate::ordered::engine::ordered_evaluator_workers;
@@ -128,6 +155,7 @@ mod tests {
                 mount_snapshot,
                 evaluation_now: Timestamp::new(0, 0),
                 execdir_requires_safe_path: false,
+                messages_locale_required: false,
             },
             startup_warnings: Vec::new(),
             file_outputs: Vec::new(),
@@ -168,6 +196,21 @@ mod tests {
         .unwrap();
 
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn messages_locale_resolver_is_skipped_when_plan_does_not_require_it() {
+        let calls = AtomicUsize::new(0);
+        let plan = plan_with_runtime(false);
+
+        let locale = build_messages_locale_with(&plan, || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            panic!("messages locale resolver should not run");
+        })
+        .unwrap();
+
+        assert!(locale.is_none());
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 
     #[test]

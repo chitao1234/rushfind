@@ -1,5 +1,6 @@
 use crate::diagnostics::Diagnostic;
 use crate::eval::{ActionSink, RuntimeStatus, evaluate_outcome_with_context};
+use crate::messages_locale::MessagesLocale;
 use crate::planner::{ExecutionPlan, RuntimeExpr};
 use crate::runner::{RunSummary, build_eval_context, traversal_control_for_entry};
 use crate::runtime_pipeline::{EvalStep, OrderedReadyQueue, begin_entry_eval, resume_entry_eval};
@@ -11,6 +12,7 @@ pub(crate) fn run_ordered_plan<W, E>(
     plan: &ExecutionPlan,
     stdout: &mut W,
     stderr: &mut E,
+    _messages_locale: Option<MessagesLocale>,
 ) -> Result<RunSummary, Diagnostic>
 where
     W: Write,

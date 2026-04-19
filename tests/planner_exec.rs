@@ -123,6 +123,7 @@ fn ok_and_okdir_lower_to_exec_prompt_actions() {
         action,
         RuntimeAction::ExecPrompt(spec) if spec.semantics == ExecSemantics::DirLocal
     )));
+    assert!(plan.runtime.messages_locale_required);
     assert!(plan.runtime.execdir_requires_safe_path);
 }
 
