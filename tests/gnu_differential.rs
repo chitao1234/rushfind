@@ -2733,3 +2733,138 @@ fn gnu_hardening_invalid_regex_outcomes_match_gnu_find_in_parallel_mode() {
 
     assert_matches_gnu_regex_outcome_as_sets(&args);
 }
+
+#[test]
+fn gnu_hardening_success_ordered_matrix_matches_gnu_find() {
+    let root = build_gnu_regex_hardening_tree();
+
+    for args in [
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-mindepth".into(),
+            "1".into(),
+            "-regextype".into(),
+            "posix-extended".into(),
+            "-regex".into(),
+            ".*/paren)".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-mindepth".into(),
+            "1".into(),
+            "-regextype".into(),
+            "posix-basic".into(),
+            "-regex".into(),
+            r".*/\(\+foo\)".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-mindepth".into(),
+            "1".into(),
+            "-regextype".into(),
+            "posix-basic".into(),
+            "-regex".into(),
+            r".*/\(\?foo\)".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-mindepth".into(),
+            "1".into(),
+            "-regextype".into(),
+            "posix-basic".into(),
+            "-regex".into(),
+            r".*/[a\b]".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-mindepth".into(),
+            "1".into(),
+            "-regextype".into(),
+            "posix-extended".into(),
+            "-regex".into(),
+            r".*/[a\b]".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-mindepth".into(),
+            "1".into(),
+            "-regextype".into(),
+            "posix-extended".into(),
+            "-regex".into(),
+            r".*/(ab|cd)\1".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-mindepth".into(),
+            "1".into(),
+            "-regextype".into(),
+            "emacs".into(),
+            "-regex".into(),
+            r".*/\(ab\|cd\)\1".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-mindepth".into(),
+            "1".into(),
+            "-regextype".into(),
+            "posix-extended".into(),
+            "-regex".into(),
+            r".*/a{2,}".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-mindepth".into(),
+            "1".into(),
+            "-regextype".into(),
+            "posix-basic".into(),
+            "-regex".into(),
+            r".*/a\{2,\}".into(),
+        ],
+    ] {
+        assert_matches_gnu_exact(&args);
+    }
+}
+
+#[test]
+fn gnu_hardening_success_parallel_matrix_matches_gnu_find_as_sets() {
+    let root = build_gnu_regex_hardening_tree();
+    let args = vec![
+        path_arg(root.path()),
+        "(".into(),
+        "-regextype".into(),
+        "posix-basic".into(),
+        "-regex".into(),
+        r".*/[a\b]".into(),
+        "-o".into(),
+        "-regextype".into(),
+        "posix-extended".into(),
+        "-regex".into(),
+        r".*/(ab|cd)\1".into(),
+        "-o".into(),
+        "-regextype".into(),
+        "emacs".into(),
+        "-regex".into(),
+        r".*/\(ab\|cd\)\1".into(),
+        ")".into(),
+    ];
+
+    assert_matches_gnu_as_sets(&args);
+}

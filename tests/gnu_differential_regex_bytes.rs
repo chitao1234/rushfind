@@ -169,3 +169,49 @@ fn regex_emacs_followup_matrix_emacs_literal_byte_patterns_match_gnu_for_non_utf
     assert_eq!(fox.stdout, gnu.stdout, "args: {:?}", args);
     assert_eq!(fox.stderr, gnu.stderr, "args: {:?}", args);
 }
+
+fn build_non_utf8_gnu_hardening_tree() -> tempfile::TempDir {
+    let root = tempdir().unwrap();
+    fs::write(root.path().join(path_from_bytes(b"slot-\xff")), "hi\n").unwrap();
+    fs::write(root.path().join(path_from_bytes(b"slot-\\")), "slash\n").unwrap();
+    fs::write(
+        root.path().join(path_from_bytes(b"pair-\xff\xff")),
+        "repeat\n",
+    )
+    .unwrap();
+    root
+}
+
+#[test]
+fn gnu_hardening_bytes_literal_backslash_and_high_bytes_match_gnu() {
+    let root = build_non_utf8_gnu_hardening_tree();
+
+    for args in [
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-regextype".into(),
+            "posix-extended".into(),
+            "-regex".into(),
+            os(b".*/slot-[\\\\\xff]"),
+            "-print0".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-regextype".into(),
+            "emacs".into(),
+            "-regex".into(),
+            os(b".*/pair-\xff\xff"),
+            "-print0".into(),
+        ],
+    ] {
+        let gnu = run_gnu(&args);
+        let fox = run_fox(&args);
+        assert_eq!(fox.status.code(), gnu.status.code(), "args: {:?}", args);
+        assert_eq!(fox.stdout, gnu.stdout, "args: {:?}", args);
+        assert_eq!(fox.stderr, gnu.stderr, "args: {:?}", args);
+    }
+}
