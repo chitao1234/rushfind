@@ -1,7 +1,7 @@
 mod support;
 
 use assert_cmd::cargo::CommandCargoExt;
-use findoxide::birth::read_birth_time;
+use rushfind::birth::read_birth_time;
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fs;
@@ -353,9 +353,9 @@ fn assert_newermt_literal_rejection_matches_gnu(root: &Path, raw: &str) {
         .output()
         .unwrap();
 
-    let actual = Command::cargo_bin("findoxide")
+    let actual = Command::cargo_bin("rfd")
         .unwrap()
-        .env("FINDOXIDE_WORKERS", "1")
+        .env("RUSHFIND_WORKERS", "1")
         .env("LC_ALL", "C")
         .env("TZ", PRINTF_TIME_TZ)
         .args(&args)
@@ -565,9 +565,9 @@ fn gnu_ok_plus_is_rejected() {
         .args(&args)
         .output()
         .unwrap();
-    let actual = Command::cargo_bin("findoxide")
+    let actual = Command::cargo_bin("rfd")
         .unwrap()
-        .env("FINDOXIDE_WORKERS", "1")
+        .env("RUSHFIND_WORKERS", "1")
         .env("LC_ALL", "C")
         .args(&args)
         .output()
@@ -598,9 +598,9 @@ fn unsafe_execdir_path_rejection_matches_gnu_semantics() {
             .args(&args)
             .output()
             .unwrap();
-        let actual = Command::cargo_bin("findoxide")
+        let actual = Command::cargo_bin("rfd")
             .unwrap()
-            .env("FINDOXIDE_WORKERS", "1")
+            .env("RUSHFIND_WORKERS", "1")
             .env("PATH", ".:/usr/bin:/bin")
             .args(&args)
             .output()
@@ -727,7 +727,7 @@ fn fprint0_matches_gnu_for_successful_ordered_runs() {
 
 #[test]
 fn reports_parse_errors_nonzero() {
-    let output = Command::cargo_bin("findoxide")
+    let output = Command::cargo_bin("rfd")
         .unwrap()
         .args(["(", "-name", "*.rs"])
         .output()
@@ -753,9 +753,9 @@ fn ordered_mode_matches_gnu_find_exactly() {
     ];
 
     let expected = Command::new("find").args(&args).output().unwrap();
-    let actual = Command::cargo_bin("findoxide")
+    let actual = Command::cargo_bin("rfd")
         .unwrap()
-        .env("FINDOXIDE_WORKERS", "1")
+        .env("RUSHFIND_WORKERS", "1")
         .args(&args)
         .output()
         .unwrap();
@@ -817,9 +817,9 @@ fn ordered_delete_matches_gnu_output_exit_and_resulting_state() {
     ];
 
     let expected_output = Command::new("find").args(&args_expected).output().unwrap();
-    let actual_output = Command::cargo_bin("findoxide")
+    let actual_output = Command::cargo_bin("rfd")
         .unwrap()
-        .env("FINDOXIDE_WORKERS", "1")
+        .env("RUSHFIND_WORKERS", "1")
         .args(&args_actual)
         .output()
         .unwrap();
@@ -877,9 +877,9 @@ fn parallel_mode_matches_gnu_find_as_a_set() {
     ];
 
     let expected = Command::new("find").args(&args).output().unwrap();
-    let actual = Command::cargo_bin("findoxide")
+    let actual = Command::cargo_bin("rfd")
         .unwrap()
-        .env("FINDOXIDE_WORKERS", "4")
+        .env("RUSHFIND_WORKERS", "4")
         .args(&args)
         .output()
         .unwrap();
@@ -1034,9 +1034,9 @@ fn ordered_printf_unknown_escape_warnings_match_gnu_with_normalized_program_name
     ];
 
     let expected = Command::new("find").args(&args).output().unwrap();
-    let actual = Command::cargo_bin("findoxide")
+    let actual = Command::cargo_bin("rfd")
         .unwrap()
-        .env("FINDOXIDE_WORKERS", "1")
+        .env("RUSHFIND_WORKERS", "1")
         .args(&args)
         .output()
         .unwrap();
@@ -1061,9 +1061,9 @@ fn ordered_printf_unknown_escape_warnings_match_gnu_for_zero_match_runs() {
     ];
 
     let expected = Command::new("find").args(&args).output().unwrap();
-    let actual = Command::cargo_bin("findoxide")
+    let actual = Command::cargo_bin("rfd")
         .unwrap()
-        .env("FINDOXIDE_WORKERS", "1")
+        .env("RUSHFIND_WORKERS", "1")
         .args(&args)
         .output()
         .unwrap();
@@ -1199,9 +1199,9 @@ fn ordered_printf_birth_time_renders_empty_fields_when_unavailable() {
         return;
     };
 
-    let output = Command::cargo_bin("findoxide")
+    let output = Command::cargo_bin("rfd")
         .unwrap()
-        .env("FINDOXIDE_WORKERS", "1")
+        .env("RUSHFIND_WORKERS", "1")
         .env("LC_ALL", "C")
         .env("TZ", PRINTF_TIME_TZ)
         .args([
@@ -1226,9 +1226,9 @@ fn ordered_printf_birth_time_renders_linux_birth_data_when_available() {
         return;
     }
 
-    let output = Command::cargo_bin("findoxide")
+    let output = Command::cargo_bin("rfd")
         .unwrap()
-        .env("FINDOXIDE_WORKERS", "1")
+        .env("RUSHFIND_WORKERS", "1")
         .env("LC_ALL", "C")
         .env("TZ", PRINTF_TIME_TZ)
         .args([
@@ -1371,9 +1371,9 @@ fn ordered_follow_modes_match_gnu_find_exactly() {
         ],
     ] {
         let expected = Command::new("find").args(&args).output().unwrap();
-        let actual = Command::cargo_bin("findoxide")
+        let actual = Command::cargo_bin("rfd")
             .unwrap()
-            .env("FINDOXIDE_WORKERS", "1")
+            .env("RUSHFIND_WORKERS", "1")
             .args(&args)
             .output()
             .unwrap();
@@ -1401,9 +1401,9 @@ fn ordered_alias_preservation_matches_gnu_find_exactly() {
     ];
 
     let expected = Command::new("find").args(&args).output().unwrap();
-    let actual = Command::cargo_bin("findoxide")
+    let actual = Command::cargo_bin("rfd")
         .unwrap()
-        .env("FINDOXIDE_WORKERS", "1")
+        .env("RUSHFIND_WORKERS", "1")
         .args(&args)
         .output()
         .unwrap();
@@ -1431,9 +1431,9 @@ fn parallel_follow_modes_match_gnu_find_as_sets() {
     ];
 
     let expected = Command::new("find").args(&args).output().unwrap();
-    let actual = Command::cargo_bin("findoxide")
+    let actual = Command::cargo_bin("rfd")
         .unwrap()
-        .env("FINDOXIDE_WORKERS", "4")
+        .env("RUSHFIND_WORKERS", "4")
         .args(&args)
         .output()
         .unwrap();
@@ -1459,9 +1459,9 @@ fn parallel_alias_preservation_matches_gnu_find_as_sets() {
     ];
 
     let expected = Command::new("find").args(&args).output().unwrap();
-    let actual = Command::cargo_bin("findoxide")
+    let actual = Command::cargo_bin("rfd")
         .unwrap()
-        .env("FINDOXIDE_WORKERS", "4")
+        .env("RUSHFIND_WORKERS", "4")
         .args(&args)
         .output()
         .unwrap();
@@ -1507,9 +1507,9 @@ fn ordered_family_a_matches_gnu_find_exactly() {
 
     for args in args_sets {
         let expected = Command::new("find").args(&args).output().unwrap();
-        let actual = Command::cargo_bin("findoxide")
+        let actual = Command::cargo_bin("rfd")
             .unwrap()
-            .env("FINDOXIDE_WORKERS", "1")
+            .env("RUSHFIND_WORKERS", "1")
             .args(&args)
             .output()
             .unwrap();
@@ -1550,9 +1550,9 @@ fn parallel_family_a_matches_gnu_find_as_sets() {
 
     for args in args_sets {
         let expected = Command::new("find").args(&args).output().unwrap();
-        let actual = Command::cargo_bin("findoxide")
+        let actual = Command::cargo_bin("rfd")
             .unwrap()
-            .env("FINDOXIDE_WORKERS", "4")
+            .env("RUSHFIND_WORKERS", "4")
             .args(&args)
             .output()
             .unwrap();
@@ -1633,9 +1633,9 @@ fn ordered_metadata_ownership_matches_gnu_find_exactly() {
 
     for args in args_sets {
         let expected = Command::new("find").args(&args).output().unwrap();
-        let actual = Command::cargo_bin("findoxide")
+        let actual = Command::cargo_bin("rfd")
             .unwrap()
-            .env("FINDOXIDE_WORKERS", "1")
+            .env("RUSHFIND_WORKERS", "1")
             .args(&args)
             .output()
             .unwrap();
@@ -1665,9 +1665,9 @@ fn parallel_metadata_ownership_matches_gnu_find_as_sets() {
 
     for args in args_sets {
         let expected = Command::new("find").args(&args).output().unwrap();
-        let actual = Command::cargo_bin("findoxide")
+        let actual = Command::cargo_bin("rfd")
             .unwrap()
-            .env("FINDOXIDE_WORKERS", "4")
+            .env("RUSHFIND_WORKERS", "4")
             .args(&args)
             .output()
             .unwrap();
@@ -1695,9 +1695,9 @@ fn ordered_perm_matches_gnu_find_exactly() {
 
     for args in args_sets {
         let expected = Command::new("find").args(&args).output().unwrap();
-        let actual = Command::cargo_bin("findoxide")
+        let actual = Command::cargo_bin("rfd")
             .unwrap()
-            .env("FINDOXIDE_WORKERS", "1")
+            .env("RUSHFIND_WORKERS", "1")
             .args(&args)
             .output()
             .unwrap();
@@ -1724,9 +1724,9 @@ fn parallel_perm_matches_gnu_find_as_sets() {
 
     for args in args_sets {
         let expected = Command::new("find").args(&args).output().unwrap();
-        let actual = Command::cargo_bin("findoxide")
+        let actual = Command::cargo_bin("rfd")
             .unwrap()
-            .env("FINDOXIDE_WORKERS", "4")
+            .env("RUSHFIND_WORKERS", "4")
             .args(&args)
             .output()
             .unwrap();
@@ -1790,9 +1790,9 @@ fn ordered_symlink_content_matches_gnu_find_exactly() {
 
     for args in args_sets {
         let expected = Command::new("find").args(&args).output().unwrap();
-        let actual = Command::cargo_bin("findoxide")
+        let actual = Command::cargo_bin("rfd")
             .unwrap()
-            .env("FINDOXIDE_WORKERS", "1")
+            .env("RUSHFIND_WORKERS", "1")
             .args(&args)
             .output()
             .unwrap();
@@ -1856,9 +1856,9 @@ fn parallel_symlink_content_matches_gnu_find_as_sets() {
 
     for args in args_sets {
         let expected = Command::new("find").args(&args).output().unwrap();
-        let actual = Command::cargo_bin("findoxide")
+        let actual = Command::cargo_bin("rfd")
             .unwrap()
-            .env("FINDOXIDE_WORKERS", "4")
+            .env("RUSHFIND_WORKERS", "4")
             .args(&args)
             .output()
             .unwrap();
@@ -2726,9 +2726,9 @@ fn gnu_review_followup_backward_ranges_are_rejected_like_gnu_find() {
         ],
     ] {
         let expected = Command::new("find").args(&args).output().unwrap();
-        let actual = Command::cargo_bin("findoxide")
+        let actual = Command::cargo_bin("rfd")
             .unwrap()
-            .env("FINDOXIDE_WORKERS", "1")
+            .env("RUSHFIND_WORKERS", "1")
             .args(&args)
             .output()
             .unwrap();

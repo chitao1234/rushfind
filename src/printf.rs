@@ -191,7 +191,7 @@ fn parse_escape(
         b'0'..=b'7' => literal.push(parse_octal_escape(bytes, index, escaped)),
         other => {
             warnings.push(format!(
-                "findoxide: warning: unrecognized escape `\\{}'",
+                "rfd: warning: unrecognized escape `\\{}'",
                 char::from(other)
             ));
             literal.extend_from_slice(&[b'\\', other]);
@@ -960,8 +960,8 @@ mod tests {
         assert_eq!(
             compiled.warnings,
             vec![
-                "findoxide: warning: unrecognized escape `\\q'".to_string(),
-                "findoxide: warning: unrecognized escape `\\x'".to_string(),
+                "rfd: warning: unrecognized escape `\\q'".to_string(),
+                "rfd: warning: unrecognized escape `\\x'".to_string(),
             ]
         );
     }

@@ -1,9 +1,9 @@
-use findoxide::entry::EntryContext;
-use findoxide::eval::evaluate;
-use findoxide::follow::FollowMode;
-use findoxide::output::RecordingSink;
-use findoxide::perm::parse_perm_argument;
-use findoxide::planner::{RuntimeExpr, RuntimePredicate};
+use rushfind::entry::EntryContext;
+use rushfind::eval::evaluate;
+use rushfind::follow::FollowMode;
+use rushfind::output::RecordingSink;
+use rushfind::perm::parse_perm_argument;
+use rushfind::planner::{RuntimeExpr, RuntimePredicate};
 use std::ffi::OsStr;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;

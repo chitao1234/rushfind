@@ -20,9 +20,9 @@ fn gnu_find_output(args: &[OsString], with_env: bool) -> Output {
     command.args(args).output().unwrap()
 }
 
-fn findoxide_output(args: &[OsString], workers: usize, with_env: bool) -> Output {
-    let mut command = Command::cargo_bin("findoxide").unwrap();
-    command.env("FINDOXIDE_WORKERS", workers.to_string());
+fn rushfind_output(args: &[OsString], workers: usize, with_env: bool) -> Output {
+    let mut command = Command::cargo_bin("rfd").unwrap();
+    command.env("RUSHFIND_WORKERS", workers.to_string());
     if with_env {
         apply_common_env(&mut command);
     }
@@ -31,7 +31,7 @@ fn findoxide_output(args: &[OsString], workers: usize, with_env: bool) -> Output
 
 pub fn assert_matches_gnu_exact(args: &[OsString]) {
     let expected = gnu_find_output(args, false);
-    let actual = findoxide_output(args, 1, false);
+    let actual = rushfind_output(args, 1, false);
 
     assert_eq!(actual.status.code(), expected.status.code());
     assert_eq!(actual.stdout, expected.stdout);
@@ -40,7 +40,7 @@ pub fn assert_matches_gnu_exact(args: &[OsString]) {
 
 pub fn assert_matches_gnu_as_sets(args: &[OsString]) {
     let expected = gnu_find_output(args, false);
-    let actual = findoxide_output(args, 4, false);
+    let actual = rushfind_output(args, 4, false);
 
     assert_eq!(actual.status.code(), expected.status.code());
     assert_eq!(lines(&actual.stdout), lines(&expected.stdout));
@@ -49,7 +49,7 @@ pub fn assert_matches_gnu_as_sets(args: &[OsString]) {
 
 pub fn assert_matches_gnu_exact_with_env(args: &[OsString]) {
     let expected = gnu_find_output(args, true);
-    let actual = findoxide_output(args, 1, true);
+    let actual = rushfind_output(args, 1, true);
 
     assert_eq!(actual.status.code(), expected.status.code());
     assert_eq!(actual.stdout, expected.stdout);
@@ -73,9 +73,9 @@ pub fn assert_matches_gnu_exact_with_input(args: &[OsString], input: &[u8], with
     drop(expected.stdin.take());
     let expected = expected.wait_with_output().unwrap();
 
-    let mut actual = Command::cargo_bin("findoxide").unwrap();
+    let mut actual = Command::cargo_bin("rfd").unwrap();
     actual
-        .env("FINDOXIDE_WORKERS", "1")
+        .env("RUSHFIND_WORKERS", "1")
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -97,7 +97,7 @@ pub fn assert_matches_gnu_exact_with_input(args: &[OsString], input: &[u8], with
 
 pub fn assert_matches_gnu_as_sets_with_env(args: &[OsString]) {
     let expected = gnu_find_output(args, true);
-    let actual = findoxide_output(args, 4, true);
+    let actual = rushfind_output(args, 4, true);
 
     assert_eq!(actual.status.code(), expected.status.code());
     assert_eq!(lines(&actual.stdout), lines(&expected.stdout));
@@ -106,7 +106,7 @@ pub fn assert_matches_gnu_as_sets_with_env(args: &[OsString]) {
 
 pub fn assert_matches_gnu_regex_outcome(args: &[OsString]) {
     let expected = gnu_find_output(args, false);
-    let actual = findoxide_output(args, 1, false);
+    let actual = rushfind_output(args, 1, false);
 
     assert_eq!(
         actual.status.success(),
@@ -132,7 +132,7 @@ pub fn assert_matches_gnu_regex_outcome(args: &[OsString]) {
 
 pub fn assert_matches_gnu_regex_outcome_as_sets(args: &[OsString]) {
     let expected = gnu_find_output(args, false);
-    let actual = findoxide_output(args, 4, false);
+    let actual = rushfind_output(args, 4, false);
 
     assert_eq!(
         actual.status.success(),
@@ -187,8 +187,8 @@ pub fn assert_file_output_matches_gnu_with_env(
         .output()
         .unwrap();
 
-    let mut actual_command = Command::cargo_bin("findoxide").unwrap();
-    actual_command.env("FINDOXIDE_WORKERS", workers.to_string());
+    let mut actual_command = Command::cargo_bin("rfd").unwrap();
+    actual_command.env("RUSHFIND_WORKERS", workers.to_string());
     apply_common_env(&mut actual_command);
     let actual = actual_command
         .args(args)
@@ -208,7 +208,7 @@ pub fn normalize_warning_program(bytes: &[u8]) -> Vec<String> {
         .unwrap()
         .lines()
         .map(|line| {
-            line.strip_prefix("findoxide: ")
+            line.strip_prefix("rfd: ")
                 .or_else(|| line.strip_prefix("find: "))
                 .unwrap_or(line)
                 .to_string()

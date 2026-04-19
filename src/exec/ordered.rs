@@ -91,7 +91,7 @@ impl<'a, W: std::io::Write, E: std::io::Write> OrderedActionSink<'a, W, E> {
             }
             Ok(None) => {}
             Err(error) => {
-                self.write_diagnostic(format!("findoxide: {error}"))?;
+                self.write_diagnostic(format!("rfd: {error}"))?;
                 self.had_action_failures = true;
                 status = status.merge(RuntimeStatus::action_failure());
             }

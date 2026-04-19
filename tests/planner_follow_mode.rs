@@ -1,9 +1,9 @@
 mod support;
 
-use findoxide::ast::FileTypeFilter;
-use findoxide::follow::FollowMode;
-use findoxide::parser::parse_command;
-use findoxide::planner::{RuntimeExpr, RuntimePredicate, plan_command};
+use rushfind::ast::FileTypeFilter;
+use rushfind::follow::FollowMode;
+use rushfind::parser::parse_command;
+use rushfind::planner::{RuntimeExpr, RuntimePredicate, plan_command};
 use support::argv;
 
 #[test]

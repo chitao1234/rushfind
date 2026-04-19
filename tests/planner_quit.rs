@@ -1,7 +1,7 @@
 mod support;
 
-use findoxide::parser::parse_command;
-use findoxide::planner::{RuntimeAction, RuntimeExpr, plan_command};
+use rushfind::parser::parse_command;
+use rushfind::planner::{RuntimeAction, RuntimeExpr, plan_command};
 use support::{argv, contains_action};
 
 #[test]

@@ -1,9 +1,9 @@
 mod support;
 
-use findoxide::identity::FileIdentity;
-use findoxide::numeric::NumericComparison;
-use findoxide::parser::parse_command;
-use findoxide::planner::{RuntimeExpr, RuntimePredicate, plan_command};
+use rushfind::identity::FileIdentity;
+use rushfind::numeric::NumericComparison;
+use rushfind::parser::parse_command;
+use rushfind::planner::{RuntimeExpr, RuntimePredicate, plan_command};
 use std::fs;
 use std::os::unix::fs as unix_fs;
 use support::{argv, path_arg};

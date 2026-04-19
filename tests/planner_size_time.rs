@@ -1,12 +1,12 @@
 mod support;
 
-use findoxide::birth::read_birth_time;
-use findoxide::literal_time::parse_literal_time;
-use findoxide::numeric::NumericComparison;
-use findoxide::parser::parse_command;
-use findoxide::planner::{RuntimeExpr, RuntimePredicate, plan_command, plan_command_with_now};
-use findoxide::size::{SizeMatcher, SizeUnit};
-use findoxide::time::{
+use rushfind::birth::read_birth_time;
+use rushfind::literal_time::parse_literal_time;
+use rushfind::numeric::NumericComparison;
+use rushfind::parser::parse_command;
+use rushfind::planner::{RuntimeExpr, RuntimePredicate, plan_command, plan_command_with_now};
+use rushfind::size::{SizeMatcher, SizeUnit};
+use rushfind::time::{
     NewerMatcher, RelativeTimeMatcher, RelativeTimeUnit, TimeComparison, Timestamp, TimestampKind,
     UsedMatcher, local_day_start,
 };

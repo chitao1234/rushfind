@@ -1,6 +1,6 @@
-use findoxide::entry::{EntryContext, EntryKind};
-use findoxide::follow::FollowMode;
-use findoxide::identity::FileIdentity;
+use rushfind::entry::{EntryContext, EntryKind};
+use rushfind::follow::FollowMode;
+use rushfind::identity::FileIdentity;
 use std::fs;
 use std::os::unix::fs::{self as unix_fs, MetadataExt};
 use tempfile::tempdir;

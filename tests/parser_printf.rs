@@ -1,6 +1,6 @@
 mod support;
 
-use findoxide::parser::parse_command;
+use rushfind::parser::parse_command;
 use support::argv;
 
 #[test]

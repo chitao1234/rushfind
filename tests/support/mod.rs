@@ -73,8 +73,8 @@ pub fn cargo_bin_output_with_env_timeout(
     envs: &[(&str, &str)],
     timeout: Duration,
 ) -> Output {
-    let mut command = Command::new(cargo_bin("findoxide"));
-    command.env("FINDOXIDE_WORKERS", workers.to_string());
+    let mut command = Command::new(cargo_bin("rfd"));
+    command.env("RUSHFIND_WORKERS", workers.to_string());
     for (key, value) in envs {
         command.env(key, value);
     }
@@ -91,7 +91,7 @@ pub fn cargo_bin_output_with_env_timeout(
         None => {
             child.kill().unwrap();
             let _ = child.wait();
-            panic!("findoxide did not exit within {:?}", timeout);
+            panic!("rfd did not exit within {:?}", timeout);
         }
     }
 }
@@ -102,9 +102,9 @@ pub fn cargo_bin_output_with_input_timeout(
     input: &[u8],
     timeout: Duration,
 ) -> Output {
-    let mut command = Command::new(cargo_bin("findoxide"));
+    let mut command = Command::new(cargo_bin("rfd"));
     command
-        .env("FINDOXIDE_WORKERS", workers.to_string())
+        .env("RUSHFIND_WORKERS", workers.to_string())
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -121,7 +121,7 @@ pub fn cargo_bin_output_with_input_timeout(
         None => {
             child.kill().unwrap();
             let _ = child.wait();
-            panic!("findoxide did not exit within {:?}", timeout);
+            panic!("rfd did not exit within {:?}", timeout);
         }
     }
 }

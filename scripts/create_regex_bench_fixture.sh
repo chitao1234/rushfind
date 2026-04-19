@@ -2,8 +2,8 @@
 set -euo pipefail
 
 root=${1:?usage: scripts/create_regex_bench_fixture.sh ROOT}
-dirs=${FINDOXIDE_REGEX_BENCH_DIRS:-48}
-files=${FINDOXIDE_REGEX_BENCH_FILES:-24}
+dirs=${RUSHFIND_REGEX_BENCH_DIRS:-48}
+files=${RUSHFIND_REGEX_BENCH_FILES:-24}
 
 rm -rf "$root"
 mkdir -p "$root/light" "$root/heavy" "$root/fallback"

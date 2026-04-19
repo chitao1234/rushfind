@@ -36,7 +36,7 @@ pub(crate) fn internal_poisoned(resource: &str) -> Diagnostic {
 }
 
 pub(crate) fn runtime_stderr_line(message: impl fmt::Display) -> Vec<u8> {
-    format!("findoxide: {message}\n").into_bytes()
+    format!("rfd: {message}\n").into_bytes()
 }
 
 impl fmt::Display for Diagnostic {

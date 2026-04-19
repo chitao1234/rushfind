@@ -1,10 +1,10 @@
-use findoxide::birth::read_birth_time;
-use findoxide::entry::EntryContext;
-use findoxide::eval::evaluate;
-use findoxide::follow::FollowMode;
-use findoxide::output::RecordingSink;
-use findoxide::planner::{RuntimeExpr, RuntimePredicate};
-use findoxide::time::{NewerMatcher, TimeComparison, Timestamp, TimestampKind, UsedMatcher};
+use rushfind::birth::read_birth_time;
+use rushfind::entry::EntryContext;
+use rushfind::eval::evaluate;
+use rushfind::follow::FollowMode;
+use rushfind::output::RecordingSink;
+use rushfind::planner::{RuntimeExpr, RuntimePredicate};
+use rushfind::time::{NewerMatcher, TimeComparison, Timestamp, TimestampKind, UsedMatcher};
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{self as unix_fs, MetadataExt};

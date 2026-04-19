@@ -1,8 +1,8 @@
 mod support;
 
-use findoxide::parser::parse_command;
-use findoxide::perm::{PermMatcher, parse_perm_argument};
-use findoxide::planner::{RuntimeExpr, RuntimePredicate, plan_command};
+use rushfind::parser::parse_command;
+use rushfind::perm::{PermMatcher, parse_perm_argument};
+use rushfind::planner::{RuntimeExpr, RuntimePredicate, plan_command};
 use std::ffi::OsStr;
 use support::argv;
 

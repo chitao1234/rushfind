@@ -50,7 +50,7 @@ pub(crate) fn run_prepared_inherited<E: Write>(
     match command.status() {
         Ok(status) => Ok(status.success()),
         Err(error) => {
-            writeln!(stderr, "findoxide: {}: {error}", program.to_string_lossy()).map_err(
+            writeln!(stderr, "rfd: {}: {error}", program.to_string_lossy()).map_err(
                 |io_error| Diagnostic::new(format!("failed to write stderr: {io_error}"), 1),
             )?;
             Ok(false)
@@ -106,7 +106,7 @@ fn run_parallel_command(
             send_broker_message(
                 broker,
                 BrokerMessage::Stderr(
-                    format!("findoxide: {}: {error}\n", program.to_string_lossy()).into_bytes(),
+                    format!("rfd: {}: {error}\n", program.to_string_lossy()).into_bytes(),
                 ),
             )?;
             return Ok(false);

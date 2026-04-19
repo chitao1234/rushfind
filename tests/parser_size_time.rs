@@ -1,7 +1,7 @@
 mod support;
 
-use findoxide::ast::{CommandAst, Expr, Predicate};
-use findoxide::parser::parse_command;
+use rushfind::ast::{CommandAst, Expr, Predicate};
+use rushfind::parser::parse_command;
 use std::ffi::OsString;
 use std::path::PathBuf;
 use support::argv;

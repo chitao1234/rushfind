@@ -188,9 +188,9 @@ fn ordered_exec_false_still_blocks_later_print_under_the_pipeline() {
     ];
 
     let expected = Command::new("find").args(&args).output().unwrap();
-    let actual = Command::cargo_bin("findoxide")
+    let actual = Command::cargo_bin("rfd")
         .unwrap()
-        .env("FINDOXIDE_WORKERS", "1")
+        .env("RUSHFIND_WORKERS", "1")
         .args(&args)
         .output()
         .unwrap();

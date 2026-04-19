@@ -3,7 +3,7 @@ set -euo pipefail
 
 repo_root=$(cd "$(dirname "$0")/.." && pwd)
 baseline_ref=${1:?usage: scripts/bench_parallel_engine.sh BASELINE_REF}
-workers=${FINDOXIDE_WORKERS:-8}
+workers=${RUSHFIND_WORKERS:-8}
 tmpdir=$(mktemp -d)
 baseline_tree="$tmpdir/baseline"
 fixture="$tmpdir/wide-tree"
@@ -26,7 +26,7 @@ run_case() {
         cd "$tree"
         cargo build --quiet >/dev/null
         /usr/bin/time -f "%E %MKB" \
-            env FINDOXIDE_WORKERS="$workers" \
+            env RUSHFIND_WORKERS="$workers" \
             cargo run --quiet -- "$fixture" -type f -printf '%p\n' >/dev/null
     )
 }

@@ -126,7 +126,7 @@ impl ParallelActionSink {
             Err(error) => {
                 send_broker_message(
                     &self.broker,
-                    BrokerMessage::Stderr(format!("findoxide: {error}\n").into_bytes()),
+                    BrokerMessage::Stderr(format!("rfd: {error}\n").into_bytes()),
                 )?;
                 self.mark_action_failure();
                 status = status.merge(RuntimeStatus::action_failure());

@@ -27,9 +27,9 @@ fn run_gnu(args: &[OsString]) -> Output {
 }
 
 fn run_fox(args: &[OsString]) -> Output {
-    Command::cargo_bin("findoxide")
+    Command::cargo_bin("rfd")
         .unwrap()
-        .env("FINDOXIDE_WORKERS", "1")
+        .env("RUSHFIND_WORKERS", "1")
         .env("LC_ALL", "C")
         .args(args)
         .output()

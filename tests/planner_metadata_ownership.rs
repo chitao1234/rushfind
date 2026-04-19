@@ -1,8 +1,8 @@
 mod support;
 
-use findoxide::numeric::NumericComparison;
-use findoxide::parser::parse_command;
-use findoxide::planner::{RuntimeExpr, RuntimePredicate, plan_command};
+use rushfind::numeric::NumericComparison;
+use rushfind::parser::parse_command;
+use rushfind::planner::{RuntimeExpr, RuntimePredicate, plan_command};
 #[cfg(unix)]
 use std::ffi::OsString;
 use std::fs;

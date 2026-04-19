@@ -1,8 +1,8 @@
 mod support;
 
-use findoxide::ast::{CommandAst, Expr, FileTypeFilter, GlobalOption, Predicate};
-use findoxide::follow::FollowMode;
-use findoxide::parser::parse_command;
+use rushfind::ast::{CommandAst, Expr, FileTypeFilter, GlobalOption, Predicate};
+use rushfind::follow::FollowMode;
+use rushfind::parser::parse_command;
 use support::argv;
 
 #[test]

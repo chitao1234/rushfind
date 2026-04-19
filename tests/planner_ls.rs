@@ -1,8 +1,8 @@
 mod support;
 
-use findoxide::parser::parse_command;
-use findoxide::planner::{RuntimeAction, plan_command, plan_command_with_now};
-use findoxide::time::Timestamp;
+use rushfind::parser::parse_command;
+use rushfind::planner::{RuntimeAction, plan_command, plan_command_with_now};
+use rushfind::time::Timestamp;
 use std::path::PathBuf;
 use support::{argv, contains_action};
 

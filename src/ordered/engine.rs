@@ -69,7 +69,7 @@ where
                 }
                 WalkEvent::Error(error) => {
                     had_runtime_errors = true;
-                    sink.write_diagnostic(format!("findoxide: {error}"))?;
+                    sink.write_diagnostic(format!("rfd: {error}"))?;
                 }
             }
             Ok(OrderedWalkDirective::Continue)
@@ -153,7 +153,7 @@ where
                     }
                     WalkEvent::Error(error) => {
                         had_runtime_errors = true;
-                        sink.write_diagnostic(format!("findoxide: {error}"))?;
+                        sink.write_diagnostic(format!("rfd: {error}"))?;
                     }
                 }
                 Ok(OrderedWalkDirective::Continue)

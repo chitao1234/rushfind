@@ -1,4 +1,4 @@
-use findoxide::planner::{RuntimeAction, RuntimeExpr, RuntimePredicate};
+use rushfind::planner::{RuntimeAction, RuntimeExpr, RuntimePredicate};
 
 pub fn action_labels<F>(expr: &RuntimeExpr, mut label: F) -> Vec<&'static str>
 where

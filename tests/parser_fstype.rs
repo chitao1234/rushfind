@@ -1,7 +1,7 @@
 mod support;
 
-use findoxide::ast::{Action, Expr, Predicate};
-use findoxide::parser::parse_command;
+use rushfind::ast::{Action, Expr, Predicate};
+use rushfind::parser::parse_command;
 use support::argv;
 
 #[test]

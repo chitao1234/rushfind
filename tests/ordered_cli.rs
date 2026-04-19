@@ -27,9 +27,9 @@ fn ordered_single_worker_matches_gnu_find_for_supported_subset() {
     ];
 
     let expected = Command::new("find").args(&args).output().unwrap();
-    let actual = Command::cargo_bin("findoxide")
+    let actual = Command::cargo_bin("rfd")
         .unwrap()
-        .env("FINDOXIDE_WORKERS", "1")
+        .env("RUSHFIND_WORKERS", "1")
         .args(&args)
         .output()
         .unwrap();
@@ -49,9 +49,9 @@ fn ordered_depth_print_matches_gnu_for_supported_subset() {
     let args = vec![path_arg(root.path()), "-depth".into(), "-print".into()];
 
     let expected = Command::new("find").args(&args).output().unwrap();
-    let actual = Command::cargo_bin("findoxide")
+    let actual = Command::cargo_bin("rfd")
         .unwrap()
-        .env("FINDOXIDE_WORKERS", "1")
+        .env("RUSHFIND_WORKERS", "1")
         .args(&args)
         .output()
         .unwrap();

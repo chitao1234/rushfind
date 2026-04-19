@@ -1,8 +1,8 @@
 mod support;
 
-use findoxide::parser::parse_command;
-use findoxide::planner::{RuntimeExpr, RuntimePredicate, plan_command};
-use findoxide::regex_match::RegexDialect;
+use rushfind::parser::parse_command;
+use rushfind::planner::{RuntimeExpr, RuntimePredicate, plan_command};
+use rushfind::regex_match::RegexDialect;
 use support::argv;
 
 #[test]

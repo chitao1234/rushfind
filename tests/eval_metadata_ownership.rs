@@ -1,9 +1,9 @@
-use findoxide::entry::EntryContext;
-use findoxide::eval::evaluate;
-use findoxide::follow::FollowMode;
-use findoxide::numeric::NumericComparison;
-use findoxide::output::RecordingSink;
-use findoxide::planner::{RuntimeExpr, RuntimePredicate};
+use rushfind::entry::EntryContext;
+use rushfind::eval::evaluate;
+use rushfind::follow::FollowMode;
+use rushfind::numeric::NumericComparison;
+use rushfind::output::RecordingSink;
+use rushfind::planner::{RuntimeExpr, RuntimePredicate};
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};

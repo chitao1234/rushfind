@@ -1,8 +1,8 @@
 mod support;
 
-use findoxide::file_output::FileOutputTerminator;
-use findoxide::parser::parse_command;
-use findoxide::planner::{
+use rushfind::file_output::FileOutputTerminator;
+use rushfind::parser::parse_command;
+use rushfind::planner::{
     OutputAction, RuntimeAction, RuntimeExpr, RuntimePredicate, plan_command,
 };
 use support::{argv, predicate_labels as collect_predicate_labels};
@@ -190,8 +190,8 @@ fn expr_label(expr: &RuntimeExpr) -> &'static str {
         RuntimeExpr::Action(RuntimeAction::ExecImmediate(_)) => "exec:semicolon",
         RuntimeExpr::Action(RuntimeAction::ExecBatched(_)) => "exec:batch",
         RuntimeExpr::Action(RuntimeAction::ExecPrompt(spec)) => match spec.semantics {
-            findoxide::exec::ExecSemantics::Normal => "ok:semicolon",
-            findoxide::exec::ExecSemantics::DirLocal => "okdir:semicolon",
+            rushfind::exec::ExecSemantics::Normal => "ok:semicolon",
+            rushfind::exec::ExecSemantics::DirLocal => "okdir:semicolon",
         },
         RuntimeExpr::And(_) => "and",
         RuntimeExpr::Or(_, _) => "or",
@@ -226,28 +226,28 @@ fn predicate_label(predicate: &RuntimePredicate) -> &'static str {
         RuntimePredicate::Used(_) => "used",
         RuntimePredicate::Newer(_) => "newer",
         RuntimePredicate::RelativeTime(matcher) => match (matcher.kind, matcher.unit) {
-            (findoxide::time::TimestampKind::Access, findoxide::time::RelativeTimeUnit::Days) => {
+            (rushfind::time::TimestampKind::Access, rushfind::time::RelativeTimeUnit::Days) => {
                 "atime"
             }
-            (findoxide::time::TimestampKind::Birth, _) => "time-birth",
-            (findoxide::time::TimestampKind::Change, findoxide::time::RelativeTimeUnit::Days) => {
+            (rushfind::time::TimestampKind::Birth, _) => "time-birth",
+            (rushfind::time::TimestampKind::Change, rushfind::time::RelativeTimeUnit::Days) => {
                 "ctime"
             }
             (
-                findoxide::time::TimestampKind::Modification,
-                findoxide::time::RelativeTimeUnit::Days,
+                rushfind::time::TimestampKind::Modification,
+                rushfind::time::RelativeTimeUnit::Days,
             ) => "mtime",
             (
-                findoxide::time::TimestampKind::Access,
-                findoxide::time::RelativeTimeUnit::Minutes,
+                rushfind::time::TimestampKind::Access,
+                rushfind::time::RelativeTimeUnit::Minutes,
             ) => "amin",
             (
-                findoxide::time::TimestampKind::Change,
-                findoxide::time::RelativeTimeUnit::Minutes,
+                rushfind::time::TimestampKind::Change,
+                rushfind::time::RelativeTimeUnit::Minutes,
             ) => "cmin",
             (
-                findoxide::time::TimestampKind::Modification,
-                findoxide::time::RelativeTimeUnit::Minutes,
+                rushfind::time::TimestampKind::Modification,
+                rushfind::time::RelativeTimeUnit::Minutes,
             ) => "mmin",
         },
         RuntimePredicate::Type(_) => "type",

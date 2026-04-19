@@ -1,8 +1,8 @@
-use findoxide::entry::EntryContext;
-use findoxide::eval::evaluate;
-use findoxide::follow::FollowMode;
-use findoxide::output::RecordingSink;
-use findoxide::planner::{OutputAction, RuntimeAction, RuntimeExpr, RuntimePredicate};
+use rushfind::entry::EntryContext;
+use rushfind::eval::evaluate;
+use rushfind::follow::FollowMode;
+use rushfind::output::RecordingSink;
+use rushfind::planner::{OutputAction, RuntimeAction, RuntimeExpr, RuntimePredicate};
 use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::tempdir;
@@ -51,7 +51,7 @@ fn type_predicate_filters_by_entry_kind() {
     fs::create_dir(&path).unwrap();
     let entry = entry_for(&path, 0);
     let expr = RuntimeExpr::Predicate(RuntimePredicate::Type(
-        findoxide::ast::FileTypeFilter::Directory,
+        rushfind::ast::FileTypeFilter::Directory,
     ));
     let mut sink = RecordingSink::default();
 

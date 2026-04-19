@@ -22,9 +22,9 @@ fn logical_mode_descends_through_symlinked_directories() {
     ];
 
     let expected = Command::new("find").args(&args).output().unwrap();
-    let actual = Command::cargo_bin("findoxide")
+    let actual = Command::cargo_bin("rfd")
         .unwrap()
-        .env("FINDOXIDE_WORKERS", "1")
+        .env("RUSHFIND_WORKERS", "1")
         .args(&args)
         .output()
         .unwrap();
@@ -49,9 +49,9 @@ fn command_line_only_mode_follows_symlinked_start_paths() {
     ];
 
     let expected = Command::new("find").args(&args).output().unwrap();
-    let actual = Command::cargo_bin("findoxide")
+    let actual = Command::cargo_bin("rfd")
         .unwrap()
-        .env("FINDOXIDE_WORKERS", "1")
+        .env("RUSHFIND_WORKERS", "1")
         .args(&args)
         .output()
         .unwrap();

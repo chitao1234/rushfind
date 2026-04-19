@@ -1,7 +1,7 @@
 mod support;
 
-use findoxide::parser::parse_command;
-use findoxide::planner::{OutputAction, RuntimeAction, plan_command};
+use rushfind::parser::parse_command;
+use rushfind::planner::{OutputAction, RuntimeAction, plan_command};
 use std::path::PathBuf;
 use support::{argv, contains_action};
 

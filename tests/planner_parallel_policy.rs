@@ -1,7 +1,7 @@
 mod support;
 
-use findoxide::parser::parse_command;
-use findoxide::planner::{ParallelExecutionPolicy, plan_command};
+use rushfind::parser::parse_command;
+use rushfind::planner::{ParallelExecutionPolicy, plan_command};
 use support::argv;
 
 #[test]

@@ -1,6 +1,6 @@
-# findoxide
+# rushfind
 
-`findoxide` is a fresh Rust implementation of Unix `find` that targets GNU `find` syntax while adding a parallel traversal engine.
+`rushfind` is a fresh Rust implementation of Unix `find` that targets GNU `find` syntax while adding a parallel traversal engine. The installed binary is `rfd`.
 
 ## v0 and stage-14 scope
 
@@ -73,16 +73,16 @@
   `@<unix-seconds>[.frac]`, `YYYY-MM-DD`, and `YYYY-MM-DD[ T]HH:MM[:SS][.frac][Z|±HH[:MM]]`
 - Installed GNU `find` builds can still reject `B` predicates on hosts where GNU findutils does
   not expose birth-time support; the current implementation keeps Linux-first `B` handling in
-  `findoxide`
+  `rushfind`
 
 ## Worker selection
 
-`findoxide` keeps the command-line syntax identical to GNU `find`.
+The `rfd` binary keeps the command-line syntax identical to GNU `find`.
 
-Use the `FINDOXIDE_WORKERS` environment variable to control execution mode:
+Use the `RUSHFIND_WORKERS` environment variable to control execution mode:
 
-- `FINDOXIDE_WORKERS=1` keeps traversal/output close to GNU ordering
-- `FINDOXIDE_WORKERS=4` enables the worker-owned relaxed-order parallel engine by default
+- `RUSHFIND_WORKERS=1` keeps traversal/output close to GNU ordering
+- `RUSHFIND_WORKERS=4` enables the worker-owned relaxed-order parallel engine by default
 
 ## Regex benchmark stage
 
@@ -90,7 +90,7 @@ Use the regex benchmark harness when you want end-to-end ordered versus parallel
 regex-heavy workloads:
 
 ```bash
-FINDOXIDE_WORKERS=8 FINDOXIDE_BENCH_REPEATS=5 bash scripts/bench_regex_stage.sh cd95653
+RUSHFIND_WORKERS=8 RUSHFIND_BENCH_REPEATS=5 bash scripts/bench_regex_stage.sh cd95653
 ```
 
 The script builds baseline and current release binaries outside the timed region, reuses one

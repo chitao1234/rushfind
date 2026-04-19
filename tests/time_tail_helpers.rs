@@ -1,6 +1,6 @@
-use findoxide::birth::read_birth_time;
-use findoxide::literal_time::parse_literal_time;
-use findoxide::time::Timestamp;
+use rushfind::birth::read_birth_time;
+use rushfind::literal_time::parse_literal_time;
+use rushfind::time::Timestamp;
 use std::ffi::OsStr;
 use std::path::Path;
 use tempfile::tempdir;

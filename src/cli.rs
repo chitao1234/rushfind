@@ -24,14 +24,14 @@ where
             }
         }
         Err(error) => {
-            eprintln!("findoxide: {}", error);
+            eprintln!("rfd: {}", error);
             error.exit_code
         }
     }
 }
 
 fn resolve_worker_count() -> usize {
-    std::env::var("FINDOXIDE_WORKERS")
+    std::env::var("RUSHFIND_WORKERS")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .filter(|value| *value > 0)

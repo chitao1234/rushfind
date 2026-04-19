@@ -196,8 +196,8 @@ mod tests {
         let mut stderr = Vec::new();
         write_startup_warnings(
             &[
-                "findoxide: warning: unrecognized escape `\\q'".into(),
-                "findoxide: warning: unrecognized escape `\\x'".into(),
+                "rfd: warning: unrecognized escape `\\q'".into(),
+                "rfd: warning: unrecognized escape `\\x'".into(),
             ],
             &mut stderr,
         )
@@ -205,8 +205,8 @@ mod tests {
 
         assert_eq!(
             String::from_utf8(stderr).unwrap(),
-            "findoxide: warning: unrecognized escape `\\q'\n\
-             findoxide: warning: unrecognized escape `\\x'\n"
+            "rfd: warning: unrecognized escape `\\q'\n\
+             rfd: warning: unrecognized escape `\\x'\n"
         );
     }
 

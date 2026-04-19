@@ -1,8 +1,8 @@
-use findoxide::entry::EntryContext;
-use findoxide::eval::evaluate;
-use findoxide::follow::FollowMode;
-use findoxide::output::RecordingSink;
-use findoxide::planner::{RuntimeExpr, RuntimePredicate};
+use rushfind::entry::EntryContext;
+use rushfind::eval::evaluate;
+use rushfind::follow::FollowMode;
+use rushfind::output::RecordingSink;
+use rushfind::planner::{RuntimeExpr, RuntimePredicate};
 use std::fs;
 use std::os::unix::fs as unix_fs;
 use std::path::{Path, PathBuf};

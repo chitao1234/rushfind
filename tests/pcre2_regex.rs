@@ -17,9 +17,9 @@ fn regex_foundation_matrix_pcre2_accepts_raw_syntax() {
     fs::write(root.path().join("src/lib.rs"), "lib\n").unwrap();
     fs::write(root.path().join("docs/Guide.txt"), "guide\n").unwrap();
 
-    let output = Command::cargo_bin("findoxide")
+    let output = Command::cargo_bin("rfd")
         .unwrap()
-        .env("FINDOXIDE_WORKERS", "1")
+        .env("RUSHFIND_WORKERS", "1")
         .args([
             path_arg(root.path()),
             "-regextype".into(),
@@ -36,9 +36,9 @@ fn regex_foundation_matrix_pcre2_accepts_raw_syntax() {
 #[test]
 fn regex_foundation_matrix_pcre2_reports_invalid_patterns() {
     let root = tempdir().unwrap();
-    let output = Command::cargo_bin("findoxide")
+    let output = Command::cargo_bin("rfd")
         .unwrap()
-        .env("FINDOXIDE_WORKERS", "1")
+        .env("RUSHFIND_WORKERS", "1")
         .args([
             path_arg(root.path()),
             "-regextype".into(),
@@ -68,9 +68,9 @@ fn regex_foundation_matrix_pcre2_matches_non_utf8_candidates_via_hex_escape() {
         ])));
     fs::write(&path, "target\n").unwrap();
 
-    let output = Command::cargo_bin("findoxide")
+    let output = Command::cargo_bin("rfd")
         .unwrap()
-        .env("FINDOXIDE_WORKERS", "1")
+        .env("RUSHFIND_WORKERS", "1")
         .args([
             path_arg(root.path()),
             "-maxdepth".into(),

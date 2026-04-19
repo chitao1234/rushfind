@@ -1,8 +1,8 @@
 mod support;
 
-use findoxide::exec::ExecSemantics;
-use findoxide::parser::parse_command;
-use findoxide::planner::{RuntimeAction, plan_command};
+use rushfind::exec::ExecSemantics;
+use rushfind::parser::parse_command;
+use rushfind::planner::{RuntimeAction, plan_command};
 use support::{action_labels, argv, contains_action};
 
 #[test]

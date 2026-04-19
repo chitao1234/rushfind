@@ -1,7 +1,7 @@
-use findoxide::entry::EntryContext;
-use findoxide::file_output::{FileOutputTerminator, render_file_print_bytes};
-use findoxide::output::render_output_bytes;
-use findoxide::planner::OutputAction;
+use rushfind::entry::EntryContext;
+use rushfind::file_output::{FileOutputTerminator, render_file_print_bytes};
+use rushfind::output::render_output_bytes;
+use rushfind::planner::OutputAction;
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
 use std::path::PathBuf;

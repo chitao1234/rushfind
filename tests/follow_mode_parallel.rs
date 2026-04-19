@@ -28,9 +28,9 @@ fn parallel_logical_mode_matches_gnu_find_as_a_set() {
     ];
 
     let expected = Command::new("find").args(&args).output().unwrap();
-    let actual = Command::cargo_bin("findoxide")
+    let actual = Command::cargo_bin("rfd")
         .unwrap()
-        .env("FINDOXIDE_WORKERS", "4")
+        .env("RUSHFIND_WORKERS", "4")
         .args(&args)
         .output()
         .unwrap();

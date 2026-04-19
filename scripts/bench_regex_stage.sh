@@ -3,8 +3,8 @@ set -euo pipefail
 
 repo_root=$(cd "$(dirname "$0")/.." && pwd)
 baseline_ref=${1:?usage: scripts/bench_regex_stage.sh BASELINE_REF}
-workers=${FINDOXIDE_WORKERS:-8}
-repeats=${FINDOXIDE_BENCH_REPEATS:-5}
+workers=${RUSHFIND_WORKERS:-8}
+repeats=${RUSHFIND_BENCH_REPEATS:-5}
 tmpdir=$(mktemp -d)
 baseline_tree="$tmpdir/baseline"
 fixture="$tmpdir/fixture"
@@ -24,7 +24,7 @@ build_binary() {
         cd "$tree"
         cargo build --quiet --release >/dev/null
     )
-    printf '%s\n' "$tree/target/release/findoxide"
+    printf '%s\n' "$tree/target/release/rfd"
 }
 
 median() {
@@ -50,7 +50,7 @@ time_case() {
     local output
     output=$(
         {
-            /usr/bin/time -f '%e' env FINDOXIDE_WORKERS="$case_workers" "$binary" "$@" >/dev/null
+            /usr/bin/time -f '%e' env RUSHFIND_WORKERS="$case_workers" "$binary" "$@" >/dev/null
         } 2>&1
     )
     printf '%s\n' "$output"
