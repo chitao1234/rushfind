@@ -64,6 +64,38 @@ pub fn assert_matches_gnu_as_sets_with_env(args: &[OsString]) {
     assert_eq!(lines(&actual.stderr), lines(&expected.stderr));
 }
 
+pub fn assert_matches_gnu_regex_outcome(args: &[OsString]) {
+    let expected = gnu_find_output(args, false);
+    let actual = findoxide_output(args, 1, false);
+
+    assert_eq!(actual.status.success(), expected.status.success(), "args: {:?}", args);
+    assert_eq!(actual.status.code(), expected.status.code(), "args: {:?}", args);
+    assert_eq!(actual.stdout, expected.stdout, "args: {:?}", args);
+
+    if expected.status.success() {
+        assert_eq!(actual.stderr, expected.stderr, "args: {:?}", args);
+    } else {
+        assert!(!expected.stderr.is_empty(), "args: {:?}", args);
+        assert!(!actual.stderr.is_empty(), "args: {:?}", args);
+    }
+}
+
+pub fn assert_matches_gnu_regex_outcome_as_sets(args: &[OsString]) {
+    let expected = gnu_find_output(args, false);
+    let actual = findoxide_output(args, 4, false);
+
+    assert_eq!(actual.status.success(), expected.status.success(), "args: {:?}", args);
+    assert_eq!(actual.status.code(), expected.status.code(), "args: {:?}", args);
+    assert_eq!(lines(&actual.stdout), lines(&expected.stdout), "args: {:?}", args);
+
+    if expected.status.success() {
+        assert_eq!(lines(&actual.stderr), lines(&expected.stderr), "args: {:?}", args);
+    } else {
+        assert!(!expected.stderr.is_empty(), "args: {:?}", args);
+        assert!(!actual.stderr.is_empty(), "args: {:?}", args);
+    }
+}
+
 pub fn assert_file_output_matches_gnu_with_env(
     args: &[OsString],
     action: &str,

@@ -87,7 +87,72 @@ pub fn parse_gnu_regex(
     pattern: &[u8],
 ) -> Result<GnuRegex, Diagnostic> {
     let tokens = lex_gnu_tokens(flag, dialect, pattern)?;
-    TokenParser::new(flag, dialect, &tokens).parse()
+    let regex = TokenParser::new(flag, dialect, &tokens).parse()?;
+    validate_gnu_regex(flag, dialect, &regex)?;
+    Ok(regex)
+}
+
+fn validate_gnu_regex(flag: &str, dialect: RegexDialect, regex: &GnuRegex) -> Result<(), Diagnostic> {
+    fn walk(
+        expr: &GnuExpr,
+        closed_captures: u16,
+        flag: &str,
+        dialect: RegexDialect,
+    ) -> Result<u16, Diagnostic> {
+        match expr {
+            GnuExpr::Empty
+            | GnuExpr::Literal(_)
+            | GnuExpr::Dot
+            | GnuExpr::Class(_)
+            | GnuExpr::Anchor(_)
+            | GnuExpr::Assertion(_)
+            | GnuExpr::WordByteClass { .. } => Ok(closed_captures),
+            GnuExpr::Backreference(index) if *index == 0 || *index > closed_captures => {
+                Err(malformed_regex(flag, dialect, "invalid back reference"))
+            }
+            GnuExpr::Backreference(_) => Ok(closed_captures),
+            GnuExpr::Concat(items) => {
+                let mut closed = closed_captures;
+                for item in items {
+                    closed = walk(item, closed, flag, dialect)?;
+                }
+                Ok(closed)
+            }
+            GnuExpr::Alternation(items) => {
+                let mut max_closed = closed_captures;
+                for item in items {
+                    max_closed = max_closed.max(walk(item, closed_captures, flag, dialect)?);
+                }
+                Ok(max_closed)
+            }
+            GnuExpr::Group {
+                capture_index,
+                expr,
+            } => {
+                let closed = walk(expr, closed_captures, flag, dialect)?;
+                Ok(closed.max(*capture_index))
+            }
+            GnuExpr::Repeat { expr, kind } => {
+                if let RepetitionKind::Bounded {
+                    min,
+                    max: Some(max),
+                } = kind
+                {
+                    if min > max {
+                        return Err(malformed_regex(
+                            flag,
+                            dialect,
+                            "invalid bounded repetition",
+                        ));
+                    }
+                }
+                walk(expr, closed_captures, flag, dialect)
+            }
+        }
+    }
+
+    let _ = walk(&regex.expr, 0, flag, dialect)?;
+    Ok(())
 }
 
 fn lex_gnu_tokens(

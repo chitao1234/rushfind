@@ -12,7 +12,8 @@ use std::process::Command;
 use support::{
     PRINTF_TIME_TZ, assert_file_output_matches_gnu_with_env, assert_matches_gnu_as_sets,
     assert_matches_gnu_as_sets_with_env, assert_matches_gnu_exact,
-    assert_matches_gnu_exact_with_env, lines, normalize_warning_program, path_arg,
+    assert_matches_gnu_exact_with_env, assert_matches_gnu_regex_outcome,
+    assert_matches_gnu_regex_outcome_as_sets, lines, normalize_warning_program, path_arg,
 };
 use tempfile::tempdir;
 
@@ -2542,6 +2543,17 @@ fn build_regex_bracket_review_tree() -> tempfile::TempDir {
     root
 }
 
+fn build_gnu_regex_hardening_tree() -> tempfile::TempDir {
+    let root = tempdir().unwrap();
+    for name in [
+        "a", "aa", "ab", "abab", "abcd", "cdcd", "foo", "foobar", "paren)", "+foo", "?foo",
+        "-", "\\",
+    ] {
+        fs::write(root.path().join(name), "x\n").unwrap();
+    }
+    root
+}
+
 #[test]
 fn gnu_review_followup_ordered_bracket_semantics_match_gnu_find_exactly() {
     let root = build_regex_bracket_review_tree();
@@ -2661,4 +2673,63 @@ fn gnu_review_followup_backward_ranges_are_rejected_like_gnu_find() {
         assert!(!actual.stderr.is_empty());
         assert!(!expected.stderr.is_empty());
     }
+}
+
+#[test]
+fn gnu_hardening_invalid_regex_outcomes_match_gnu_find() {
+    let root = build_gnu_regex_hardening_tree();
+
+    for args in [
+        vec![
+            path_arg(root.path()),
+            "-regextype".into(),
+            "posix-basic".into(),
+            "-regex".into(),
+            r".*/\1".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-regextype".into(),
+            "posix-extended".into(),
+            "-regex".into(),
+            r".*/\1".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-regextype".into(),
+            "posix-basic".into(),
+            "-regex".into(),
+            r".*/a\{2,1\}".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-regextype".into(),
+            "posix-extended".into(),
+            "-regex".into(),
+            r".*/a{2,1}".into(),
+        ],
+    ] {
+        assert_matches_gnu_regex_outcome(&args);
+    }
+}
+
+#[test]
+fn gnu_hardening_invalid_regex_outcomes_match_gnu_find_in_parallel_mode() {
+    let root = build_gnu_regex_hardening_tree();
+    let args = vec![
+        path_arg(root.path()),
+        "(".into(),
+        "-regextype".into(),
+        "posix-basic".into(),
+        "-regex".into(),
+        r".*/\1".into(),
+        "-o".into(),
+        "-regextype".into(),
+        "posix-extended".into(),
+        "-regex".into(),
+        r".*/a{2,1}".into(),
+        ")".into(),
+    ];
+
+    assert_matches_gnu_regex_outcome_as_sets(&args);
 }

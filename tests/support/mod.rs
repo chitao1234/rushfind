@@ -14,7 +14,8 @@ use wait_timeout::ChildExt;
 pub use gnu::{
     PRINTF_TIME_TZ, assert_file_output_matches_gnu_with_env, assert_matches_gnu_as_sets,
     assert_matches_gnu_as_sets_with_env, assert_matches_gnu_exact,
-    assert_matches_gnu_exact_with_env, normalize_warning_program,
+    assert_matches_gnu_exact_with_env, assert_matches_gnu_regex_outcome,
+    assert_matches_gnu_regex_outcome_as_sets, normalize_warning_program,
 };
 pub use planner::{action_labels, contains_action, contains_predicate, predicate_labels};
 

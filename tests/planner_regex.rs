@@ -198,6 +198,25 @@ fn gnu_review_followup_planning_rejects_backward_ranges() {
     }
 }
 
+#[test]
+fn gnu_hardening_invalid_regexes_are_planning_errors() {
+    for (dialect_name, pattern, expected_fragment) in [
+        ("posix-basic", r".*/\1", "invalid back reference"),
+        ("posix-extended", r".*/\1", "invalid back reference"),
+        ("posix-basic", r".*/a\{2,1\}", "invalid bounded repetition"),
+        ("posix-extended", r".*/a{2,1}", "invalid bounded repetition"),
+    ] {
+        let error = plan_command(
+            parse_command(&argv(&[".", "-regextype", dialect_name, "-regex", pattern])).unwrap(),
+            1,
+        )
+        .unwrap_err();
+
+        assert!(error.message.contains(dialect_name));
+        assert!(error.message.contains(expected_fragment));
+    }
+}
+
 fn regex_dialects(expr: &RuntimeExpr) -> Vec<RegexDialect> {
     let mut out = Vec::new();
     collect_regex_dialects(expr, &mut out);
