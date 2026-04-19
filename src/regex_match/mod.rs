@@ -1,9 +1,12 @@
 mod backend;
+mod gnu;
+mod ir;
 
 use crate::diagnostics::Diagnostic;
 use backend::{
     CompiledRegex, RegexBackendKind, compile_pcre2_anchored, compile_rust_anchored,
 };
+use gnu::compile_gnu_regex;
 use std::ffi::OsStr;
 use std::fmt::Write as _;
 
@@ -78,37 +81,34 @@ impl RegexMatcher {
         case_insensitive: bool,
     ) -> Result<Self, Diagnostic> {
         let original_pattern = pattern.as_encoded_bytes().to_vec();
-        let translated_pattern = match dialect {
+
+        let (backend, translated_pattern, compiled) = match dialect {
             RegexDialect::Emacs | RegexDialect::PosixExtended | RegexDialect::PosixBasic => {
-                translate_gnu_facing_subset(flag, dialect, &original_pattern)?
+                let compiled = compile_gnu_regex(flag, dialect, &original_pattern, case_insensitive)?;
+                (compiled.backend, compiled.translated_pattern, compiled.compiled)
             }
-            RegexDialect::Rust => translate_rust_bytes(&original_pattern),
-            RegexDialect::Pcre2 => std::str::from_utf8(&original_pattern)
-                .map(str::to_owned)
-                .map_err(|_| {
-                    Diagnostic::new(
-                        format!(
-                            "failed to compile pcre2 regex for `{flag}`: raw pcre2 patterns must be valid UTF-8; use PCRE2 byte escapes like `\\\\xFF` for arbitrary bytes"
-                        ),
-                        1,
-                    )
-                })?,
-        };
-        let anchored_pattern = format!(r"\A(?:{})\z", translated_pattern);
-        let (backend, compiled) = match dialect {
-            RegexDialect::Emacs | RegexDialect::PosixExtended | RegexDialect::PosixBasic | RegexDialect::Rust => (
-                RegexBackendKind::Rust,
-                compile_rust_anchored(
-                    flag,
-                    dialect.label(),
-                    &anchored_pattern,
-                    case_insensitive,
-                )?,
-            ),
-            RegexDialect::Pcre2 => (
-                RegexBackendKind::Pcre2,
-                compile_pcre2_anchored(flag, &anchored_pattern, case_insensitive)?,
-            ),
+            RegexDialect::Rust => {
+                let translated_pattern = translate_rust_bytes(&original_pattern);
+                let anchored_pattern = format!(r"\A(?:{})\z", translated_pattern);
+                let compiled =
+                    compile_rust_anchored(flag, dialect.label(), &anchored_pattern, case_insensitive)?;
+                (RegexBackendKind::Rust, translated_pattern, compiled)
+            }
+            RegexDialect::Pcre2 => {
+                let translated_pattern = std::str::from_utf8(&original_pattern)
+                    .map(str::to_owned)
+                    .map_err(|_| {
+                        Diagnostic::new(
+                            format!(
+                                "failed to compile pcre2 regex for `{flag}`: raw pcre2 patterns must be valid UTF-8; use PCRE2 byte escapes like `\\\\xFF` for arbitrary bytes"
+                            ),
+                            1,
+                        )
+                    })?;
+                let anchored_pattern = format!(r"\A(?:{})\z", translated_pattern);
+                let compiled = compile_pcre2_anchored(flag, &anchored_pattern, case_insensitive)?;
+                (RegexBackendKind::Pcre2, translated_pattern, compiled)
+            }
         };
 
         Ok(Self {
@@ -135,542 +135,19 @@ impl RegexMatcher {
     }
 }
 
-fn translate_gnu_facing_subset(
-    flag: &str,
-    dialect: RegexDialect,
-    pattern: &[u8],
-) -> Result<String, Diagnostic> {
-    let rules = GnuDialectRules::for_dialect(dialect);
-    GnuRegexScanner::new(flag, dialect, rules, pattern).translate()
-}
-
 fn translate_rust_bytes(pattern: &[u8]) -> String {
     let mut translated = String::new();
     for &byte in pattern {
-        push_rust_pattern_byte(&mut translated, byte);
+        match byte {
+            0x20..=0x7e => translated.push(char::from(byte)),
+            other => push_hex_byte(&mut translated, other),
+        }
     }
     translated
 }
 
-#[derive(Debug, Clone, Copy)]
-struct GnuDialectRules {
-    emacs_syntax: bool,
-    posix_basic_syntax: bool,
-    posix_extended_syntax: bool,
-}
-
-impl GnuDialectRules {
-    fn for_dialect(dialect: RegexDialect) -> Self {
-        match dialect {
-            RegexDialect::Emacs => Self {
-                emacs_syntax: true,
-                posix_basic_syntax: false,
-                posix_extended_syntax: false,
-            },
-            RegexDialect::PosixBasic => Self {
-                emacs_syntax: false,
-                posix_basic_syntax: true,
-                posix_extended_syntax: false,
-            },
-            RegexDialect::PosixExtended => Self {
-                emacs_syntax: false,
-                posix_basic_syntax: false,
-                posix_extended_syntax: true,
-            },
-            RegexDialect::Rust | RegexDialect::Pcre2 => {
-                unreachable!("direct backend regexes are not translated as GNU subsets")
-            }
-        }
-    }
-}
-
-struct GnuRegexScanner<'a> {
-    flag: &'a str,
-    dialect: RegexDialect,
-    rules: GnuDialectRules,
-    bytes: &'a [u8],
-    index: usize,
-    translated: String,
-    group_depth: usize,
-    can_repeat_atom: bool,
-    branch_start: bool,
-}
-
-impl<'a> GnuRegexScanner<'a> {
-    fn new(
-        flag: &'a str,
-        dialect: RegexDialect,
-        rules: GnuDialectRules,
-        pattern: &'a [u8],
-    ) -> Self {
-        Self {
-            flag,
-            dialect,
-            rules,
-            bytes: pattern,
-            index: 0,
-            translated: String::new(),
-            group_depth: 0,
-            can_repeat_atom: false,
-            branch_start: true,
-        }
-    }
-
-    fn translate(mut self) -> Result<String, Diagnostic> {
-        while let Some(byte) = self.next() {
-            match byte {
-                b'[' => self.translate_bracket_expression()?,
-                b'\\' => self.translate_escape()?,
-                b'^' if self.rules.emacs_syntax => self.translate_emacs_caret(),
-                b'$' if self.rules.emacs_syntax => self.translate_emacs_dollar(),
-                b'*' if self.rules.emacs_syntax => self.translate_contextual_postfix(b'*'),
-                b'+' | b'?' if self.rules.emacs_syntax => self.translate_contextual_postfix(byte),
-                b'(' if self.rules.posix_extended_syntax => {
-                    if self.peek() == Some(b'?') {
-                        return Err(unsupported_construct(
-                            self.flag,
-                            self.dialect,
-                            "non-capturing groups are out of scope",
-                        ));
-                    }
-                    self.open_group();
-                }
-                b')' if self.rules.posix_extended_syntax => self.close_group_operator()?,
-                b'|' if self.rules.posix_extended_syntax => self.push_alternation_operator(),
-                b'*' if self.rules.posix_basic_syntax => self.translated.push('*'),
-                b'*' | b'+' | b'?' if self.rules.posix_extended_syntax => {
-                    self.translated.push(char::from(byte));
-                }
-                b'{' | b'}' if self.rules.posix_extended_syntax => {
-                    self.translated.push(char::from(byte));
-                }
-                b'(' | b')' | b'|' | b'+' | b'?' | b'{' | b'}' if self.rules.posix_basic_syntax => {
-                    self.push_literal_atom(byte);
-                }
-                b'(' | b')' | b'|' | b'{' | b'}' if self.rules.emacs_syntax => {
-                    self.push_literal_atom(byte);
-                }
-                b'.' => {
-                    self.translated.push('.');
-                    self.mark_atom();
-                }
-                _ => self.push_literal_atom(byte),
-            }
-        }
-
-        if self.group_depth != 0 {
-            return Err(malformed_regex(self.flag, self.dialect, "unclosed group"));
-        }
-
-        Ok(self.translated)
-    }
-
-    fn translate_escape(&mut self) -> Result<(), Diagnostic> {
-        let escaped = self
-            .next()
-            .ok_or_else(|| malformed_regex(self.flag, self.dialect, "trailing `\\`"))?;
-
-        if escaped.is_ascii_digit() {
-            return Err(unsupported_construct(
-                self.flag,
-                self.dialect,
-                "backreferences are out of scope",
-            ));
-        }
-
-        if self.rules.posix_basic_syntax {
-            match escaped {
-                b'(' => self.open_group(),
-                b')' => self.close_group_operator()?,
-                b'|' => self.push_alternation_operator(),
-                b'+' | b'?' => self.translated.push(char::from(escaped)),
-                b'{' => self.translate_bre_bound()?,
-                b'\\' | b'.' | b'^' | b'$' | b'*' | b'[' | b']' | b'}' => {
-                    self.push_literal_atom(escaped)
-                }
-                other => {
-                    return Err(unsupported_construct(
-                        self.flag,
-                        self.dialect,
-                        format!("unsupported escape `{}`", escaped_display(other)),
-                    ));
-                }
-            }
-        } else if self.rules.emacs_syntax {
-            match escaped {
-                b'(' => self.open_group(),
-                b')' => self.close_group_operator()?,
-                b'|' => self.push_alternation_operator(),
-                b'{' => {
-                    if self.can_repeat_atom {
-                        self.translate_bre_bound()?;
-                    } else {
-                        self.push_literal_atom(b'{');
-                    }
-                }
-                b'\\' | b'.' | b'^' | b'$' | b'*' | b'+' | b'?' | b'[' | b']' | b'}' => {
-                    self.push_literal_atom(escaped)
-                }
-                other => self.push_literal_atom(other),
-            }
-        } else {
-            match escaped {
-                b'\\' | b'.' | b'^' | b'$' | b'*' | b'+' | b'?' | b'(' | b')' | b'|' | b'{'
-                | b'}' | b'[' | b']' => self.push_literal_atom(escaped),
-                other => {
-                    return Err(unsupported_construct(
-                        self.flag,
-                        self.dialect,
-                        format!("unsupported escape `{}`", escaped_display(other)),
-                    ));
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    fn translate_bre_bound(&mut self) -> Result<(), Diagnostic> {
-        let mut contents = String::new();
-
-        loop {
-            let byte = self.next().ok_or_else(|| {
-                malformed_regex(self.flag, self.dialect, "unterminated bounded repetition")
-            })?;
-
-            if byte == b'\\' {
-                let escaped = self.next().ok_or_else(|| {
-                    malformed_regex(self.flag, self.dialect, "unterminated bounded repetition")
-                })?;
-                if escaped == b'}' {
-                    break;
-                }
-                return Err(malformed_regex(
-                    self.flag,
-                    self.dialect,
-                    "malformed bounded repetition",
-                ));
-            }
-
-            if !byte.is_ascii() {
-                return Err(malformed_regex(
-                    self.flag,
-                    self.dialect,
-                    "malformed bounded repetition",
-                ));
-            }
-            contents.push(char::from(byte));
-        }
-
-        let normalized = normalize_repetition_bound(&contents).ok_or_else(|| {
-            malformed_regex(self.flag, self.dialect, "malformed bounded repetition")
-        })?;
-
-        self.translated.push('{');
-        self.translated.push_str(&normalized);
-        self.translated.push('}');
-        self.can_repeat_atom = false;
-        self.branch_start = false;
-        Ok(())
-    }
-
-    fn translate_bracket_expression(&mut self) -> Result<(), Diagnostic> {
-        self.translated.push('[');
-
-        if self.peek() == Some(b'^') {
-            self.index += 1;
-            self.translated.push('^');
-        }
-
-        if self.peek() == Some(b']') {
-            self.index += 1;
-            self.translated.push(']');
-        }
-
-        while let Some(byte) = self.next() {
-            match byte {
-                b']' => {
-                    self.translated.push(']');
-                    self.mark_atom();
-                    return Ok(());
-                }
-                b'[' => match self.peek() {
-                    Some(b':') => {
-                        self.index += 1;
-                        let name = self.take_posix_class_name()?;
-                        let fragment = posix_named_class_fragment(self.flag, self.dialect, &name)?;
-                        self.translated.push_str(fragment);
-                    }
-                    Some(b'.') => {
-                        return Err(unsupported_construct(
-                            self.flag,
-                            self.dialect,
-                            "POSIX collating symbols are out of scope",
-                        ));
-                    }
-                    Some(b'=') => {
-                        return Err(unsupported_construct(
-                            self.flag,
-                            self.dialect,
-                            "POSIX equivalence classes are out of scope",
-                        ));
-                    }
-                    _ => self.translated.push('['),
-                },
-                b'\\' => {
-                    if self.rules.emacs_syntax {
-                        self.translated.push('\\');
-                        self.translated.push('\\');
-                    } else {
-                        let escaped = self.next().ok_or_else(|| {
-                            malformed_regex(
-                                self.flag,
-                                self.dialect,
-                                "unterminated bracket expression",
-                            )
-                        })?;
-                        push_bracket_escaped_byte(&mut self.translated, escaped);
-                    }
-                }
-                _ => push_bracket_literal_byte(&mut self.translated, byte),
-            }
-        }
-
-        Err(malformed_regex(
-            self.flag,
-            self.dialect,
-            "unterminated bracket expression",
-        ))
-    }
-
-    fn take_posix_class_name(&mut self) -> Result<String, Diagnostic> {
-        let mut name = String::new();
-
-        loop {
-            let byte = self.next().ok_or_else(|| {
-                malformed_regex(
-                    self.flag,
-                    self.dialect,
-                    "unterminated POSIX character class",
-                )
-            })?;
-
-            if byte == b':' && self.peek() == Some(b']') {
-                self.index += 1;
-                return Ok(name);
-            }
-
-            if !byte.is_ascii() {
-                return Err(unsupported_construct(
-                    self.flag,
-                    self.dialect,
-                    "unsupported POSIX character class",
-                ));
-            }
-
-            name.push(char::from(byte));
-        }
-    }
-
-    fn close_group(&mut self) -> Result<(), Diagnostic> {
-        if self.group_depth == 0 {
-            return Err(malformed_regex(self.flag, self.dialect, "unmatched `)`"));
-        }
-        self.group_depth -= 1;
-        Ok(())
-    }
-
-    fn open_group(&mut self) {
-        self.group_depth += 1;
-        self.translated.push('(');
-        self.can_repeat_atom = false;
-        self.branch_start = true;
-    }
-
-    fn close_group_operator(&mut self) -> Result<(), Diagnostic> {
-        self.close_group()?;
-        self.translated.push(')');
-        self.mark_atom();
-        Ok(())
-    }
-
-    fn push_alternation_operator(&mut self) {
-        self.translated.push('|');
-        self.can_repeat_atom = false;
-        self.branch_start = true;
-    }
-
-    fn translate_emacs_caret(&mut self) {
-        if self.branch_start {
-            self.translated.push('^');
-            self.can_repeat_atom = false;
-            self.branch_start = false;
-        } else {
-            self.push_literal_atom(b'^');
-        }
-    }
-
-    fn translate_emacs_dollar(&mut self) {
-        if self.peek().is_none()
-            || (self.peek() == Some(b'\\') && matches!(self.peek_n(1), Some(b')') | Some(b'|')))
-        {
-            self.translated.push('$');
-            self.can_repeat_atom = false;
-            self.branch_start = false;
-        } else {
-            self.push_literal_atom(b'$');
-        }
-    }
-
-    fn translate_contextual_postfix(&mut self, byte: u8) {
-        if self.can_repeat_atom {
-            self.translated.push(char::from(byte));
-            self.can_repeat_atom = false;
-            self.branch_start = false;
-        } else {
-            self.push_literal_atom(byte);
-        }
-    }
-
-    fn push_literal_atom(&mut self, byte: u8) {
-        push_literal_regex_byte(&mut self.translated, byte);
-        self.mark_atom();
-    }
-
-    fn mark_atom(&mut self) {
-        self.can_repeat_atom = true;
-        self.branch_start = false;
-    }
-
-    fn next(&mut self) -> Option<u8> {
-        let byte = self.bytes.get(self.index).copied()?;
-        self.index += 1;
-        Some(byte)
-    }
-
-    fn peek(&self) -> Option<u8> {
-        self.bytes.get(self.index).copied()
-    }
-
-    fn peek_n(&self, offset: usize) -> Option<u8> {
-        self.bytes.get(self.index + offset).copied()
-    }
-}
-
-fn push_rust_pattern_byte(out: &mut String, byte: u8) {
-    match byte {
-        0x20..=0x7e => out.push(char::from(byte)),
-        other => push_hex_byte(out, other),
-    }
-}
-
-fn push_literal_regex_byte(out: &mut String, byte: u8) {
-    match byte {
-        b'.' | b'^' | b'$' | b'|' | b'(' | b')' | b'[' | b']' | b'{' | b'}' | b'*' | b'+'
-        | b'?' | b'\\' => {
-            out.push('\\');
-            out.push(char::from(byte));
-        }
-        0x20..=0x7e => out.push(char::from(byte)),
-        other => push_hex_byte(out, other),
-    }
-}
-
-fn push_bracket_literal_byte(out: &mut String, byte: u8) {
-    match byte {
-        0x20..=0x7e => out.push(char::from(byte)),
-        other => push_hex_byte(out, other),
-    }
-}
-
-fn push_bracket_escaped_byte(out: &mut String, byte: u8) {
-    match byte {
-        b'\\' | b']' | b'^' | b'-' => {
-            out.push('\\');
-            out.push(char::from(byte));
-        }
-        0x20..=0x7e => out.push(char::from(byte)),
-        other => push_hex_byte(out, other),
-    }
-}
-
 fn push_hex_byte(out: &mut String, byte: u8) {
     write!(out, r"\x{:02X}", byte).unwrap();
-}
-
-fn escaped_display(byte: u8) -> String {
-    match byte {
-        0x20..=0x7e => format!(r"\{}", char::from(byte)),
-        _ => format!(r"\x{:02X}", byte),
-    }
-}
-
-fn normalize_repetition_bound(contents: &str) -> Option<String> {
-    if let Some((left, right)) = contents.split_once(',') {
-        let left_valid = left.is_empty() || left.chars().all(|ch| ch.is_ascii_digit());
-        let right_valid = right.is_empty() || right.chars().all(|ch| ch.is_ascii_digit());
-
-        if !left_valid || !right_valid {
-            return None;
-        }
-
-        let lower = if left.is_empty() { "0" } else { left };
-        Some(format!("{lower},{right}"))
-    } else {
-        (!contents.is_empty() && contents.chars().all(|ch| ch.is_ascii_digit()))
-            .then(|| contents.to_owned())
-    }
-}
-
-fn posix_named_class_fragment(
-    flag: &str,
-    dialect: RegexDialect,
-    name: &str,
-) -> Result<&'static str, Diagnostic> {
-    match name {
-        "alnum" => Ok("A-Za-z0-9"),
-        "alpha" => Ok("A-Za-z"),
-        "blank" => Ok(r" \t"),
-        "cntrl" => Ok(r"\x00-\x1F\x7F"),
-        "digit" => Ok("0-9"),
-        "graph" => Ok("!-~"),
-        "lower" => Ok("a-z"),
-        "print" => Ok(r"\x20-\x7E"),
-        "punct" => Ok(r"!-/:-@\x5B-\x60{-~"),
-        "space" => Ok(r" \t\r\n\f\x0B"),
-        "upper" => Ok("A-Z"),
-        "xdigit" => Ok("A-Fa-f0-9"),
-        other => Err(unsupported_construct(
-            flag,
-            dialect,
-            format!("unsupported POSIX character class `[:{other}:]`"),
-        )),
-    }
-}
-
-fn unsupported_construct(
-    flag: &str,
-    dialect: RegexDialect,
-    reason: impl std::fmt::Display,
-) -> Diagnostic {
-    Diagnostic::new(
-        format!(
-            "unsupported construct in {} regex for `{flag}`: {reason}",
-            dialect.label()
-        ),
-        1,
-    )
-}
-
-fn malformed_regex(
-    flag: &str,
-    dialect: RegexDialect,
-    reason: impl std::fmt::Display,
-) -> Diagnostic {
-    Diagnostic::new(
-        format!("malformed {} regex for `{flag}`: {reason}", dialect.label()),
-        1,
-    )
 }
 
 #[cfg(test)]
