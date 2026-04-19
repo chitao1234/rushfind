@@ -5,6 +5,7 @@ pub struct GnuRegex {
 }
 
 impl GnuRegex {
+    #[cfg(test)]
     pub fn capture_count(&self) -> u16 {
         self.capture_count
     }
@@ -27,6 +28,9 @@ pub enum GnuExpr {
         kind: RepetitionKind,
     },
     Anchor(AnchorKind),
+    Backreference(u16),
+    Assertion(AssertionKind),
+    WordByteClass { negated: bool },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,4 +57,14 @@ pub enum RepetitionKind {
 pub enum AnchorKind {
     Start,
     End,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssertionKind {
+    WordBoundary,
+    NotWordBoundary,
+    WordStart,
+    WordEnd,
+    BufferStart,
+    BufferEnd,
 }

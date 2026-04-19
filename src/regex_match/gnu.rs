@@ -1,5 +1,9 @@
-use super::backend::{CompiledRegex, RegexBackendKind, compile_rust_anchored};
-use super::ir::{AnchorKind, ClassExpr, ClassItem, GnuExpr, GnuRegex, RepetitionKind};
+use super::backend::{
+    CompiledRegex, RegexBackendKind, compile_pcre2_anchored, compile_rust_anchored,
+};
+use super::ir::{
+    AnchorKind, AssertionKind, ClassExpr, ClassItem, GnuExpr, GnuRegex, RepetitionKind,
+};
 use super::RegexDialect;
 use crate::diagnostics::Diagnostic;
 use std::fmt::Write as _;
@@ -15,6 +19,9 @@ enum GnuToken {
     GroupClose,
     Alternation,
     Quantifier(RepetitionKind),
+    Backreference(u16),
+    Assertion(AssertionKind),
+    WordByteClass { negated: bool },
 }
 
 pub struct GnuCompiled {
@@ -33,10 +40,17 @@ pub fn compile_gnu_regex(
     let backend = choose_backend(&expr);
     let translated_pattern = match backend {
         RegexBackendKind::Rust => lower_to_rust(&expr.expr)?,
-        RegexBackendKind::Pcre2 => unreachable!("task 3 GNU IR only supports the Rust fast path"),
+        RegexBackendKind::Pcre2 => lower_to_pcre2(&expr.expr)?,
     };
     let anchored_pattern = format!(r"\A(?:{})\z", translated_pattern);
-    let compiled = compile_rust_anchored(flag, dialect.label(), &anchored_pattern, case_insensitive)?;
+    let compiled = match backend {
+        RegexBackendKind::Rust => {
+            compile_rust_anchored(flag, dialect.label(), &anchored_pattern, case_insensitive)?
+        }
+        RegexBackendKind::Pcre2 => {
+            compile_pcre2_anchored(flag, &anchored_pattern, case_insensitive)?
+        }
+    };
 
     Ok(GnuCompiled {
         backend,
@@ -48,11 +62,13 @@ pub fn compile_gnu_regex(
 pub fn choose_backend(expr: &GnuRegex) -> RegexBackendKind {
     fn visit(node: &GnuExpr) -> RegexBackendKind {
         match node {
+            GnuExpr::Backreference(_) | GnuExpr::Assertion(_) => RegexBackendKind::Pcre2,
             GnuExpr::Empty
             | GnuExpr::Literal(_)
             | GnuExpr::Dot
             | GnuExpr::Class(_)
-            | GnuExpr::Anchor(_) => RegexBackendKind::Rust,
+            | GnuExpr::Anchor(_)
+            | GnuExpr::WordByteClass { .. } => RegexBackendKind::Rust,
             GnuExpr::Concat(items) | GnuExpr::Alternation(items) => items
                 .iter()
                 .map(visit)
@@ -96,10 +112,11 @@ fn lex_gnu_tokens(
                 }
                 b')' => {
                     if group_depth == 0 {
-                        return Err(malformed_regex(flag, dialect, "unmatched `)`"));
+                        GnuToken::Literal(b')')
+                    } else {
+                        group_depth -= 1;
+                        GnuToken::GroupClose
                     }
-                    group_depth -= 1;
-                    GnuToken::GroupClose
                 }
                 b'|' => GnuToken::Alternation,
                 b'*' => GnuToken::Quantifier(RepetitionKind::ZeroOrMore),
@@ -153,7 +170,11 @@ fn lex_gnu_tokens(
 
         can_repeat_atom = matches!(
             token,
-            GnuToken::Literal(_) | GnuToken::Dot | GnuToken::Class(_) | GnuToken::GroupClose
+            GnuToken::Literal(_)
+                | GnuToken::Dot
+                | GnuToken::Class(_)
+                | GnuToken::GroupClose
+                | GnuToken::WordByteClass { .. }
         );
         branch_start = matches!(token, GnuToken::GroupOpen | GnuToken::Alternation);
         tokens.push(token);
@@ -180,16 +201,9 @@ fn lex_bre_or_emacs_escape(
         .ok_or_else(|| malformed_regex(flag, dialect, "trailing `\\`"))?;
     *index += 1;
 
-    if escaped.is_ascii_digit() {
-        return Err(unsupported_construct(
-            flag,
-            dialect,
-            "backreferences are out of scope",
-        ));
-    }
-
     match dialect {
         RegexDialect::PosixBasic => match escaped {
+            b'1'..=b'9' => Ok(GnuToken::Backreference((escaped - b'0') as u16)),
             b'(' => {
                 *group_depth += 1;
                 Ok(GnuToken::GroupOpen)
@@ -202,11 +216,22 @@ fn lex_bre_or_emacs_escape(
                 Ok(GnuToken::GroupClose)
             }
             b'|' => Ok(GnuToken::Alternation),
-            b'+' => Ok(GnuToken::Quantifier(RepetitionKind::OneOrMore)),
-            b'?' => Ok(GnuToken::Quantifier(RepetitionKind::ZeroOrOne)),
-            b'{' => Ok(GnuToken::Quantifier(lex_basic_bound(
+            b'+' if can_repeat_atom => Ok(GnuToken::Quantifier(RepetitionKind::OneOrMore)),
+            b'+' => Ok(GnuToken::Literal(b'+')),
+            b'?' if can_repeat_atom => Ok(GnuToken::Quantifier(RepetitionKind::ZeroOrOne)),
+            b'?' => Ok(GnuToken::Literal(b'?')),
+            b'{' if can_repeat_atom => Ok(GnuToken::Quantifier(lex_basic_bound(
                 flag, dialect, pattern, index,
             )?)),
+            b'{' => Ok(GnuToken::Literal(b'{')),
+            b'w' => Ok(GnuToken::WordByteClass { negated: false }),
+            b'W' => Ok(GnuToken::WordByteClass { negated: true }),
+            b'b' => Ok(GnuToken::Assertion(AssertionKind::WordBoundary)),
+            b'B' => Ok(GnuToken::Assertion(AssertionKind::NotWordBoundary)),
+            b'<' => Ok(GnuToken::Assertion(AssertionKind::WordStart)),
+            b'>' => Ok(GnuToken::Assertion(AssertionKind::WordEnd)),
+            b'`' => Ok(GnuToken::Assertion(AssertionKind::BufferStart)),
+            b'\'' => Ok(GnuToken::Assertion(AssertionKind::BufferEnd)),
             b'\\' | b'.' | b'^' | b'$' | b'*' | b'[' | b']' | b'}' => {
                 Ok(GnuToken::Literal(escaped))
             }
@@ -232,6 +257,11 @@ fn lex_bre_or_emacs_escape(
             b'{' if can_repeat_atom => Ok(GnuToken::Quantifier(lex_basic_bound(
                 flag, dialect, pattern, index,
             )?)),
+            b'1'..=b'9' => Err(unsupported_construct(
+                flag,
+                dialect,
+                "backreferences are out of scope",
+            )),
             b'\\' | b'.' | b'^' | b'$' | b'*' | b'+' | b'?' | b'[' | b']' | b'}' => {
                 Ok(GnuToken::Literal(escaped))
             }
@@ -253,15 +283,16 @@ fn lex_extended_escape(
         .ok_or_else(|| malformed_regex(flag, dialect, "trailing `\\`"))?;
     *index += 1;
 
-    if escaped.is_ascii_digit() {
-        return Err(unsupported_construct(
-            flag,
-            dialect,
-            "backreferences are out of scope",
-        ));
-    }
-
     match escaped {
+        b'1'..=b'9' => Ok(GnuToken::Backreference((escaped - b'0') as u16)),
+        b'w' => Ok(GnuToken::WordByteClass { negated: false }),
+        b'W' => Ok(GnuToken::WordByteClass { negated: true }),
+        b'b' => Ok(GnuToken::Assertion(AssertionKind::WordBoundary)),
+        b'B' => Ok(GnuToken::Assertion(AssertionKind::NotWordBoundary)),
+        b'<' => Ok(GnuToken::Assertion(AssertionKind::WordStart)),
+        b'>' => Ok(GnuToken::Assertion(AssertionKind::WordEnd)),
+        b'`' => Ok(GnuToken::Assertion(AssertionKind::BufferStart)),
+        b'\'' => Ok(GnuToken::Assertion(AssertionKind::BufferEnd)),
         b'\\' | b'.' | b'^' | b'$' | b'*' | b'+' | b'?' | b'(' | b')' | b'|' | b'{' | b'}'
         | b'[' | b']' => Ok(GnuToken::Literal(escaped)),
         other => Err(unsupported_construct(
@@ -574,6 +605,9 @@ impl<'a> TokenParser<'a> {
             GnuToken::GroupOpen => self.parse_group(),
             GnuToken::GroupClose => Err(malformed_regex(self.flag, self.dialect, "unmatched `)`")),
             GnuToken::Alternation => Ok(GnuExpr::Empty),
+            GnuToken::Backreference(index) => Ok(GnuExpr::Backreference(index)),
+            GnuToken::Assertion(kind) => Ok(GnuExpr::Assertion(kind)),
+            GnuToken::WordByteClass { negated } => Ok(GnuExpr::WordByteClass { negated }),
             GnuToken::Quantifier(_) => Err(malformed_regex(
                 self.flag,
                 self.dialect,
@@ -608,18 +642,28 @@ impl<'a> TokenParser<'a> {
 
 fn lower_to_rust(expr: &GnuExpr) -> Result<String, Diagnostic> {
     let mut out = String::new();
-    render_expr(expr, &mut out)?;
+    render_expr(expr, &mut out, RegexBackendKind::Rust)?;
     Ok(out)
 }
 
-fn render_expr(expr: &GnuExpr, out: &mut String) -> Result<(), Diagnostic> {
+fn lower_to_pcre2(expr: &GnuExpr) -> Result<String, Diagnostic> {
+    let mut out = String::new();
+    render_expr(expr, &mut out, RegexBackendKind::Pcre2)?;
+    Ok(out)
+}
+
+fn render_expr(
+    expr: &GnuExpr,
+    out: &mut String,
+    backend: RegexBackendKind,
+) -> Result<(), Diagnostic> {
     match expr {
         GnuExpr::Empty => {}
         GnuExpr::Literal(byte) => push_literal_regex_byte(out, *byte),
         GnuExpr::Dot => out.push('.'),
         GnuExpr::Concat(items) => {
             for item in items {
-                render_expr(item, out)?;
+                render_expr(item, out, backend)?;
             }
         }
         GnuExpr::Alternation(items) => {
@@ -628,13 +672,13 @@ fn render_expr(expr: &GnuExpr, out: &mut String) -> Result<(), Diagnostic> {
                 if index > 0 {
                     out.push('|');
                 }
-                render_expr(item, out)?;
+                render_expr(item, out, backend)?;
             }
             out.push(')');
         }
         GnuExpr::Group { expr, .. } => {
             out.push('(');
-            render_expr(expr, out)?;
+            render_expr(expr, out, backend)?;
             out.push(')');
         }
         GnuExpr::Class(class) => {
@@ -651,7 +695,7 @@ fn render_expr(expr: &GnuExpr, out: &mut String) -> Result<(), Diagnostic> {
             out.push(']');
         }
         GnuExpr::Repeat { expr, kind } => {
-            render_repeated_expr(expr, out)?;
+            render_repeated_expr(expr, out, backend)?;
             match kind {
                 RepetitionKind::ZeroOrMore => out.push('*'),
                 RepetitionKind::OneOrMore => out.push('+'),
@@ -665,19 +709,53 @@ fn render_expr(expr: &GnuExpr, out: &mut String) -> Result<(), Diagnostic> {
         }
         GnuExpr::Anchor(AnchorKind::Start) => out.push('^'),
         GnuExpr::Anchor(AnchorKind::End) => out.push('$'),
+        GnuExpr::Backreference(index) => {
+            debug_assert_eq!(backend, RegexBackendKind::Pcre2);
+            write!(out, r"\{}", index).unwrap();
+        }
+        GnuExpr::Assertion(AssertionKind::WordBoundary) => {
+            debug_assert_eq!(backend, RegexBackendKind::Pcre2);
+            out.push_str(r"\b");
+        }
+        GnuExpr::Assertion(AssertionKind::NotWordBoundary) => {
+            debug_assert_eq!(backend, RegexBackendKind::Pcre2);
+            out.push_str(r"\B");
+        }
+        GnuExpr::Assertion(AssertionKind::WordStart) => {
+            debug_assert_eq!(backend, RegexBackendKind::Pcre2);
+            out.push_str(r"\b(?=\w)");
+        }
+        GnuExpr::Assertion(AssertionKind::WordEnd) => {
+            debug_assert_eq!(backend, RegexBackendKind::Pcre2);
+            out.push_str(r"\b(?<=\w)");
+        }
+        GnuExpr::Assertion(AssertionKind::BufferStart) => {
+            debug_assert_eq!(backend, RegexBackendKind::Pcre2);
+            out.push_str(r"\A");
+        }
+        GnuExpr::Assertion(AssertionKind::BufferEnd) => {
+            debug_assert_eq!(backend, RegexBackendKind::Pcre2);
+            out.push_str(r"\z");
+        }
+        GnuExpr::WordByteClass { negated: false } => out.push_str(r"\w"),
+        GnuExpr::WordByteClass { negated: true } => out.push_str(r"\W"),
     }
     Ok(())
 }
 
-fn render_repeated_expr(expr: &GnuExpr, out: &mut String) -> Result<(), Diagnostic> {
+fn render_repeated_expr(
+    expr: &GnuExpr,
+    out: &mut String,
+    backend: RegexBackendKind,
+) -> Result<(), Diagnostic> {
     match expr {
         GnuExpr::Alternation(_) | GnuExpr::Concat(_) => {
             out.push_str("(?:");
-            render_expr(expr, out)?;
+            render_expr(expr, out, backend)?;
             out.push(')');
             Ok(())
         }
-        _ => render_expr(expr, out),
+        _ => render_expr(expr, out, backend),
     }
 }
 
@@ -784,5 +862,26 @@ mod tests {
         .unwrap();
 
         assert_eq!(choose_backend(&expr), RegexBackendKind::Rust);
+    }
+
+    #[test]
+    fn gnu_foundation_ere_unmatched_close_paren_is_literal() {
+        let expr = parse_gnu_regex("-regex", RegexDialect::PosixExtended, br".*/paren)").unwrap();
+
+        assert_eq!(choose_backend(&expr), RegexBackendKind::Rust);
+    }
+
+    #[test]
+    fn gnu_foundation_backreferences_force_pcre2_fallback() {
+        let expr = parse_gnu_regex("-regex", RegexDialect::PosixBasic, br".*/\(.\)\1").unwrap();
+
+        assert_eq!(choose_backend(&expr), RegexBackendKind::Pcre2);
+    }
+
+    #[test]
+    fn gnu_foundation_boundary_escapes_force_pcre2_fallback() {
+        let expr = parse_gnu_regex("-regex", RegexDialect::PosixExtended, br".*/\<foo\>").unwrap();
+
+        assert_eq!(choose_backend(&expr), RegexBackendKind::Pcre2);
     }
 }

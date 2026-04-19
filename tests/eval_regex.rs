@@ -211,6 +211,83 @@ fn pcre2_regextype_remains_whole_path_anchored() {
     assert!(!matcher.is_match(OsStr::new("./src/lib.rs")).unwrap());
 }
 
+#[test]
+fn gnu_foundation_posix_extended_unmatched_close_paren_matches_literal_names() {
+    let matcher = RegexMatcher::compile(
+        "-regex",
+        RegexDialect::PosixExtended,
+        OsStr::new(".*/paren)"),
+        false,
+    )
+    .unwrap();
+
+    assert!(matcher.is_match(OsStr::new("./paren)")).unwrap());
+}
+
+#[test]
+fn gnu_foundation_posix_basic_contextual_plus_and_question_match_gnu_examples() {
+    let plus = RegexMatcher::compile(
+        "-regex",
+        RegexDialect::PosixBasic,
+        OsStr::new(r".*/\(\+foo\)"),
+        false,
+    )
+    .unwrap();
+    let question = RegexMatcher::compile(
+        "-regex",
+        RegexDialect::PosixBasic,
+        OsStr::new(r".*/\(\?foo\)"),
+        false,
+    )
+    .unwrap();
+
+    assert!(plus.is_match(OsStr::new("./+foo")).unwrap());
+    assert!(question.is_match(OsStr::new("./?foo")).unwrap());
+}
+
+#[test]
+fn gnu_foundation_bre_and_ere_backreferences_match() {
+    let bre = RegexMatcher::compile(
+        "-regex",
+        RegexDialect::PosixBasic,
+        OsStr::new(r".*/\(.\)\1"),
+        false,
+    )
+    .unwrap();
+    let ere = RegexMatcher::compile(
+        "-regex",
+        RegexDialect::PosixExtended,
+        OsStr::new(r".*/(.)\1"),
+        false,
+    )
+    .unwrap();
+
+    assert!(bre.is_match(OsStr::new("./aa")).unwrap());
+    assert!(ere.is_match(OsStr::new("./aa")).unwrap());
+}
+
+#[test]
+fn gnu_foundation_bre_and_ere_gnu_escapes_match() {
+    let word = RegexMatcher::compile(
+        "-regex",
+        RegexDialect::PosixExtended,
+        OsStr::new(r".*/\<foo\>"),
+        false,
+    )
+    .unwrap();
+    let boundary = RegexMatcher::compile(
+        "-regex",
+        RegexDialect::PosixBasic,
+        OsStr::new(r".*/\bfoo\b"),
+        false,
+    )
+    .unwrap();
+
+    assert!(word.is_match(OsStr::new("./foo")).unwrap());
+    assert!(boundary.is_match(OsStr::new("./foo")).unwrap());
+    assert!(!word.is_match(OsStr::new("./foobar")).unwrap());
+}
+
 fn entry_for(path: &Path, depth: usize) -> EntryContext {
     EntryContext::new(PathBuf::from(path), depth, true)
 }

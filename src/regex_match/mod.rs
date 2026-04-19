@@ -347,18 +347,32 @@ mod tests {
     }
 
     #[test]
-    fn gnu_facing_dialects_reject_backreferences() {
-        for dialect in [
-            RegexDialect::Emacs,
-            RegexDialect::PosixExtended,
-            RegexDialect::PosixBasic,
+    fn gnu_foundation_backreferences_use_pcre2_backend() {
+        for (dialect, pattern) in [
+            (RegexDialect::PosixBasic, r".*/\(.\)\1"),
+            (RegexDialect::PosixExtended, r".*/(.)\1"),
         ] {
-            let error =
-                RegexMatcher::compile("-regex", dialect, OsStr::new("\\1"), false).unwrap_err();
+            let matcher = RegexMatcher::compile("-regex", dialect, OsStr::new(pattern), false)
+                .unwrap();
 
-            assert!(error.message.contains(dialect.label()));
-            assert!(error.message.contains("backreferences are out of scope"));
+            assert_eq!(matcher.backend_kind(), RegexBackendKind::Pcre2);
+            assert!(matcher.is_match(OsStr::new("./aa")).unwrap());
         }
+    }
+
+    #[test]
+    fn gnu_foundation_boundary_escapes_use_pcre2_backend() {
+        let matcher = RegexMatcher::compile(
+            "-regex",
+            RegexDialect::PosixExtended,
+            OsStr::new(r".*/\<foo\>"),
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(matcher.backend_kind(), RegexBackendKind::Pcre2);
+        assert!(matcher.is_match(OsStr::new("./foo")).unwrap());
+        assert!(!matcher.is_match(OsStr::new("./foobar")).unwrap());
     }
 
     #[test]
