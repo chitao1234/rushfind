@@ -106,7 +106,7 @@ impl ActionSink for WorkerActionSink {
         context: &EvalContext,
     ) -> Result<ActionOutcome, Diagnostic> {
         match action {
-            RuntimeAction::Output(_) | RuntimeAction::Printf(_) => {
+            RuntimeAction::Output(_) | RuntimeAction::Printf(_) | RuntimeAction::Ls => {
                 let bytes = render_runtime_action_bytes(action, entry, follow_mode, context)?;
                 self.broker
                     .send(BrokerMessage::Stdout(bytes))
@@ -130,10 +130,11 @@ impl ActionSink for WorkerActionSink {
                 self.file_outputs.write_record(*destination, &bytes)?;
                 Ok(ActionOutcome::matched_true())
             }
-            RuntimeAction::Ls | RuntimeAction::FileLs { .. } => Err(Diagnostic::new(
-                "internal error: ls actions are not wired into parallel execution yet",
-                1,
-            )),
+            RuntimeAction::FileLs { destination } => {
+                let bytes = crate::ls::render_ls_record(entry, follow_mode, context)?;
+                self.file_outputs.write_record(*destination, &bytes)?;
+                Ok(ActionOutcome::matched_true())
+            }
             RuntimeAction::Quit => {
                 self.control.request_quit();
                 Ok(ActionOutcome::quit())

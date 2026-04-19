@@ -407,7 +407,7 @@ impl ParallelActionSink {
         context: &EvalContext,
     ) -> Result<ActionOutcome, Diagnostic> {
         match action {
-            RuntimeAction::Output(_) | RuntimeAction::Printf(_) => {
+            RuntimeAction::Output(_) | RuntimeAction::Printf(_) | RuntimeAction::Ls => {
                 send_broker_message(
                     &self.broker,
                     BrokerMessage::Stdout(render_runtime_action_bytes(
@@ -419,16 +419,14 @@ impl ParallelActionSink {
                 )?;
                 Ok(ActionOutcome::matched_true())
             }
-            RuntimeAction::FilePrint { .. } | RuntimeAction::FilePrintf { .. } => {
+            RuntimeAction::FilePrint { .. }
+            | RuntimeAction::FilePrintf { .. }
+            | RuntimeAction::FileLs { .. } => {
                 Err(Diagnostic::new(
                     "internal error: file-backed output actions are not wired into parallel execution yet",
                     1,
                 ))
             }
-            RuntimeAction::Ls | RuntimeAction::FileLs { .. } => Err(Diagnostic::new(
-                "internal error: ls actions are not wired into parallel execution yet",
-                1,
-            )),
             RuntimeAction::Quit => Ok(ActionOutcome::quit()),
             RuntimeAction::ExecImmediate(spec) => run_immediate_parallel(
                 spec,

@@ -38,7 +38,7 @@ pub(crate) fn render_ls_record(
     let path = escape_ls_bytes(entry.path.as_os_str().as_bytes());
     let suffix = render_symlink_suffix(entry, follow_mode)?;
 
-    let mut out = format!("{inode:>10} {blocks_1k:>6} {mode} {links:>3} ").into_bytes();
+    let mut out = format!("{inode:>9} {blocks_1k:>6} {mode} {links:>3} ").into_bytes();
     append_padded_field(&mut out, &owner, OWNER_GROUP_FIELD_WIDTH);
     out.push(b' ');
     append_padded_field(&mut out, &group, OWNER_GROUP_FIELD_WIDTH);

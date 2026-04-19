@@ -389,6 +389,35 @@ fn assert_matches_gnu_as_sets_with_env(args: &[OsString]) {
     assert_eq!(lines(&actual.stderr), lines(&expected.stderr));
 }
 
+fn assert_fls_matches_gnu_exact_with_env(_root: &Path, args: Vec<OsString>) {
+    let out_dir = tempdir().unwrap();
+    let gnu_out = out_dir.path().join("gnu.ls");
+    let oxide_out = out_dir.path().join("oxide.ls");
+
+    let gnu = Command::new("find")
+        .env("LC_ALL", "C")
+        .env("TZ", PRINTF_TIME_TZ)
+        .args(&args)
+        .arg("-fls")
+        .arg(&gnu_out)
+        .output()
+        .unwrap();
+    let oxide = Command::cargo_bin("findoxide")
+        .unwrap()
+        .env("FINDOXIDE_WORKERS", "1")
+        .env("LC_ALL", "C")
+        .env("TZ", PRINTF_TIME_TZ)
+        .args(&args)
+        .arg("-fls")
+        .arg(&oxide_out)
+        .output()
+        .unwrap();
+
+    assert_eq!(oxide.status.code(), gnu.status.code());
+    assert_eq!(oxide.stderr, gnu.stderr);
+    assert_eq!(fs::read(&oxide_out).unwrap(), fs::read(&gnu_out).unwrap());
+}
+
 fn normalize_warning_program(bytes: &[u8]) -> Vec<String> {
     String::from_utf8(bytes.to_vec())
         .unwrap()
@@ -1505,6 +1534,55 @@ fn parallel_family_a_matches_gnu_find_as_sets() {
         assert_eq!(actual.status.code(), expected.status.code());
         assert_eq!(lines(&actual.stdout), lines(&expected.stdout));
     }
+}
+
+#[test]
+fn ls_matches_gnu_for_weird_names_and_follow_modes() {
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("plain"), "x").unwrap();
+    fs::write(root.path().join("space name"), "x").unwrap();
+    fs::write(root.path().join("tab\tname"), "x").unwrap();
+    fs::write(root.path().join("line\nbreak"), "x").unwrap();
+    fs::write(root.path().join("old-file"), "x").unwrap();
+    let touch_status = Command::new("touch")
+        .args(["-t", "202001020304.05"])
+        .arg(root.path().join("old-file"))
+        .status()
+        .unwrap();
+    assert!(touch_status.success());
+    unix_fs::symlink("plain", root.path().join("root-link")).unwrap();
+    unix_fs::symlink("space name", root.path().join("space-link")).unwrap();
+
+    assert_matches_gnu_exact_with_env(&[
+        path_arg(root.path()),
+        "-maxdepth".into(),
+        "1".into(),
+        "-ls".into(),
+    ]);
+    assert_matches_gnu_exact_with_env(&[
+        "-L".into(),
+        path_arg(root.path().join("root-link").as_path()),
+        "-maxdepth".into(),
+        "0".into(),
+        "-ls".into(),
+    ]);
+    assert_matches_gnu_exact_with_env(&[
+        "-H".into(),
+        path_arg(root.path().join("root-link").as_path()),
+        "-maxdepth".into(),
+        "0".into(),
+        "-ls".into(),
+    ]);
+    assert_matches_gnu_as_sets_with_env(&[
+        path_arg(root.path()),
+        "-maxdepth".into(),
+        "1".into(),
+        "-ls".into(),
+    ]);
+    assert_fls_matches_gnu_exact_with_env(
+        root.path(),
+        vec![path_arg(root.path()), "-maxdepth".into(), "1".into()],
+    );
 }
 
 #[test]

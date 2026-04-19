@@ -2,7 +2,7 @@ mod support;
 
 use std::fs;
 use std::time::Duration;
-use support::{cargo_bin_output_with_timeout, path_arg};
+use support::{cargo_bin_output_with_timeout, newline_records, path_arg};
 use tempfile::tempdir;
 
 #[test]
@@ -81,4 +81,32 @@ fn ordered_fls_shared_destination_appends_without_retruncating() {
     let rendered = String::from_utf8_lossy(&fs::read(&out).unwrap()).into_owned();
     assert!(rendered.contains("alpha.txt"));
     assert!(rendered.contains("[alpha.txt]"));
+}
+
+#[test]
+fn parallel_fls_keeps_each_record_atomic_per_destination() {
+    let root = tempdir().unwrap();
+    let out_dir = tempdir().unwrap();
+    fs::write(root.path().join("alpha file.txt"), "a\n").unwrap();
+    fs::write(root.path().join("beta\tfile.txt"), "b\n").unwrap();
+    let out = out_dir.path().join("parallel.ls");
+
+    let output = cargo_bin_output_with_timeout(
+        &[
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-type".into(),
+            "f".into(),
+            "-fls".into(),
+            path_arg(&out),
+        ],
+        4,
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    let records = newline_records(&fs::read(&out).unwrap());
+    assert_eq!(records.len(), 2);
+    assert!(records.iter().all(|record| record.windows(4).any(|w| w == b".txt")));
 }
