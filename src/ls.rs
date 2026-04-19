@@ -233,8 +233,14 @@ mod tests {
     #[test]
     fn recent_window_is_inclusive_at_both_edges() {
         let now = Timestamp::new(1_700_000_000, 0);
-        assert!(recent_window_contains(now, Timestamp::new(1_700_000_000 - 15_552_000, 0)));
-        assert!(recent_window_contains(now, Timestamp::new(1_700_000_000 + 3_600, 0)));
+        assert!(recent_window_contains(
+            now,
+            Timestamp::new(1_700_000_000 - 15_552_000, 0)
+        ));
+        assert!(recent_window_contains(
+            now,
+            Timestamp::new(1_700_000_000 + 3_600, 0)
+        ));
     }
 
     #[test]
@@ -300,7 +306,10 @@ mod tests {
             b"CST".to_vec(),
         );
 
-        assert_eq!(render_ls_time_column(&recent, now).unwrap(), b"Nov 14 22:12");
+        assert_eq!(
+            render_ls_time_column(&recent, now).unwrap(),
+            b"Nov 14 22:12"
+        );
         assert_eq!(render_ls_time_column(&old, now).unwrap(), b"May 18  2023");
     }
 }

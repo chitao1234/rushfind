@@ -108,5 +108,9 @@ fn parallel_fls_keeps_each_record_atomic_per_destination() {
     assert_eq!(output.status.code(), Some(0));
     let records = newline_records(&fs::read(&out).unwrap());
     assert_eq!(records.len(), 2);
-    assert!(records.iter().all(|record| record.windows(4).any(|w| w == b".txt")));
+    assert!(
+        records
+            .iter()
+            .all(|record| record.windows(4).any(|w| w == b".txt"))
+    );
 }

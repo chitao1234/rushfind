@@ -100,7 +100,8 @@ impl<'a, W: Write> ActionSink for StdoutSink<'a, W> {
         follow_mode: FollowMode,
         context: &EvalContext,
     ) -> Result<ActionOutcome, Diagnostic> {
-        let (RuntimeAction::Output(_) | RuntimeAction::Printf(_) | RuntimeAction::Ls) = action else {
+        let (RuntimeAction::Output(_) | RuntimeAction::Printf(_) | RuntimeAction::Ls) = action
+        else {
             return Err(Diagnostic::new(
                 "internal error: plain stdout sink cannot execute runtime actions",
                 1,
@@ -138,7 +139,8 @@ impl ActionSink for RecordingSink {
         follow_mode: FollowMode,
         context: &EvalContext,
     ) -> Result<ActionOutcome, Diagnostic> {
-        let (RuntimeAction::Output(_) | RuntimeAction::Printf(_) | RuntimeAction::Ls) = action else {
+        let (RuntimeAction::Output(_) | RuntimeAction::Printf(_) | RuntimeAction::Ls) = action
+        else {
             return Err(Diagnostic::new(
                 "internal error: recording sink cannot execute runtime actions",
                 1,

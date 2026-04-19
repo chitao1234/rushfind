@@ -133,7 +133,10 @@ impl EvalContext {
 
     pub(crate) fn evaluation_now(&self) -> Result<Timestamp, Diagnostic> {
         self.evaluation_now.ok_or_else(|| {
-            Diagnostic::new("internal error: ls rendering requires a frozen runtime now", 1)
+            Diagnostic::new(
+                "internal error: ls rendering requires a frozen runtime now",
+                1,
+            )
         })
     }
 }

@@ -10,7 +10,12 @@ use support::argv;
 fn ls_family_suppresses_implicit_print_and_deduplicates_destinations() {
     let plan = plan_command(
         parse_command(&argv(&[
-            ".", "-fls", "report.txt", "-fprint", "report.txt", "-ls",
+            ".",
+            "-fls",
+            "report.txt",
+            "-fprint",
+            "report.txt",
+            "-ls",
         ]))
         .unwrap(),
         1,
@@ -27,8 +32,7 @@ fn ls_family_suppresses_implicit_print_and_deduplicates_destinations() {
 #[test]
 fn ls_plans_capture_the_frozen_now_timestamp() {
     let now = Timestamp::new(1_700_000_000, 250_000_000);
-    let plan = plan_command_with_now(parse_command(&argv(&[".", "-ls"])).unwrap(), 1, now)
-        .unwrap();
+    let plan = plan_command_with_now(parse_command(&argv(&[".", "-ls"])).unwrap(), 1, now).unwrap();
 
     assert_eq!(plan.runtime.evaluation_now, now);
 }

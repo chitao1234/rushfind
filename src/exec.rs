@@ -421,12 +421,10 @@ impl ParallelActionSink {
             }
             RuntimeAction::FilePrint { .. }
             | RuntimeAction::FilePrintf { .. }
-            | RuntimeAction::FileLs { .. } => {
-                Err(Diagnostic::new(
-                    "internal error: file-backed output actions are not wired into parallel execution yet",
-                    1,
-                ))
-            }
+            | RuntimeAction::FileLs { .. } => Err(Diagnostic::new(
+                "internal error: file-backed output actions are not wired into parallel execution yet",
+                1,
+            )),
             RuntimeAction::Quit => Ok(ActionOutcome::quit()),
             RuntimeAction::ExecImmediate(spec) => run_immediate_parallel(
                 spec,
