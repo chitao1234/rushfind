@@ -7,6 +7,7 @@ use backend::{CompiledRegex, RegexBackendKind, compile_pcre2_anchored, compile_r
 use gnu::compile_gnu_regex;
 use std::ffi::OsStr;
 use std::fmt::Write as _;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RegexDialect {
@@ -50,7 +51,7 @@ impl RegexDialect {
 }
 
 #[derive(Debug, Clone)]
-pub struct RegexMatcher {
+struct RegexMatcherInner {
     dialect: RegexDialect,
     backend: RegexBackendKind,
     original_pattern: Vec<u8>,
@@ -59,13 +60,26 @@ pub struct RegexMatcher {
     compiled: CompiledRegex,
 }
 
-impl PartialEq for RegexMatcher {
+impl PartialEq for RegexMatcherInner {
     fn eq(&self, other: &Self) -> bool {
         self.dialect == other.dialect
             && self.backend == other.backend
             && self.original_pattern == other.original_pattern
             && self.translated_pattern == other.translated_pattern
             && self.case_insensitive == other.case_insensitive
+    }
+}
+
+impl Eq for RegexMatcherInner {}
+
+#[derive(Debug, Clone)]
+pub struct RegexMatcher {
+    inner: Arc<RegexMatcherInner>,
+}
+
+impl PartialEq for RegexMatcher {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner) || *self.inner == *other.inner
     }
 }
 
@@ -119,26 +133,28 @@ impl RegexMatcher {
         };
 
         Ok(Self {
-            dialect,
-            backend,
-            original_pattern,
-            translated_pattern,
-            case_insensitive,
-            compiled,
+            inner: Arc::new(RegexMatcherInner {
+                dialect,
+                backend,
+                original_pattern,
+                translated_pattern,
+                case_insensitive,
+                compiled,
+            }),
         })
     }
 
     pub fn dialect(&self) -> RegexDialect {
-        self.dialect
+        self.inner.dialect
     }
 
     #[cfg(test)]
     pub(crate) fn backend_kind(&self) -> RegexBackendKind {
-        self.backend
+        self.inner.backend
     }
 
     pub fn is_match(&self, candidate: &OsStr) -> Result<bool, Diagnostic> {
-        self.compiled.is_match(candidate.as_encoded_bytes())
+        self.inner.compiled.is_match(candidate.as_encoded_bytes())
     }
 }
 
@@ -195,6 +211,24 @@ mod tests {
             assert!(matcher.is_match(OsStr::new("./A7")).unwrap());
             assert!(!matcher.is_match(OsStr::new("./é7")).unwrap());
         }
+    }
+
+    #[test]
+    fn regex_matcher_clone_is_small_and_preserves_matches() {
+        assert!(std::mem::size_of::<RegexMatcher>() <= 2 * std::mem::size_of::<usize>());
+
+        let matcher = RegexMatcher::compile(
+            "-regex",
+            RegexDialect::PosixExtended,
+            OsStr::new(".*/(src|docs)/.*\\.rs"),
+            false,
+        )
+        .unwrap();
+        let cloned = matcher.clone();
+
+        assert_eq!(matcher, cloned);
+        assert_eq!(matcher.backend_kind(), cloned.backend_kind());
+        assert!(cloned.is_match(OsStr::new("./src/lib.rs")).unwrap());
     }
 
     #[test]

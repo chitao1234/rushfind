@@ -376,6 +376,29 @@ fn gnu_hardening_focus_emacs_backreference_eval_stays_correct() {
     assert!(!evaluate(&expr, &entry_for(&abcd, 0), FollowMode::Physical, &mut sink).unwrap());
 }
 
+#[test]
+fn repeated_regex_predicates_can_share_one_compiled_matcher() {
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("src")).unwrap();
+    let path = root.path().join("src/lib.rs");
+    fs::write(&path, "pub fn lib() {}\n").unwrap();
+
+    let matcher = RegexMatcher::compile(
+        "-regex",
+        RegexDialect::PosixExtended,
+        OsStr::new(".*/src/.*\\.rs"),
+        false,
+    )
+    .unwrap();
+    let expr = RuntimeExpr::And(vec![
+        RuntimeExpr::Predicate(RuntimePredicate::Regex(matcher.clone())),
+        RuntimeExpr::Predicate(RuntimePredicate::Regex(matcher)),
+    ]);
+    let mut sink = RecordingSink::default();
+
+    assert!(evaluate(&expr, &entry_for(&path, 1), FollowMode::Physical, &mut sink).unwrap());
+}
+
 fn entry_for(path: &Path, depth: usize) -> EntryContext {
     EntryContext::new(PathBuf::from(path), depth, true)
 }
