@@ -98,7 +98,7 @@ fn rust_mode_accepts_non_utf8_literal_bytes_in_patterns() {
     let matcher =
         RegexMatcher::compile("-regex", RegexDialect::Rust, pattern.as_os_str(), false).unwrap();
 
-    assert!(matcher.is_match(path.as_os_str()));
+    assert!(matcher.is_match(path.as_os_str()).unwrap());
 }
 
 #[cfg(unix)]
@@ -119,7 +119,7 @@ fn gnu_facing_dialects_accept_non_utf8_literal_bytes_in_patterns() {
     )
     .unwrap();
 
-    assert!(matcher.is_match(path.as_os_str()));
+    assert!(matcher.is_match(path.as_os_str()).unwrap());
 }
 
 #[test]
@@ -199,8 +199,16 @@ fn gnu_facing_named_classes_use_ascii_c_locale_semantics() {
     )
     .unwrap();
 
-    assert!(ascii.is_match(OsStr::new("./A7.txt")));
-    assert!(!ascii.is_match(OsStr::new("./é7.txt")));
+    assert!(ascii.is_match(OsStr::new("./A7.txt")).unwrap());
+    assert!(!ascii.is_match(OsStr::new("./é7.txt")).unwrap());
+}
+
+#[test]
+fn pcre2_regextype_remains_whole_path_anchored() {
+    let matcher = RegexMatcher::compile("-regex", RegexDialect::Pcre2, OsStr::new("lib"), false)
+        .unwrap();
+
+    assert!(!matcher.is_match(OsStr::new("./src/lib.rs")).unwrap());
 }
 
 fn entry_for(path: &Path, depth: usize) -> EntryContext {

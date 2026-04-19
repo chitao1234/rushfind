@@ -82,6 +82,25 @@ fn unsupported_regextype_is_a_planning_error() {
     assert!(error.message.contains("posix-extended"));
     assert!(error.message.contains("posix-basic"));
     assert!(error.message.contains("rust"));
+    assert!(error.message.contains("pcre2"));
+}
+
+#[test]
+fn pcre2_regextype_lowers_into_pcre2_matchers() {
+    let plan = plan_command(
+        parse_command(&argv(&[
+            ".",
+            "-regextype",
+            "pcre2",
+            "-regex",
+            ".*/(?:src|docs)/.+\\.(?:rs|txt)",
+        ]))
+        .unwrap(),
+        1,
+    )
+    .unwrap();
+
+    assert_eq!(regex_dialects(&plan.expr), vec![RegexDialect::Pcre2]);
 }
 
 #[cfg(unix)]
