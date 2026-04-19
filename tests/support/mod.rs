@@ -1,4 +1,7 @@
-#![allow(dead_code)]
+#![allow(dead_code, unused_imports)]
+
+pub mod gnu;
+pub mod planner;
 
 use assert_cmd::cargo::cargo_bin;
 use std::collections::BTreeSet;
@@ -8,12 +11,25 @@ use std::process::{Command, Output, Stdio};
 use std::time::Duration;
 use wait_timeout::ChildExt;
 
+pub use gnu::{
+    PRINTF_TIME_TZ, assert_file_output_matches_gnu_with_env, assert_matches_gnu_as_sets,
+    assert_matches_gnu_as_sets_with_env, assert_matches_gnu_exact,
+    assert_matches_gnu_exact_with_env, normalize_warning_program,
+};
+pub use planner::{action_labels, contains_action, contains_predicate, predicate_labels};
+
 pub fn argv(parts: &[&str]) -> Vec<OsString> {
     parts.iter().map(OsString::from).collect()
 }
 
 pub fn path_arg(path: &Path) -> OsString {
     path.as_os_str().to_os_string()
+}
+
+pub fn temp_output_path(name: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(name);
+    (dir, path)
 }
 
 pub fn lines(bytes: &[u8]) -> BTreeSet<String> {

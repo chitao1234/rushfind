@@ -2,7 +2,7 @@ mod support;
 
 use std::fs;
 use std::time::Duration;
-use support::{cargo_bin_output_with_timeout, path_arg};
+use support::{cargo_bin_output_with_timeout, path_arg, temp_output_path};
 use tempfile::tempdir;
 
 #[test]
@@ -139,10 +139,9 @@ fn ordered_fprint_destination_is_visible_when_created_inside_the_tree() {
 #[test]
 fn parallel_fprintf_keeps_each_record_atomic_per_destination() {
     let root = tempdir().unwrap();
-    let out_dir = tempdir().unwrap();
     fs::write(root.path().join("alpha.txt"), "a\n").unwrap();
     fs::write(root.path().join("beta.txt"), "b\n").unwrap();
-    let out = out_dir.path().join("parallel.txt");
+    let (_out_dir, out) = temp_output_path("parallel.txt");
 
     let output = cargo_bin_output_with_timeout(
         &[

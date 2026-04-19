@@ -2,7 +2,7 @@ mod support;
 
 use std::fs;
 use std::time::Duration;
-use support::{cargo_bin_output_with_timeout, newline_records, path_arg};
+use support::{cargo_bin_output_with_timeout, newline_records, path_arg, temp_output_path};
 use tempfile::tempdir;
 
 #[test]
@@ -86,10 +86,9 @@ fn ordered_fls_shared_destination_appends_without_retruncating() {
 #[test]
 fn parallel_fls_keeps_each_record_atomic_per_destination() {
     let root = tempdir().unwrap();
-    let out_dir = tempdir().unwrap();
     fs::write(root.path().join("alpha file.txt"), "a\n").unwrap();
     fs::write(root.path().join("beta\tfile.txt"), "b\n").unwrap();
-    let out = out_dir.path().join("parallel.ls");
+    let (_out_dir, out) = temp_output_path("parallel.ls");
 
     let output = cargo_bin_output_with_timeout(
         &[

@@ -9,7 +9,11 @@ use std::io::{Seek, SeekFrom, Write};
 use std::os::unix::fs::{self as unix_fs, MetadataExt, PermissionsExt};
 use std::path::Path;
 use std::process::Command;
-use support::{lines, path_arg};
+use support::{
+    PRINTF_TIME_TZ, assert_file_output_matches_gnu_with_env, assert_matches_gnu_as_sets,
+    assert_matches_gnu_as_sets_with_env, assert_matches_gnu_exact,
+    assert_matches_gnu_exact_with_env, lines, normalize_warning_program, path_arg,
+};
 use tempfile::tempdir;
 
 fn build_tree() -> tempfile::TempDir {
@@ -317,120 +321,6 @@ fn current_fstype(path: &Path) -> OsString {
     OsString::from(String::from_utf8(output.stdout).unwrap().trim().to_owned())
 }
 
-const PRINTF_TIME_TZ: &str = "Asia/Shanghai";
-
-fn assert_matches_gnu_exact(args: &[OsString]) {
-    let expected = Command::new("find").args(args).output().unwrap();
-    let actual = Command::cargo_bin("findoxide")
-        .unwrap()
-        .env("FINDOXIDE_WORKERS", "1")
-        .args(args)
-        .output()
-        .unwrap();
-
-    assert_eq!(actual.status.code(), expected.status.code());
-    assert_eq!(actual.stdout, expected.stdout);
-    assert_eq!(actual.stderr, expected.stderr);
-}
-
-fn assert_matches_gnu_as_sets(args: &[OsString]) {
-    let expected = Command::new("find").args(args).output().unwrap();
-    let actual = Command::cargo_bin("findoxide")
-        .unwrap()
-        .env("FINDOXIDE_WORKERS", "4")
-        .args(args)
-        .output()
-        .unwrap();
-
-    assert_eq!(actual.status.code(), expected.status.code());
-    assert_eq!(lines(&actual.stdout), lines(&expected.stdout));
-    assert_eq!(lines(&actual.stderr), lines(&expected.stderr));
-}
-
-fn assert_matches_gnu_exact_with_env(args: &[OsString]) {
-    let expected = Command::new("find")
-        .env("LC_ALL", "C")
-        .env("TZ", PRINTF_TIME_TZ)
-        .args(args)
-        .output()
-        .unwrap();
-    let actual = Command::cargo_bin("findoxide")
-        .unwrap()
-        .env("FINDOXIDE_WORKERS", "1")
-        .env("LC_ALL", "C")
-        .env("TZ", PRINTF_TIME_TZ)
-        .args(args)
-        .output()
-        .unwrap();
-
-    assert_eq!(actual.status.code(), expected.status.code());
-    assert_eq!(actual.stdout, expected.stdout);
-    assert_eq!(actual.stderr, expected.stderr);
-}
-
-fn assert_matches_gnu_as_sets_with_env(args: &[OsString]) {
-    let expected = Command::new("find")
-        .env("LC_ALL", "C")
-        .env("TZ", PRINTF_TIME_TZ)
-        .args(args)
-        .output()
-        .unwrap();
-    let actual = Command::cargo_bin("findoxide")
-        .unwrap()
-        .env("FINDOXIDE_WORKERS", "4")
-        .env("LC_ALL", "C")
-        .env("TZ", PRINTF_TIME_TZ)
-        .args(args)
-        .output()
-        .unwrap();
-
-    assert_eq!(actual.status.code(), expected.status.code());
-    assert_eq!(lines(&actual.stdout), lines(&expected.stdout));
-    assert_eq!(lines(&actual.stderr), lines(&expected.stderr));
-}
-
-fn assert_fls_matches_gnu_exact_with_env(_root: &Path, args: Vec<OsString>) {
-    let out_dir = tempdir().unwrap();
-    let gnu_out = out_dir.path().join("gnu.ls");
-    let oxide_out = out_dir.path().join("oxide.ls");
-
-    let gnu = Command::new("find")
-        .env("LC_ALL", "C")
-        .env("TZ", PRINTF_TIME_TZ)
-        .args(&args)
-        .arg("-fls")
-        .arg(&gnu_out)
-        .output()
-        .unwrap();
-    let oxide = Command::cargo_bin("findoxide")
-        .unwrap()
-        .env("FINDOXIDE_WORKERS", "1")
-        .env("LC_ALL", "C")
-        .env("TZ", PRINTF_TIME_TZ)
-        .args(&args)
-        .arg("-fls")
-        .arg(&oxide_out)
-        .output()
-        .unwrap();
-
-    assert_eq!(oxide.status.code(), gnu.status.code());
-    assert_eq!(oxide.stderr, gnu.stderr);
-    assert_eq!(fs::read(&oxide_out).unwrap(), fs::read(&gnu_out).unwrap());
-}
-
-fn normalize_warning_program(bytes: &[u8]) -> Vec<String> {
-    String::from_utf8(bytes.to_vec())
-        .unwrap()
-        .lines()
-        .map(|line| {
-            line.strip_prefix("findoxide: ")
-                .or_else(|| line.strip_prefix("find: "))
-                .unwrap_or(line)
-                .to_string()
-        })
-        .collect()
-}
-
 fn proc_path_without_birth_time() -> Option<&'static Path> {
     let candidate = Path::new("/proc/self/status");
     match read_birth_time(candidate, true) {
@@ -546,157 +436,71 @@ fn ordered_quit_matches_gnu_find_exactly() {
 #[test]
 fn fprint_matches_gnu_for_successful_ordered_runs() {
     let root = build_printf_tree();
-    let outputs = tempdir().unwrap();
-    let gnu_out = outputs.path().join("gnu-paths.txt");
-    let fox_out = outputs.path().join("fox-paths.txt");
-
-    let gnu = Command::new("find")
-        .args([
+    assert_file_output_matches_gnu_with_env(
+        &[
             path_arg(root.path()),
             "-mindepth".into(),
             "1".into(),
             "-maxdepth".into(),
             "1".into(),
-            "-fprint".into(),
-            path_arg(&gnu_out),
-        ])
-        .output()
-        .unwrap();
-    let fox = Command::cargo_bin("findoxide")
-        .unwrap()
-        .env("FINDOXIDE_WORKERS", "1")
-        .args([
-            path_arg(root.path()),
-            "-mindepth".into(),
-            "1".into(),
-            "-maxdepth".into(),
-            "1".into(),
-            "-fprint".into(),
-            path_arg(&fox_out),
-        ])
-        .output()
-        .unwrap();
-
-    assert_eq!(fox.status.code(), gnu.status.code());
-    assert_eq!(fox.stderr, gnu.stderr);
-    assert_eq!(fs::read(&fox_out).unwrap(), fs::read(&gnu_out).unwrap());
+        ],
+        "-fprint",
+        1,
+        "paths.txt",
+        &[],
+    );
 }
 
 #[test]
 fn fprintf_matches_gnu_for_successful_ordered_runs() {
     let root = build_printf_tree();
-    let outputs = tempdir().unwrap();
-    let gnu_out = outputs.path().join("gnu.txt");
-    let fox_out = outputs.path().join("fox.txt");
-
-    let gnu = Command::new("find")
-        .args([
+    assert_file_output_matches_gnu_with_env(
+        &[
             path_arg(root.path()),
             "-mindepth".into(),
             "1".into(),
             "-maxdepth".into(),
             "1".into(),
-            "-fprintf".into(),
-            path_arg(&gnu_out),
-            "[%P][%y]\\n".into(),
-        ])
-        .output()
-        .unwrap();
-    let fox = Command::cargo_bin("findoxide")
-        .unwrap()
-        .env("FINDOXIDE_WORKERS", "1")
-        .args([
-            path_arg(root.path()),
-            "-mindepth".into(),
-            "1".into(),
-            "-maxdepth".into(),
-            "1".into(),
-            "-fprintf".into(),
-            path_arg(&fox_out),
-            "[%P][%y]\\n".into(),
-        ])
-        .output()
-        .unwrap();
-
-    assert_eq!(fox.status.code(), gnu.status.code());
-    assert_eq!(fox.stderr, gnu.stderr);
-    assert_eq!(fs::read(&fox_out).unwrap(), fs::read(&gnu_out).unwrap());
+        ],
+        "-fprintf",
+        1,
+        "printf.txt",
+        &["[%P][%y]\\n"],
+    );
 }
 
 #[test]
 fn fprintf_literal_escapes_match_gnu_for_successful_ordered_runs() {
     let root = build_printf_tree();
-    let outputs = tempdir().unwrap();
-    let gnu_out = outputs.path().join("gnu-escapes.bin");
-    let fox_out = outputs.path().join("fox-escapes.bin");
-
-    let gnu = Command::new("find")
-        .args([
+    assert_file_output_matches_gnu_with_env(
+        &[
             path_arg(root.path().join("dir/file.txt").as_path()),
             "-maxdepth".into(),
             "0".into(),
-            "-fprintf".into(),
-            path_arg(&gnu_out),
-            "A\\a\\101\\cB".into(),
-        ])
-        .output()
-        .unwrap();
-    let fox = Command::cargo_bin("findoxide")
-        .unwrap()
-        .env("FINDOXIDE_WORKERS", "1")
-        .args([
-            path_arg(root.path().join("dir/file.txt").as_path()),
-            "-maxdepth".into(),
-            "0".into(),
-            "-fprintf".into(),
-            path_arg(&fox_out),
-            "A\\a\\101\\cB".into(),
-        ])
-        .output()
-        .unwrap();
-
-    assert_eq!(fox.status.code(), gnu.status.code());
-    assert_eq!(fox.stderr, gnu.stderr);
-    assert_eq!(fs::read(&fox_out).unwrap(), fs::read(&gnu_out).unwrap());
+        ],
+        "-fprintf",
+        1,
+        "escapes.bin",
+        &["A\\a\\101\\cB"],
+    );
 }
 
 #[test]
 fn fprint0_matches_gnu_for_successful_ordered_runs() {
     let root = build_printf_tree();
-    let outputs = tempdir().unwrap();
-    let gnu_out = outputs.path().join("gnu.bin");
-    let fox_out = outputs.path().join("fox.bin");
-
-    let gnu = Command::new("find")
-        .args([
+    assert_file_output_matches_gnu_with_env(
+        &[
             path_arg(root.path()),
             "-mindepth".into(),
             "1".into(),
             "-maxdepth".into(),
             "1".into(),
-            "-fprint0".into(),
-            path_arg(&gnu_out),
-        ])
-        .output()
-        .unwrap();
-    let fox = Command::cargo_bin("findoxide")
-        .unwrap()
-        .env("FINDOXIDE_WORKERS", "1")
-        .args([
-            path_arg(root.path()),
-            "-mindepth".into(),
-            "1".into(),
-            "-maxdepth".into(),
-            "1".into(),
-            "-fprint0".into(),
-            path_arg(&fox_out),
-        ])
-        .output()
-        .unwrap();
-
-    assert_eq!(fox.status.code(), gnu.status.code());
-    assert_eq!(fox.stderr, gnu.stderr);
-    assert_eq!(fs::read(&fox_out).unwrap(), fs::read(&gnu_out).unwrap());
+        ],
+        "-fprint0",
+        1,
+        "paths.bin",
+        &[],
+    );
 }
 
 #[test]
@@ -1579,9 +1383,12 @@ fn ls_matches_gnu_for_weird_names_and_follow_modes() {
         "1".into(),
         "-ls".into(),
     ]);
-    assert_fls_matches_gnu_exact_with_env(
-        root.path(),
-        vec![path_arg(root.path()), "-maxdepth".into(), "1".into()],
+    assert_file_output_matches_gnu_with_env(
+        &[path_arg(root.path()), "-maxdepth".into(), "1".into()],
+        "-fls",
+        1,
+        "listing.ls",
+        &[],
     );
 }
 

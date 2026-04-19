@@ -1,8 +1,8 @@
 mod support;
 
 use findoxide::parser::parse_command;
-use findoxide::planner::{RuntimeAction, RuntimeExpr, plan_command};
-use support::argv;
+use findoxide::planner::{RuntimeAction, plan_command};
+use support::{action_labels, argv};
 
 #[test]
 fn lowers_exec_semicolon_and_plus_into_distinct_runtime_actions() {
@@ -24,7 +24,11 @@ fn lowers_exec_semicolon_and_plus_into_distinct_runtime_actions() {
     .unwrap();
 
     assert_eq!(
-        action_labels(&plan.expr),
+        action_labels(&plan.expr, |action| match action {
+            RuntimeAction::ExecImmediate(_) => Some("exec:semicolon"),
+            RuntimeAction::ExecBatched(_) => Some("exec:batch"),
+            _ => None,
+        }),
         vec!["exec:semicolon", "exec:batch"]
     );
 }
@@ -37,7 +41,13 @@ fn explicit_exec_suppresses_implicit_print() {
     )
     .unwrap();
 
-    assert_eq!(action_labels(&plan.expr), vec!["exec:semicolon"]);
+    assert_eq!(
+        action_labels(&plan.expr, |action| match action {
+            RuntimeAction::ExecImmediate(_) => Some("exec:semicolon"),
+            _ => None,
+        }),
+        vec!["exec:semicolon"]
+    );
 }
 
 #[test]
@@ -63,38 +73,5 @@ fn execdir_ok_and_okdir_remain_unsupported() {
         let error = plan_command(parse_command(&argv(&args)).unwrap(), 1).unwrap_err();
         assert!(error.message.contains("unsupported"));
         assert!(error.message.contains(needle));
-    }
-}
-
-fn action_labels(expr: &RuntimeExpr) -> Vec<&'static str> {
-    let mut labels = Vec::new();
-    collect(expr, &mut labels);
-    labels
-}
-
-fn collect(expr: &RuntimeExpr, labels: &mut Vec<&'static str>) {
-    match expr {
-        RuntimeExpr::And(items) => {
-            for item in items {
-                collect(item, labels);
-            }
-        }
-        RuntimeExpr::Or(left, right) => {
-            collect(left, labels);
-            collect(right, labels);
-        }
-        RuntimeExpr::Not(inner) => collect(inner, labels),
-        RuntimeExpr::Action(action) => labels.push(match action {
-            RuntimeAction::Output(_) => "print",
-            RuntimeAction::Printf(_) => "printf",
-            RuntimeAction::FilePrint { .. } => "fprint",
-            RuntimeAction::FilePrintf { .. } => "fprintf",
-            RuntimeAction::Quit => "quit",
-            RuntimeAction::ExecImmediate(_) => "exec:semicolon",
-            RuntimeAction::ExecBatched(_) => "exec:batch",
-            RuntimeAction::Delete => "delete",
-            _ => panic!("unexpected action in exec planner test: {action:?}"),
-        }),
-        RuntimeExpr::Predicate(_) | RuntimeExpr::Barrier => {}
     }
 }
