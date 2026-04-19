@@ -5,6 +5,35 @@ use std::str;
 
 const NANOS_PER_SECOND: i32 = 1_000_000_000;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DateShape {
+    Delimited,
+    Compact,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DateTimeSeparator {
+    Space,
+    T,
+}
+
+#[derive(Clone, Copy)]
+struct ParsedDate {
+    year: i32,
+    month: u32,
+    day: u32,
+    shape: DateShape,
+}
+
+#[derive(Clone, Copy)]
+struct ParsedClock {
+    hour: u32,
+    minute: u32,
+    second: u32,
+    nanos: i32,
+    offset_seconds: Option<i32>,
+}
+
 pub fn parse_literal_time(raw: &OsStr) -> Result<Timestamp, Diagnostic> {
     let rendered = str::from_utf8(raw.as_encoded_bytes())
         .map_err(|_| unsupported_literal_time(raw.to_string_lossy().as_ref()))?;
@@ -13,8 +42,8 @@ pub fn parse_literal_time(raw: &OsStr) -> Result<Timestamp, Diagnostic> {
         return parse_epoch_seconds(rest, rendered);
     }
 
-    if rendered.len() == 10 && rendered.as_bytes()[4] == b'-' && rendered.as_bytes()[7] == b'-' {
-        return parse_date_only(rendered);
+    if let Ok(timestamp) = parse_date_only(rendered) {
+        return Ok(timestamp);
     }
 
     parse_date_time(rendered)
@@ -57,52 +86,96 @@ fn parse_epoch_seconds(raw: &str, original: &str) -> Result<Timestamp, Diagnosti
 }
 
 fn parse_date_only(raw: &str) -> Result<Timestamp, Diagnostic> {
-    let (year, month, day) = parse_ymd(raw)?;
-    local_timestamp(year, month, day, 0, 0, 0, 0, raw)
+    let date = parse_date(raw, raw)?;
+    local_timestamp(date.year, date.month, date.day, 0, 0, 0, 0, raw)
 }
 
 fn parse_date_time(raw: &str) -> Result<Timestamp, Diagnostic> {
-    let (date_part, time_part) = raw
-        .split_once('T')
-        .or_else(|| raw.split_once(' '))
-        .ok_or_else(|| unsupported_literal_time(raw))?;
-    let (year, month, day) = parse_ymd(date_part)?;
-    let (hour, minute, second, nanos, offset_seconds) = parse_clock(time_part, raw)?;
+    let (date_part, separator, time_part) = split_date_time(raw)?;
+    let date = parse_date(date_part, raw)?;
+    let clock = parse_clock(time_part, raw, date.shape, separator)?;
 
-    match offset_seconds {
-        Some(_) => fixed_offset_timestamp(year, month, day, hour, minute, second, nanos),
-        None => local_timestamp(year, month, day, hour, minute, second, nanos, raw),
-    }
-    .map(|timestamp| {
-        if let Some(offset) = offset_seconds {
-            Timestamp::new(timestamp.seconds - offset as i64, timestamp.nanos)
-        } else {
-            timestamp
+    match clock.offset_seconds {
+        Some(offset) => {
+            let utc = fixed_offset_timestamp(
+                date.year,
+                date.month,
+                date.day,
+                clock.hour,
+                clock.minute,
+                clock.second,
+                clock.nanos,
+            )?;
+            Ok(Timestamp::new(utc.seconds - offset as i64, utc.nanos))
         }
-    })
+        None => local_timestamp(
+            date.year,
+            date.month,
+            date.day,
+            clock.hour,
+            clock.minute,
+            clock.second,
+            clock.nanos,
+            raw,
+        ),
+    }
 }
 
-fn parse_ymd(raw: &str) -> Result<(i32, u32, u32), Diagnostic> {
-    if raw.len() != 10 || raw.as_bytes()[4] != b'-' || raw.as_bytes()[7] != b'-' {
-        return Err(unsupported_literal_time(raw));
+fn parse_date(raw: &str, original: &str) -> Result<ParsedDate, Diagnostic> {
+    if raw.len() == 10 && raw.as_bytes()[4] == b'-' && raw.as_bytes()[7] == b'-' {
+        let year = parse_digits::<i32>(&raw[0..4], original)?;
+        let month = parse_digits::<u32>(&raw[5..7], original)?;
+        let day = parse_digits::<u32>(&raw[8..10], original)?;
+        ensure_valid_date(year, month, day, original)?;
+        return Ok(ParsedDate {
+            year,
+            month,
+            day,
+            shape: DateShape::Delimited,
+        });
     }
 
-    let year = parse_digits::<i32>(&raw[0..4], raw)?;
-    let month = parse_digits::<u32>(&raw[5..7], raw)?;
-    let day = parse_digits::<u32>(&raw[8..10], raw)?;
-    ensure_valid_date(year, month, day, raw)?;
-    Ok((year, month, day))
+    if raw.len() == 8 && raw.bytes().all(|byte| byte.is_ascii_digit()) {
+        let year = parse_digits::<i32>(&raw[0..4], original)?;
+        let month = parse_digits::<u32>(&raw[4..6], original)?;
+        let day = parse_digits::<u32>(&raw[6..8], original)?;
+        ensure_valid_date(year, month, day, original)?;
+        return Ok(ParsedDate {
+            year,
+            month,
+            day,
+            shape: DateShape::Compact,
+        });
+    }
+
+    Err(unsupported_literal_time(original))
 }
 
-fn parse_clock(raw: &str, original: &str) -> Result<(u32, u32, u32, i32, Option<i32>), Diagnostic> {
-    let (clock_part, offset_seconds) = if let Some(clock) = raw.strip_suffix('Z') {
-        (clock, Some(0))
-    } else if let Some(index) = find_offset_start(raw) {
-        let (clock, offset) = raw.split_at(index);
-        (clock, Some(parse_offset(offset, original)?))
-    } else {
-        (raw, None)
-    };
+fn split_date_time(raw: &str) -> Result<(&str, DateTimeSeparator, &str), Diagnostic> {
+    if let Some((date, time)) = raw.split_once('T') {
+        return Ok((date, DateTimeSeparator::T, time));
+    }
+    if let Some((date, time)) = raw.split_once(' ') {
+        return Ok((date, DateTimeSeparator::Space, time));
+    }
+    Err(unsupported_literal_time(raw))
+}
+
+fn parse_clock(
+    raw: &str,
+    original: &str,
+    date_shape: DateShape,
+    separator: DateTimeSeparator,
+) -> Result<ParsedClock, Diagnostic> {
+    let (clock_part, offset_seconds) = split_zone_suffix(raw, original)?;
+    let coloned = clock_part.contains(':');
+
+    if offset_seconds.is_some() && !(date_shape == DateShape::Delimited && coloned) {
+        return Err(unsupported_literal_time(original));
+    }
+    if date_shape == DateShape::Delimited && separator == DateTimeSeparator::T && !coloned {
+        return Err(unsupported_literal_time(original));
+    }
 
     let (base, frac) = match clock_part.split_once('.') {
         Some((base, frac)) if !frac.is_empty() => (base, Some(frac)),
@@ -110,7 +183,33 @@ fn parse_clock(raw: &str, original: &str) -> Result<(u32, u32, u32, i32, Option<
         None => (clock_part, None),
     };
 
-    let mut fields = base.split(':');
+    let (hour, minute, second, has_seconds) = if coloned {
+        parse_coloned_clock(base, original)?
+    } else {
+        parse_compact_hhmm(base, original)?
+    };
+
+    if frac.is_some() && !has_seconds {
+        return Err(unsupported_literal_time(original));
+    }
+
+    let nanos = frac
+        .map(|value| parse_fractional_nanos(value, original))
+        .transpose()?
+        .unwrap_or(0);
+
+    ensure_valid_time(hour, minute, second, original)?;
+    Ok(ParsedClock {
+        hour,
+        minute,
+        second,
+        nanos,
+        offset_seconds,
+    })
+}
+
+fn parse_coloned_clock(raw: &str, original: &str) -> Result<(u32, u32, u32, bool), Diagnostic> {
+    let mut fields = raw.split(':');
     let hour = fields
         .next()
         .ok_or_else(|| unsupported_literal_time(original))?;
@@ -118,27 +217,51 @@ fn parse_clock(raw: &str, original: &str) -> Result<(u32, u32, u32, i32, Option<
         .next()
         .ok_or_else(|| unsupported_literal_time(original))?;
     let second = fields.next();
-    if fields.next().is_some() {
+
+    if fields.next().is_some()
+        || hour.len() != 2
+        || minute.len() != 2
+        || second.is_some_and(|value| value.len() != 2)
+    {
         return Err(unsupported_literal_time(original));
     }
 
-    if hour.len() != 2 || minute.len() != 2 || second.is_some_and(|value| value.len() != 2) {
+    Ok((
+        parse_digits::<u32>(hour, original)?,
+        parse_digits::<u32>(minute, original)?,
+        second
+            .map(|value| parse_digits::<u32>(value, original))
+            .transpose()?
+            .unwrap_or(0),
+        second.is_some(),
+    ))
+}
+
+fn parse_compact_hhmm(raw: &str, original: &str) -> Result<(u32, u32, u32, bool), Diagnostic> {
+    if raw.len() != 4 || !raw.bytes().all(|byte| byte.is_ascii_digit()) {
         return Err(unsupported_literal_time(original));
     }
 
-    let hour = parse_digits::<u32>(hour, original)?;
-    let minute = parse_digits::<u32>(minute, original)?;
-    let second = second
-        .map(|value| parse_digits::<u32>(value, original))
-        .transpose()?
-        .unwrap_or(0);
-    let nanos = frac
-        .map(|value| parse_fractional_nanos(value, original))
-        .transpose()?
-        .unwrap_or(0);
+    Ok((
+        parse_digits::<u32>(&raw[0..2], original)?,
+        parse_digits::<u32>(&raw[2..4], original)?,
+        0,
+        false,
+    ))
+}
 
-    ensure_valid_time(hour, minute, second, original)?;
-    Ok((hour, minute, second, nanos, offset_seconds))
+fn split_zone_suffix<'a>(
+    raw: &'a str,
+    original: &str,
+) -> Result<(&'a str, Option<i32>), Diagnostic> {
+    if let Some(clock) = raw.strip_suffix('Z') {
+        return Ok((clock, Some(0)));
+    }
+    if let Some(index) = find_offset_start(raw) {
+        let (clock, offset) = raw.split_at(index);
+        return Ok((clock, Some(parse_offset(offset, original)?)));
+    }
+    Ok((raw, None))
 }
 
 fn find_offset_start(raw: &str) -> Option<usize> {
@@ -157,6 +280,7 @@ fn parse_offset(raw: &str, original: &str) -> Result<i32, Diagnostic> {
     let body = &raw[1..];
     let (hours, minutes) = match body.len() {
         2 => (body, "00"),
+        4 => (&body[..2], &body[2..]),
         5 if body.as_bytes()[2] == b':' => (&body[..2], &body[3..]),
         _ => return Err(unsupported_literal_time(original)),
     };
