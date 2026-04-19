@@ -83,10 +83,23 @@ pub(crate) fn scheduled_entry(
 
 pub(crate) trait WalkBackend: Send + Sync + 'static {
     fn load_entry(&self, pending: &PendingPath) -> Result<EntryContext, Diagnostic>;
+    fn visit_children(
+        &self,
+        path: &Path,
+        visit: &mut dyn FnMut(Result<DiscoveredChild, Diagnostic>),
+    ) -> Result<(), Diagnostic>;
     fn read_children(
         &self,
         path: &Path,
-    ) -> Result<(Vec<DiscoveredChild>, Vec<Diagnostic>), Diagnostic>;
+    ) -> Result<(Vec<DiscoveredChild>, Vec<Diagnostic>), Diagnostic> {
+        let mut children = Vec::new();
+        let mut diagnostics = Vec::new();
+        self.visit_children(path, &mut |item| match item {
+            Ok(child) => children.push(child),
+            Err(error) => diagnostics.push(error),
+        })?;
+        Ok((children, diagnostics))
+    }
     fn active_directory_identity(
         &self,
         entry: &EntryContext,
@@ -101,11 +114,12 @@ impl WalkBackend for FsWalkBackend {
         load_entry(pending)
     }
 
-    fn read_children(
+    fn visit_children(
         &self,
         path: &Path,
-    ) -> Result<(Vec<DiscoveredChild>, Vec<Diagnostic>), Diagnostic> {
-        read_children(path)
+        visit: &mut dyn FnMut(Result<DiscoveredChild, Diagnostic>),
+    ) -> Result<(), Diagnostic> {
+        visit_children(path, visit)
     }
 
     fn active_directory_identity(
@@ -373,24 +387,21 @@ pub(crate) fn should_descend_directory(
     Ok(Some((next, root_device)))
 }
 
-pub(crate) fn read_children(
+pub(crate) fn visit_children(
     path: &Path,
-) -> Result<(Vec<DiscoveredChild>, Vec<Diagnostic>), Diagnostic> {
+    visit: &mut dyn FnMut(Result<DiscoveredChild, Diagnostic>),
+) -> Result<(), Diagnostic> {
     let read_dir = fs::read_dir(path).map_err(|error| path_error(path, error))?;
-    let mut children = Vec::new();
-    let mut diagnostics = Vec::new();
-
     for child in read_dir {
         match child {
-            Ok(child) => children.push(DiscoveredChild {
+            Ok(child) => visit(Ok(DiscoveredChild {
                 path: child.path(),
                 physical_file_type_hint: child.file_type().ok(),
-            }),
-            Err(error) => diagnostics.push(path_error(path, error)),
+            })),
+            Err(error) => visit(Err(path_error(path, error))),
         }
     }
-
-    Ok((children, diagnostics))
+    Ok(())
 }
 
 fn should_descend(depth: usize, max_depth: Option<usize>) -> bool {
@@ -411,8 +422,8 @@ fn loop_error(path: &Path) -> Diagnostic {
 #[cfg(test)]
 mod tests {
     use super::{
-        DiscoveredChild, OrderedWalkDirective, PendingPath, WalkBackend, WalkEvent, read_children,
-        walk_ordered_with_backend,
+        DiscoveredChild, FsWalkBackend, OrderedWalkDirective, PendingPath, WalkBackend, WalkEvent,
+        load_entry, walk_ordered_with_backend,
     };
     use crate::diagnostics::Diagnostic;
     use crate::entry::EntryContext;
@@ -420,10 +431,75 @@ mod tests {
     use crate::identity::FileIdentity;
     use crate::planner::{TraversalOptions, TraversalOrder};
     use crate::traversal_control::TraversalControl;
+    use std::ffi::OsString;
     use std::fs;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::sync::Arc;
     use tempfile::tempdir;
+
+    #[test]
+    fn fs_backend_visit_children_yields_each_child() {
+        let root = tempdir().unwrap();
+        for name in ["a.txt", "b.txt", "c.txt"] {
+            fs::write(root.path().join(name), "x\n").unwrap();
+        }
+
+        let mut seen = Vec::new();
+        FsWalkBackend
+            .visit_children(root.path(), &mut |item| {
+                let child = item.unwrap();
+                seen.push(child.path.file_name().unwrap().to_owned());
+            })
+            .unwrap();
+
+        seen.sort();
+        assert_eq!(
+            seen,
+            vec![
+                OsString::from("a.txt"),
+                OsString::from("b.txt"),
+                OsString::from("c.txt"),
+            ]
+        );
+    }
+
+    #[test]
+    fn read_children_collects_streamed_backend_output() {
+        struct StreamingBackend;
+
+        impl WalkBackend for StreamingBackend {
+            fn load_entry(&self, pending: &PendingPath) -> Result<EntryContext, Diagnostic> {
+                load_entry(pending)
+            }
+
+            fn visit_children(
+                &self,
+                _path: &Path,
+                visit: &mut dyn FnMut(Result<DiscoveredChild, Diagnostic>),
+            ) -> Result<(), Diagnostic> {
+                visit(Ok(DiscoveredChild {
+                    path: PathBuf::from("child.txt"),
+                    physical_file_type_hint: None,
+                }));
+                visit(Err(Diagnostic::new("synthetic stream error", 1)));
+                Ok(())
+            }
+
+            fn active_directory_identity(
+                &self,
+                entry: &EntryContext,
+                follow_mode: FollowMode,
+            ) -> Result<Option<FileIdentity>, Diagnostic> {
+                entry.active_directory_identity(follow_mode)
+            }
+        }
+
+        let (children, diagnostics) = StreamingBackend.read_children(Path::new(".")).unwrap();
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].path, PathBuf::from("child.txt"));
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].message, "synthetic stream error");
+    }
 
     #[test]
     fn ordered_walk_respects_prune_boundary_before_child_fanout() {
@@ -528,11 +604,12 @@ mod tests {
             ))
         }
 
-        fn read_children(
+        fn visit_children(
             &self,
             path: &Path,
-        ) -> Result<(Vec<DiscoveredChild>, Vec<Diagnostic>), Diagnostic> {
-            read_children(path)
+            visit: &mut dyn FnMut(Result<DiscoveredChild, Diagnostic>),
+        ) -> Result<(), Diagnostic> {
+            FsWalkBackend.visit_children(path, visit)
         }
 
         fn active_directory_identity(

@@ -170,3 +170,37 @@ fn parallel_v2_quit_stops_future_fanout_after_the_current_entry() {
     assert!(line_count >= 1);
     assert!(line_count < 200);
 }
+
+#[test]
+fn parallel_v2_chunked_quit_still_stops_before_full_tree_completion() {
+    let root = tempdir().unwrap();
+    let burst = root.path().join("burst");
+    fs::create_dir(&burst).unwrap();
+
+    for dir_index in 0..96 {
+        let dir = burst.join(format!("dir-{dir_index:03}"));
+        fs::create_dir(&dir).unwrap();
+        for file_index in 0..8 {
+            fs::write(dir.join(format!("file-{file_index:02}.txt")), "x\n").unwrap();
+        }
+    }
+
+    let output = cargo_bin_output_with_timeout(
+        &[
+            path_arg(root.path()),
+            "-mindepth".into(),
+            "1".into(),
+            "-type".into(),
+            "f".into(),
+            "-print".into(),
+            "-quit".into(),
+        ],
+        4,
+        Duration::from_secs(5),
+    );
+
+    let line_count = String::from_utf8(output.stdout).unwrap().lines().count();
+    assert_eq!(output.status.code(), Some(0));
+    assert!(line_count >= 1);
+    assert!(line_count < 96 * 8);
+}

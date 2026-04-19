@@ -174,3 +174,69 @@ fn parallel_v2_wide_root_split_still_visits_each_matching_file_once() {
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(lines.len(), 48 * 8);
 }
+
+#[test]
+fn parallel_v2_chunked_single_parent_still_visits_each_matching_file_once() {
+    let root = tempdir().unwrap();
+    let burst = root.path().join("burst");
+    fs::create_dir(&burst).unwrap();
+
+    for dir_index in 0..96 {
+        let dir = burst.join(format!("dir-{dir_index:03}"));
+        fs::create_dir(&dir).unwrap();
+        for file_index in 0..4 {
+            fs::write(dir.join(format!("file-{file_index:02}.txt")), "x\n").unwrap();
+        }
+    }
+
+    let output = cargo_bin_output_with_timeout(
+        &[
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-print".into(),
+        ],
+        4,
+        Duration::from_secs(5),
+    );
+
+    let lines = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(str::to_owned)
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(lines.len(), 96 * 4);
+}
+
+#[test]
+fn parallel_v2_chunked_prune_stops_child_chunk_formation() {
+    let root = tempdir().unwrap();
+    let skip = root.path().join("skip");
+    fs::create_dir(&skip).unwrap();
+    fs::write(root.path().join("keep.txt"), "x\n").unwrap();
+
+    for dir_index in 0..64 {
+        let dir = skip.join(format!("dir-{dir_index:03}"));
+        fs::create_dir(&dir).unwrap();
+        fs::write(dir.join("hidden.txt"), "x\n").unwrap();
+    }
+
+    let output = cargo_bin_output_with_timeout(
+        &[
+            path_arg(root.path()),
+            "-name".into(),
+            "skip".into(),
+            "-prune".into(),
+            "-o".into(),
+            "-print".into(),
+        ],
+        4,
+        Duration::from_secs(5),
+    );
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    assert!(stdout.contains("keep.txt"));
+    assert!(!stdout.contains("hidden.txt"));
+}

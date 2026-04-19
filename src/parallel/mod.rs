@@ -1,5 +1,6 @@
 pub(crate) mod batch;
 pub(crate) mod broker;
+pub(crate) mod chunking;
 pub(crate) mod control;
 pub(crate) mod engine;
 pub(crate) mod postorder;
