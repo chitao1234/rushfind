@@ -63,10 +63,13 @@ where
     F: FnOnce() -> Result<MountSnapshot, Diagnostic>,
 {
     if !plan.runtime.mount_snapshot {
-        return Ok(EvalContext::default());
+        return Ok(EvalContext::with_now(plan.runtime.evaluation_now));
     }
 
-    Ok(EvalContext::with_mount_snapshot(load_mount_snapshot()?))
+    Ok(EvalContext::with_mount_snapshot_and_now(
+        load_mount_snapshot()?,
+        plan.runtime.evaluation_now,
+    ))
 }
 
 #[cfg(test)]

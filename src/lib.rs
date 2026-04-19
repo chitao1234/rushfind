@@ -11,6 +11,7 @@ pub mod file_output;
 pub mod follow;
 pub mod identity;
 pub mod literal_time;
+pub mod ls;
 pub(crate) mod mounts;
 pub mod numeric;
 pub mod optimizer;

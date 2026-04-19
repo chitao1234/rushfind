@@ -95,12 +95,28 @@ pub(crate) struct EvalOutcome {
 #[derive(Debug, Clone, Default)]
 pub struct EvalContext {
     mount_snapshot: Option<Arc<MountSnapshot>>,
+    evaluation_now: Option<Timestamp>,
 }
 
 impl EvalContext {
+    pub(crate) fn with_now(now: Timestamp) -> Self {
+        Self {
+            mount_snapshot: None,
+            evaluation_now: Some(now),
+        }
+    }
+
     pub(crate) fn with_mount_snapshot(snapshot: MountSnapshot) -> Self {
         Self {
             mount_snapshot: Some(Arc::new(snapshot)),
+            evaluation_now: None,
+        }
+    }
+
+    pub(crate) fn with_mount_snapshot_and_now(snapshot: MountSnapshot, now: Timestamp) -> Self {
+        Self {
+            mount_snapshot: Some(Arc::new(snapshot)),
+            evaluation_now: Some(now),
         }
     }
 
@@ -110,6 +126,12 @@ impl EvalContext {
                 "internal error: -fstype and -printf %F require a mount snapshot runtime context",
                 1,
             )
+        })
+    }
+
+    pub(crate) fn evaluation_now(&self) -> Result<Timestamp, Diagnostic> {
+        self.evaluation_now.ok_or_else(|| {
+            Diagnostic::new("internal error: ls rendering requires a frozen runtime now", 1)
         })
     }
 }
@@ -320,12 +342,22 @@ mod tests {
         ExecutionPlan, OutputAction, RuntimeAction, RuntimeExpr, RuntimePredicate, plan_command,
     };
     use crate::printf::compile_printf_program;
+    use crate::time::Timestamp;
     use std::collections::VecDeque;
     use std::ffi::OsStr;
     use std::ffi::OsString;
     use std::fs;
     use std::os::unix::fs as unix_fs;
     use tempfile::tempdir;
+
+    #[test]
+    fn eval_context_exposes_frozen_now() {
+        let context = EvalContext::with_now(Timestamp::new(1_700_000_000, 250_000_000));
+        assert_eq!(
+            context.evaluation_now().unwrap(),
+            Timestamp::new(1_700_000_000, 250_000_000)
+        );
+    }
 
     #[derive(Default)]
     struct ScriptedSink {
