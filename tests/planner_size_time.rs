@@ -1,6 +1,7 @@
 mod support;
 
 use findoxide::birth::read_birth_time;
+use findoxide::literal_time::parse_literal_time;
 use findoxide::numeric::NumericComparison;
 use findoxide::parser::parse_command;
 use findoxide::planner::{RuntimeExpr, RuntimePredicate, plan_command, plan_command_with_now};
@@ -9,6 +10,7 @@ use findoxide::time::{
     NewerMatcher, RelativeTimeMatcher, RelativeTimeUnit, TimeComparison, Timestamp, TimestampKind,
     UsedMatcher, local_day_start,
 };
+use std::ffi::OsStr;
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use support::argv;
@@ -261,6 +263,36 @@ fn lowers_newer_shorthands_and_supported_newerxy_forms() {
             reference,
         }) if *reference == Timestamp::new(metadata.ctime(), metadata.ctime_nsec() as i32)
     )));
+}
+
+#[test]
+fn lowers_expanded_literal_t_references_for_non_birth_newerxy() {
+    for (flag, raw, current_kind) in [
+        ("-newermt", "20260415", TimestampKind::Modification),
+        ("-newerat", "2026-04-15 1234", TimestampKind::Access),
+        ("-newerct", "20260415T1234", TimestampKind::Change),
+        (
+            "-newermt",
+            "2026-04-15T12:34:56+0800",
+            TimestampKind::Modification,
+        ),
+        (
+            "-newermt",
+            "2026-04-15T12:34:56.25+08:00",
+            TimestampKind::Modification,
+        ),
+    ] {
+        let expected = parse_literal_time(OsStr::new(raw)).unwrap();
+        let plan = plan_command(parse_command(&argv(&[".", flag, raw])).unwrap(), 1).unwrap();
+
+        assert!(predicate_items(&plan.expr).iter().any(|predicate| matches!(
+            predicate,
+            RuntimePredicate::Newer(NewerMatcher {
+                current,
+                reference,
+            }) if *current == current_kind && *reference == expected
+        )));
+    }
 }
 
 #[test]

@@ -1,9 +1,11 @@
 mod support;
 
 use findoxide::birth::read_birth_time;
+use findoxide::literal_time::parse_literal_time;
 use findoxide::parser::parse_command;
 use findoxide::planner::{RuntimeExpr, RuntimePredicate, plan_command};
-use findoxide::time::{NewerMatcher, TimeComparison, Timestamp, TimestampKind};
+use findoxide::time::{NewerMatcher, TimeComparison, TimestampKind};
+use std::ffi::OsStr;
 use std::fs;
 use support::argv;
 use tempfile::tempdir;
@@ -31,22 +33,35 @@ fn lowers_empty_and_used_predicates() {
 
 #[test]
 fn lowers_supported_birth_and_literal_newerxy_forms() {
-    let literal = plan_command(
-        parse_command(&argv(&[".", "-newerBt", "@1700000000.25"])).unwrap(),
-        1,
-    )
-    .unwrap();
-    assert!(
-        predicate_items(&literal.expr)
-            .iter()
-            .any(|predicate| matches!(
-                predicate,
-                RuntimePredicate::Newer(NewerMatcher {
-                    current: TimestampKind::Birth,
-                    reference,
-                }) if *reference == Timestamp::new(1_700_000_000, 250_000_000)
-            ))
-    );
+    for raw in [
+        "@1700000000.25",
+        "2026-04-15",
+        "20260415",
+        "2026-04-15 1234",
+        "20260415 1234",
+        "20260415T12:34:56.25",
+        "2026-04-15T12:34:56Z",
+        "2026-04-15T12:34:56+08",
+        "2026-04-15T12:34:56+0800",
+        "2026-04-15T12:34:56+08:00",
+    ] {
+        let expected = parse_literal_time(OsStr::new(raw)).unwrap();
+        let literal = plan_command(parse_command(&argv(&[".", "-newerBt", raw])).unwrap(), 1)
+            .unwrap();
+
+        assert!(
+            predicate_items(&literal.expr)
+                .iter()
+                .any(|predicate| matches!(
+                    predicate,
+                    RuntimePredicate::Newer(NewerMatcher {
+                        current: TimestampKind::Birth,
+                        reference,
+                    }) if *reference == expected
+                )),
+            "{raw}"
+        );
+    }
 
     let root = tempdir().unwrap();
     let reference = root.path().join("reference.txt");
@@ -80,6 +95,12 @@ fn rejects_invalid_current_t_and_unsupported_literal_forms() {
         ("-newertm", "ref"),
         ("-newerBt", "yesterday"),
         ("-newerBt", "2026-04"),
+        ("-newerBt", "2026-04-15T12:34.5"),
+        ("-newerBt", "2026-04-15T1234"),
+        ("-newerBt", "202604151234"),
+        ("-newerBt", "20260415 123456"),
+        ("-newerBt", "20260415T12:34Z"),
+        ("-newerBt", "20260415T12:34:56+08:00"),
     ] {
         let error = plan_command(parse_command(&argv(&[".", flag, arg])).unwrap(), 1).unwrap_err();
         assert!(
