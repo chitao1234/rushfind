@@ -172,12 +172,10 @@ fn rendered_path(path: &Path, semantics: ExecSemantics) -> OsString {
     }
 }
 
-pub fn render_immediate_argv(spec: &ImmediateExecAction, path: &Path) -> Vec<OsString> {
-    let rendered_path = rendered_path(path, spec.semantics);
-    let path_bytes = rendered_path.as_os_str().as_bytes();
+fn render_segments(argv: &[Vec<ExecTemplateSegment>], rendered_path: &OsStr) -> Vec<OsString> {
+    let path_bytes = rendered_path.as_bytes();
 
-    spec.argv
-        .iter()
+    argv.iter()
         .map(|template| {
             let mut rendered = Vec::new();
             for segment in template {
@@ -191,6 +189,15 @@ pub fn render_immediate_argv(spec: &ImmediateExecAction, path: &Path) -> Vec<OsS
             OsString::from_vec(rendered)
         })
         .collect()
+}
+
+pub fn render_prompt_argv(spec: &ImmediateExecAction, path: &Path) -> Vec<OsString> {
+    render_segments(&spec.argv, path.as_os_str())
+}
+
+pub fn render_immediate_argv(spec: &ImmediateExecAction, path: &Path) -> Vec<OsString> {
+    let rendered_path = rendered_path(path, spec.semantics);
+    render_segments(&spec.argv, rendered_path.as_os_str())
 }
 
 pub fn build_immediate_command(spec: &ImmediateExecAction, path: &Path) -> PreparedExecCommand {

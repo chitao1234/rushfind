@@ -1,5 +1,6 @@
 mod batch;
 mod child;
+mod confirm;
 mod delete;
 mod ordered;
 mod parallel;
@@ -13,10 +14,14 @@ pub use template::{
     BatchedExecAction, ExecBatchId, ExecSemantics, ExecTemplateSegment, ImmediateExecAction,
     PreparedExecCommand, batched_path_cost, build_batched_argv, build_immediate_command,
     compile_batched_exec, compile_immediate_exec, execdir_cwd, render_immediate_argv,
+    render_prompt_argv,
 };
 
 pub(crate) use batch::fixed_batch_cost;
-pub(crate) use child::{run_immediate_parallel, run_parallel_ready_batch};
+#[allow(unused_imports)]
+pub(crate) use child::{run_immediate_parallel, run_parallel_ready_batch, run_prepared_inherited};
+#[allow(unused_imports)]
+pub(crate) use confirm::{ConfirmOutcome, PromptCoordinator};
 pub(crate) use delete::delete_path;
 
 #[cfg(test)]

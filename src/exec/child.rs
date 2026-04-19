@@ -14,7 +14,8 @@ pub(super) fn run_ready_batch<E: Write>(
     ready: &ReadyBatch,
     stderr: &mut E,
 ) -> Result<bool, Diagnostic> {
-    run_ordered_command(build_batched_argv(&ready.spec, &ready.paths)?, stderr)
+    let prepared = build_batched_argv(&ready.spec, &ready.paths)?;
+    run_prepared_inherited(&prepared, stderr)
 }
 
 pub(super) fn run_immediate_ordered<E: Write>(
@@ -22,11 +23,12 @@ pub(super) fn run_immediate_ordered<E: Write>(
     path: &Path,
     stderr: &mut E,
 ) -> Result<bool, Diagnostic> {
-    run_ordered_command(build_immediate_command(spec, path), stderr)
+    let prepared = build_immediate_command(spec, path);
+    run_prepared_inherited(&prepared, stderr)
 }
 
-fn run_ordered_command<E: Write>(
-    command_spec: PreparedExecCommand,
+pub(crate) fn run_prepared_inherited<E: Write>(
+    command_spec: &PreparedExecCommand,
     stderr: &mut E,
 ) -> Result<bool, Diagnostic> {
     let Some(program) = command_spec.argv.first() else {
