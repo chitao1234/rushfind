@@ -26,7 +26,10 @@ fn locale_candidates(name: &str) -> [&str; 3] {
         .split_once('.')
         .map_or(exact, |(head, _tail)| head)
         .split_once('@')
-        .map_or(exact.split_once('.').map_or(exact, |(head, _tail)| head), |(head, _tail)| head);
+        .map_or(
+            exact.split_once('.').map_or(exact, |(head, _tail)| head),
+            |(head, _tail)| head,
+        );
     let language = no_codeset
         .split_once('_')
         .map_or(no_codeset, |(head, _tail)| head);
