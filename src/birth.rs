@@ -43,8 +43,5 @@ pub fn read_birth_time(path: &Path, follow: bool) -> Result<Option<Timestamp>, D
         return Ok(None);
     }
 
-    Ok(Some(Timestamp::new(
-        birth.tv_sec as i64,
-        birth.tv_nsec as i32,
-    )))
+    Ok(Some(Timestamp::new(birth.tv_sec, birth.tv_nsec as i32)))
 }

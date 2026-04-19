@@ -42,13 +42,10 @@ impl WorkerBatchState {
             }
         }
 
-        match batch.push(path)? {
-            Some(ready) => {
-                if !run_parallel_ready_batch(&ready, broker, self.spill_threshold)? {
-                    status = status.merge(RuntimeStatus::action_failure());
-                }
-            }
-            None => {}
+        if let Some(ready) = batch.push(path)?
+            && !run_parallel_ready_batch(&ready, broker, self.spill_threshold)?
+        {
+            status = status.merge(RuntimeStatus::action_failure());
         }
 
         Ok(status)

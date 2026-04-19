@@ -167,11 +167,11 @@ impl<'a, W: std::io::Write, E: std::io::Write> OrderedActionSink<'a, W, E> {
             }
         };
 
-        if let Some(ready) = ready {
-            if !run_ready_batch(&ready, self.stderr)? {
-                self.had_action_failures = true;
-                status = status.merge(RuntimeStatus::action_failure());
-            }
+        if let Some(ready) = ready
+            && !run_ready_batch(&ready, self.stderr)?
+        {
+            self.had_action_failures = true;
+            status = status.merge(RuntimeStatus::action_failure());
         }
 
         let push_result = {
@@ -360,11 +360,11 @@ impl ParallelActionSink {
             (ready, push_result)
         };
 
-        if let Some(ready) = ready {
-            if !run_parallel_ready_batch(&ready, &self.broker, self.shared.spill_threshold)? {
-                self.mark_action_failure();
-                status = status.merge(RuntimeStatus::action_failure());
-            }
+        if let Some(ready) = ready
+            && !run_parallel_ready_batch(&ready, &self.broker, self.shared.spill_threshold)?
+        {
+            self.mark_action_failure();
+            status = status.merge(RuntimeStatus::action_failure());
         }
 
         match push_result {

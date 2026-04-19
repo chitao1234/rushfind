@@ -275,10 +275,11 @@ impl EntryContext {
     }
 
     pub fn active_metadata(&self, follow_mode: FollowMode) -> Result<&Metadata, Diagnostic> {
-        if self.uses_logical_view(follow_mode) && self.physical_kind()? == EntryKind::Symlink {
-            if let Some(metadata) = self.logical_metadata() {
-                return Ok(metadata);
-            }
+        if self.uses_logical_view(follow_mode)
+            && self.physical_kind()? == EntryKind::Symlink
+            && let Some(metadata) = self.logical_metadata()
+        {
+            return Ok(metadata);
         }
 
         self.physical_metadata()
@@ -307,10 +308,11 @@ impl EntryContext {
     }
 
     pub fn active_identity(&self, follow_mode: FollowMode) -> Result<FileIdentity, Diagnostic> {
-        if self.uses_logical_view(follow_mode) && self.physical_kind()? == EntryKind::Symlink {
-            if let Some(identity) = self.logical_identity() {
-                return Ok(identity);
-            }
+        if self.uses_logical_view(follow_mode)
+            && self.physical_kind()? == EntryKind::Symlink
+            && let Some(identity) = self.logical_identity()
+        {
+            return Ok(identity);
         }
 
         self.physical_identity()
@@ -442,10 +444,11 @@ impl EntryContext {
     }
 
     pub fn active_kind(&self, follow_mode: FollowMode) -> Result<EntryKind, Diagnostic> {
-        if self.uses_logical_view(follow_mode) && self.physical_kind()? == EntryKind::Symlink {
-            if let Some(metadata) = self.logical_metadata() {
-                return Ok(file_type_to_kind(metadata.file_type()));
-            }
+        if self.uses_logical_view(follow_mode)
+            && self.physical_kind()? == EntryKind::Symlink
+            && let Some(metadata) = self.logical_metadata()
+        {
+            return Ok(file_type_to_kind(metadata.file_type()));
         }
 
         self.physical_kind()

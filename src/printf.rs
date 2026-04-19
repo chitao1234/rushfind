@@ -514,7 +514,7 @@ fn render_directive_bytes(
         ),
         PrintfDirectiveKind::Blocks1024 => {
             let blocks = entry.active_blocks(follow_mode)?;
-            format_string_like(((blocks + 1) / 2).to_string().as_bytes(), directive.format)
+            format_string_like(blocks.div_ceil(2).to_string().as_bytes(), directive.format)
         }
         PrintfDirectiveKind::UserName => {
             let uid = entry.active_uid(follow_mode)?;
@@ -673,7 +673,7 @@ fn format_six_sigfigs_ascii(value: f64) -> String {
     }
 
     let exponent = value.abs().log10().floor() as i32;
-    if exponent >= 6 || exponent < -4 {
+    if !(-4..6).contains(&exponent) {
         return trim_ascii_float(format!("{value:.5e}"));
     }
 
@@ -706,12 +706,12 @@ fn format_numeric_value(
     sign: Option<u8>,
     format: PrintfFieldFormat,
 ) -> Vec<u8> {
-    if let Some(precision) = format.precision {
-        if digits.len() < precision {
-            let mut prefixed = vec![b'0'; precision - digits.len()];
-            prefixed.extend_from_slice(&digits);
-            digits = prefixed;
-        }
+    if let Some(precision) = format.precision
+        && digits.len() < precision
+    {
+        let mut prefixed = vec![b'0'; precision - digits.len()];
+        prefixed.extend_from_slice(&digits);
+        digits = prefixed;
     }
 
     let mut value = Vec::with_capacity(digits.len() + usize::from(sign.is_some()));

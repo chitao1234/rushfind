@@ -243,16 +243,16 @@ fn collect_linear_labels(expr: &RuntimeExpr, labels: &mut Vec<&'static str>) {
 
 fn not_inner_labels(expr: &RuntimeExpr) -> Vec<&'static str> {
     let inner = find_not_inner(expr).expect("expected a Not expression");
-    let RuntimeExpr::And(inner_items) = inner.as_ref() else {
+    let RuntimeExpr::And(inner_items) = inner else {
         panic!("expected Not inner to be And, got {inner:?}");
     };
 
     inner_items.iter().map(expr_label).collect()
 }
 
-fn find_not_inner(expr: &RuntimeExpr) -> Option<&Box<RuntimeExpr>> {
+fn find_not_inner(expr: &RuntimeExpr) -> Option<&RuntimeExpr> {
     match expr {
-        RuntimeExpr::Not(inner) => Some(inner),
+        RuntimeExpr::Not(inner) => Some(inner.as_ref()),
         RuntimeExpr::And(items) => items.iter().find_map(find_not_inner),
         RuntimeExpr::Or(left, right) => find_not_inner(left).or_else(|| find_not_inner(right)),
         RuntimeExpr::Predicate(_) | RuntimeExpr::Action(_) | RuntimeExpr::Barrier => None,

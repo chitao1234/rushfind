@@ -79,6 +79,7 @@ pub(crate) struct PendingEntryEval {
 }
 
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum EvalStep {
     Complete(EvalOutcome),
     PendingAction {

@@ -157,6 +157,7 @@ pub(crate) fn process_entry_preorder_fast_path(
     Ok(outcome.status)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn run_parallel_worker(
     mut worker: WorkerHandle,
     scheduler: Arc<Scheduler>,
@@ -381,6 +382,7 @@ fn run_preorder_root_serial(
     Ok(status)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_postorder_root_task(
     plan: &ExecutionPlan,
     backend: &dyn WalkBackend,
@@ -456,10 +458,11 @@ fn run_postorder_root_task(
                         }
                     }
 
-                    if pending.path == root_path && pending.depth == root_depth {
-                        if let Some(parent) = root_notify_parent.take() {
-                            notify_parent_barrier(parent, barriers, worker, sink.control.as_ref())?;
-                        }
+                    if pending.path == root_path
+                        && pending.depth == root_depth
+                        && let Some(parent) = root_notify_parent.take()
+                    {
+                        notify_parent_barrier(parent, barriers, worker, sink.control.as_ref())?;
                     }
                     continue;
                 }
@@ -476,15 +479,11 @@ fn run_postorder_root_task(
                     Err(error) => {
                         sink.emit_runtime_error(error)?;
                         *had_runtime_errors = true;
-                        if pending.path == root_path && pending.depth == root_depth {
-                            if let Some(parent) = root_notify_parent.take() {
-                                notify_parent_barrier(
-                                    parent,
-                                    barriers,
-                                    worker,
-                                    sink.control.as_ref(),
-                                )?;
-                            }
+                        if pending.path == root_path
+                            && pending.depth == root_depth
+                            && let Some(parent) = root_notify_parent.take()
+                        {
+                            notify_parent_barrier(parent, barriers, worker, sink.control.as_ref())?;
                         }
                         continue;
                     }
@@ -625,10 +624,8 @@ fn run_postorder_root_task(
         }
     }
 
-    if !aborted_by_stop {
-        if let Some(parent) = root_notify_parent.take() {
-            notify_parent_barrier(parent, barriers, worker, sink.control.as_ref())?;
-        }
+    if !aborted_by_stop && let Some(parent) = root_notify_parent.take() {
+        notify_parent_barrier(parent, barriers, worker, sink.control.as_ref())?;
     }
 
     Ok(status)

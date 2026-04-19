@@ -339,6 +339,8 @@ pub(crate) fn load_entry(pending: &PendingPath) -> Result<EntryContext, Diagnost
     Ok(entry)
 }
 
+type DescendDecision = Option<(Vec<FileIdentity>, Option<u64>)>;
+
 pub(crate) fn should_descend_directory(
     pending: &PendingPath,
     entry: &EntryContext,
@@ -346,7 +348,7 @@ pub(crate) fn should_descend_directory(
     options: TraversalOptions,
     control: TraversalControl,
     backend: &dyn WalkBackend,
-) -> Result<Option<(Vec<FileIdentity>, Option<u64>)>, Diagnostic> {
+) -> Result<DescendDecision, Diagnostic> {
     if control.prune || !should_descend(pending.depth, options.max_depth) {
         return Ok(None);
     }

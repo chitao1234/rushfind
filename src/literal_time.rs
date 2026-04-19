@@ -186,6 +186,7 @@ fn parse_fractional_nanos(raw: &str, original: &str) -> Result<i32, Diagnostic> 
         .map_err(|_| unsupported_literal_time(original))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn local_timestamp(
     year: i32,
     month: u32,

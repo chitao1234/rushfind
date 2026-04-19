@@ -45,6 +45,7 @@ pub(crate) struct ResolvedTimeParts {
 
 impl ResolvedTimeParts {
     #[cfg(test)]
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn for_tests(
         timestamp: Timestamp,
         year: i32,

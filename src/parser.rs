@@ -13,8 +13,7 @@ pub fn parse_command(argv: &[OsString]) -> Result<CommandAst, Diagnostic> {
 
     while let Some(option) = argv
         .get(index)
-        .map(|arg| parse_global_option(Arg::new(arg.as_os_str())))
-        .flatten()
+        .and_then(|arg| parse_global_option(Arg::new(arg.as_os_str())))
     {
         global_options.push(option);
         index += 1;

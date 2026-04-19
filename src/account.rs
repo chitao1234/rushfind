@@ -106,7 +106,7 @@ fn lookup_user_by_name(raw: &OsStr) -> Result<Option<u32>, Diagnostic> {
         };
 
         if status == 0 {
-            return Ok((!result.is_null()).then_some(passwd.pw_uid as u32));
+            return Ok((!result.is_null()).then_some(passwd.pw_uid));
         }
         if status == libc::ERANGE {
             buffer.resize(buffer.len() * 2, 0);
@@ -138,7 +138,7 @@ fn lookup_group_by_name(raw: &OsStr) -> Result<Option<u32>, Diagnostic> {
         };
 
         if status == 0 {
-            return Ok((!result.is_null()).then_some(group.gr_gid as u32));
+            return Ok((!result.is_null()).then_some(group.gr_gid));
         }
         if status == libc::ERANGE {
             buffer.resize(buffer.len() * 2, 0);
