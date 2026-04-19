@@ -13,7 +13,7 @@ use crate::parallel::chunking::{
     ChunkAccumulator, DEFAULT_SPILL_CHUNK_SIZE, DEFAULT_SPLIT_CHILD_THRESHOLD,
 };
 use crate::parallel::control::GlobalControl;
-use crate::parallel::postorder::BarrierTable;
+use crate::parallel::postorder::{BarrierRelease, BarrierTable};
 use crate::parallel::scheduler::{Scheduler, WorkerHandle};
 use crate::parallel::task::{
     ParallelTask, PostOrderResumeTask, PreOrderRootTask, SiblingChunkTask,
@@ -29,8 +29,6 @@ use std::path::Path;
 use std::sync::Arc;
 
 const DEFAULT_SPILL_THRESHOLD: usize = 64 * 1024;
-const SPLIT_CHILD_THRESHOLD: usize = 32;
-
 pub(crate) struct WorkerActionSink {
     control: Arc<GlobalControl>,
     broker: Sender<BrokerMessage>,
@@ -41,14 +39,6 @@ pub(crate) struct WorkerActionSink {
 pub(crate) struct WorkerReport {
     pub(crate) status: RuntimeStatus,
     pub(crate) had_runtime_errors: bool,
-}
-
-enum PostOrderFrame {
-    Visit(PendingPath),
-    CompleteInline {
-        entry: EntryContext,
-        notify_parent: Option<SubtreeBarrierId>,
-    },
 }
 
 impl WorkerActionSink {
@@ -216,10 +206,17 @@ pub(crate) fn run_parallel_worker(
             }
             ParallelTask::SiblingChunk(task) => {
                 if task.completion_barrier.is_some() {
-                    Err(Diagnostic::new(
-                        "internal error: postorder sibling chunk tasks are not executable yet",
-                        1,
-                    ))
+                    run_postorder_pending_batch(
+                        &plan,
+                        &backend,
+                        task.pending,
+                        task.completion_barrier,
+                        &mut worker,
+                        barriers.as_ref(),
+                        &eval_context,
+                        &mut sink,
+                        &mut had_runtime_errors,
+                    )
                 } else {
                     run_preorder_pending_batch(
                         &plan,
@@ -441,11 +438,7 @@ fn run_preorder_pending_batch(
         }
 
         let chunk_plan = chunks.finish();
-        publish_preorder_sibling_chunks(
-            chunk_plan.spilled_chunks,
-            worker,
-            sink.control.as_ref(),
-        );
+        publish_preorder_sibling_chunks(chunk_plan.spilled_chunks, worker, sink.control.as_ref());
         for child in chunk_plan.local_stack.into_iter().rev() {
             stack.push(child);
         }
@@ -465,238 +458,294 @@ fn run_postorder_root_task(
     sink: &mut WorkerActionSink,
     had_runtime_errors: &mut bool,
 ) -> Result<RuntimeStatus, Diagnostic> {
-    let mut status = RuntimeStatus::default();
-    let root_pending = root.pending;
-    let root_path = root_pending.path.clone();
-    let root_depth = root_pending.depth;
-    let mut root_notify_parent = root_pending.parent_completion.map(SubtreeBarrierId);
-    let mut aborted_by_stop = false;
-    let mut stack = vec![PostOrderFrame::Visit(root_pending)];
+    run_postorder_pending_batch(
+        plan,
+        backend,
+        vec![root.pending],
+        None,
+        worker,
+        barriers,
+        context,
+        sink,
+        had_runtime_errors,
+    )
+}
 
-    while let Some(frame) = stack.pop() {
+#[allow(clippy::too_many_arguments)]
+fn run_postorder_pending_batch(
+    plan: &ExecutionPlan,
+    backend: &dyn WalkBackend,
+    initial: Vec<PendingPath>,
+    completion_barrier: Option<SubtreeBarrierId>,
+    worker: &mut WorkerHandle,
+    barriers: &BarrierTable,
+    context: &EvalContext,
+    sink: &mut WorkerActionSink,
+    had_runtime_errors: &mut bool,
+) -> Result<RuntimeStatus, Diagnostic> {
+    let mut status = RuntimeStatus::default();
+    let batch_barrier = match completion_barrier {
+        Some(parent) if initial.len() > 1 => Some(barriers.begin_batch(initial.len(), parent)?),
+        _ => None,
+    };
+    let root_completion = batch_barrier.or(completion_barrier);
+
+    for mut pending in initial {
         if sink.control.quit_seen() || sink.control.fatal_error_seen() {
-            aborted_by_stop = true;
             break;
         }
 
-        match frame {
-            PostOrderFrame::Visit(pending) => {
-                let entry = match backend.load_entry(&pending) {
-                    Ok(entry) => entry,
-                    Err(error) => {
-                        sink.emit_runtime_error(error)?;
-                        *had_runtime_errors = true;
-                        continue;
-                    }
-                };
+        if let Some(parent) = root_completion {
+            pending.parent_completion = Some(parent.0);
+        }
 
-                let traversal = match traversal_control_for_entry(
-                    plan.traversal_control.as_ref(),
-                    plan.follow_mode,
-                    plan.traversal.order,
-                    &entry,
-                    context,
-                ) {
-                    Ok(control) => control,
-                    Err(error) => {
-                        sink.emit_runtime_error(error)?;
-                        *had_runtime_errors = true;
-                        continue;
-                    }
-                };
-
-                let is_directory = match backend.active_directory_identity(&entry, plan.follow_mode)
-                {
-                    Ok(identity) => identity.is_some(),
-                    Err(error) => {
-                        sink.emit_runtime_error(error)?;
-                        *had_runtime_errors = true;
-                        continue;
-                    }
-                };
-
-                if !is_directory {
-                    if entry.depth >= plan.traversal.min_depth {
-                        status = status.merge(process_entry_preorder_fast_path(
-                            plan,
-                            &entry,
-                            plan.follow_mode,
-                            context,
-                            sink,
-                        )?);
-                        if status.is_stop_requested() {
-                            aborted_by_stop = true;
-                            break;
-                        }
-                    }
-
-                    if pending.path == root_path
-                        && pending.depth == root_depth
-                        && let Some(parent) = root_notify_parent.take()
-                    {
-                        notify_parent_barrier(parent, barriers, worker, sink.control.as_ref())?;
-                    }
-                    continue;
-                }
-
-                let descend = match should_descend_directory(
-                    &pending,
-                    &entry,
-                    plan.follow_mode,
-                    plan.traversal,
-                    traversal,
-                    backend,
-                ) {
-                    Ok(result) => result,
-                    Err(error) => {
-                        sink.emit_runtime_error(error)?;
-                        *had_runtime_errors = true;
-                        if pending.path == root_path
-                            && pending.depth == root_depth
-                            && let Some(parent) = root_notify_parent.take()
-                        {
-                            notify_parent_barrier(parent, barriers, worker, sink.control.as_ref())?;
-                        }
-                        continue;
-                    }
-                };
-
-                let Some((child_ancestry, root_device)) = descend else {
-                    let notify_parent = if pending.path == root_path && pending.depth == root_depth
-                    {
-                        root_notify_parent.take()
-                    } else {
-                        None
-                    };
-                    stack.push(PostOrderFrame::CompleteInline {
-                        entry,
-                        notify_parent,
-                    });
-                    continue;
-                };
-
-                let (children, diagnostics) = match backend.read_children(&pending.path) {
-                    Ok(result) => result,
-                    Err(error) => {
-                        sink.emit_runtime_error(error)?;
-                        *had_runtime_errors = true;
-                        let notify_parent =
-                            if pending.path == root_path && pending.depth == root_depth {
-                                root_notify_parent.take()
-                            } else {
-                                None
-                            };
-                        stack.push(PostOrderFrame::CompleteInline {
-                            entry,
-                            notify_parent,
-                        });
-                        continue;
-                    }
-                };
-
-                for error in diagnostics {
-                    sink.emit_runtime_error(error)?;
-                    *had_runtime_errors = true;
-                }
-
-                let mut discovered = children
-                    .into_iter()
-                    .map(|child| PendingPath {
-                        path: child.path,
-                        root_path: pending.root_path.clone(),
-                        depth: pending.depth + 1,
-                        is_command_line_root: false,
-                        physical_file_type_hint: child.physical_file_type_hint,
-                        ancestry: child_ancestry.clone(),
-                        ancestor_barriers: pending.ancestor_barriers.clone(),
-                        root_device,
-                        parent_completion: None,
-                    })
-                    .collect::<Vec<_>>();
-
-                let mut spilled_count = 0;
-                let mut barrier = None;
-                if discovered.len() >= SPLIT_CHILD_THRESHOLD && sink.control.accepts_new_work() {
-                    let spill = discovered.split_off(1);
-                    spilled_count = spill.len();
-                    if spilled_count > 0 {
-                        let notify_parent =
-                            if pending.path == root_path && pending.depth == root_depth {
-                                root_notify_parent.take()
-                            } else {
-                                None
-                            };
-                        let created = barriers.begin_directory(
-                            entry.clone(),
-                            pending.ancestor_barriers.clone(),
-                            spilled_count,
-                            notify_parent,
-                        )?;
-                        barrier = Some(created);
-                        for pending_child in spill {
-                            worker.push_local(
-                                ParallelTask::PreOrderRoot(PreOrderRootTask {
-                                    pending: PendingPath {
-                                        ancestor_barriers: vec![created],
-                                        parent_completion: Some(created.0),
-                                        ..pending_child
-                                    },
-                                }),
-                                sink.control.as_ref(),
-                            );
-                        }
-                    }
-                }
-
-                if spilled_count == 0 {
-                    let notify_parent = if pending.path == root_path && pending.depth == root_depth
-                    {
-                        root_notify_parent.take()
-                    } else {
-                        None
-                    };
-                    stack.push(PostOrderFrame::CompleteInline {
-                        entry,
-                        notify_parent,
-                    });
-                }
-
-                let child_ancestor_barriers = barrier
-                    .map(|created| vec![created])
-                    .unwrap_or_else(|| pending.ancestor_barriers.clone());
-                for child in discovered.into_iter().rev() {
-                    stack.push(PostOrderFrame::Visit(PendingPath {
-                        ancestor_barriers: child_ancestor_barriers.clone(),
-                        ..child
-                    }));
-                }
-            }
-            PostOrderFrame::CompleteInline {
-                entry,
-                notify_parent,
-            } => {
-                if entry.depth >= plan.traversal.min_depth {
-                    status = status.merge(process_entry_preorder_fast_path(
-                        plan,
-                        &entry,
-                        plan.follow_mode,
-                        context,
-                        sink,
-                    )?);
-                    if status.is_stop_requested() {
-                        aborted_by_stop = true;
-                        break;
-                    }
-                }
-
-                if let Some(parent) = notify_parent {
-                    notify_parent_barrier(parent, barriers, worker, sink.control.as_ref())?;
-                }
-            }
+        status = status.merge(run_postorder_pending_root(
+            plan,
+            backend,
+            pending,
+            worker,
+            barriers,
+            context,
+            sink,
+            had_runtime_errors,
+        )?);
+        if status.is_stop_requested() {
+            break;
         }
     }
 
-    if !aborted_by_stop && let Some(parent) = root_notify_parent.take() {
+    Ok(status)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_postorder_pending_root(
+    plan: &ExecutionPlan,
+    backend: &dyn WalkBackend,
+    pending: PendingPath,
+    worker: &mut WorkerHandle,
+    barriers: &BarrierTable,
+    context: &EvalContext,
+    sink: &mut WorkerActionSink,
+    had_runtime_errors: &mut bool,
+) -> Result<RuntimeStatus, Diagnostic> {
+    let notify_parent = pending.parent_completion.map(SubtreeBarrierId);
+    let entry = match backend.load_entry(&pending) {
+        Ok(entry) => entry,
+        Err(error) => {
+            sink.emit_runtime_error(error)?;
+            *had_runtime_errors = true;
+            if let Some(parent) = notify_parent {
+                notify_parent_barrier(parent, barriers, worker, sink.control.as_ref())?;
+            }
+            return Ok(RuntimeStatus::default());
+        }
+    };
+
+    let traversal = match traversal_control_for_entry(
+        plan.traversal_control.as_ref(),
+        plan.follow_mode,
+        plan.traversal.order,
+        &entry,
+        context,
+    ) {
+        Ok(control) => control,
+        Err(error) => {
+            sink.emit_runtime_error(error)?;
+            *had_runtime_errors = true;
+            if let Some(parent) = notify_parent {
+                notify_parent_barrier(parent, barriers, worker, sink.control.as_ref())?;
+            }
+            return Ok(RuntimeStatus::default());
+        }
+    };
+
+    let is_directory = match backend.active_directory_identity(&entry, plan.follow_mode) {
+        Ok(identity) => identity.is_some(),
+        Err(error) => {
+            sink.emit_runtime_error(error)?;
+            *had_runtime_errors = true;
+            if let Some(parent) = notify_parent {
+                notify_parent_barrier(parent, barriers, worker, sink.control.as_ref())?;
+            }
+            return Ok(RuntimeStatus::default());
+        }
+    };
+
+    if !is_directory {
+        return complete_postorder_entry(
+            plan,
+            entry,
+            notify_parent,
+            worker,
+            barriers,
+            context,
+            sink,
+        );
+    }
+
+    let descend = match should_descend_directory(
+        &pending,
+        &entry,
+        plan.follow_mode,
+        plan.traversal,
+        traversal,
+        backend,
+    ) {
+        Ok(result) => result,
+        Err(error) => {
+            sink.emit_runtime_error(error)?;
+            *had_runtime_errors = true;
+            if let Some(parent) = notify_parent {
+                notify_parent_barrier(parent, barriers, worker, sink.control.as_ref())?;
+            }
+            return Ok(RuntimeStatus::default());
+        }
+    };
+
+    let Some((child_ancestry, root_device)) = descend else {
+        return complete_postorder_entry(
+            plan,
+            entry,
+            notify_parent,
+            worker,
+            barriers,
+            context,
+            sink,
+        );
+    };
+
+    let mut chunks = ChunkAccumulator::new(DEFAULT_SPLIT_CHILD_THRESHOLD, DEFAULT_SPILL_CHUNK_SIZE);
+    let mut emitted_error = None;
+    match backend.visit_children(&pending.path, &mut |item| match item {
+        Ok(child) => chunks.push(
+            discovered_child_to_pending(child, &pending, &child_ancestry, root_device),
+            sink.control.accepts_new_work(),
+        ),
+        Err(error) => {
+            if let Err(emit_error) = sink.emit_runtime_error(error) {
+                emitted_error = Some(emit_error);
+            }
+            *had_runtime_errors = true;
+        }
+    }) {
+        Ok(()) => {}
+        Err(error) => {
+            sink.emit_runtime_error(error)?;
+            *had_runtime_errors = true;
+            return complete_postorder_entry(
+                plan,
+                entry,
+                notify_parent,
+                worker,
+                barriers,
+                context,
+                sink,
+            );
+        }
+    }
+
+    if let Some(error) = emitted_error {
+        return Err(error);
+    }
+
+    if sink.control.quit_seen() || sink.control.fatal_error_seen() {
+        return Ok(RuntimeStatus::default());
+    }
+
+    let chunk_plan = chunks.finish();
+    let has_local_batch = !chunk_plan.local_stack.is_empty();
+    let child_units = chunk_plan.spilled_chunks.len() + usize::from(has_local_batch);
+    if child_units == 0 {
+        return complete_postorder_entry(
+            plan,
+            entry,
+            notify_parent,
+            worker,
+            barriers,
+            context,
+            sink,
+        );
+    }
+
+    let barrier = barriers.begin_directory(
+        entry,
+        pending.ancestor_barriers.clone(),
+        child_units,
+        notify_parent,
+    )?;
+    let mut status = RuntimeStatus::default();
+
+    if has_local_batch {
+        let local_batch = chunk_plan
+            .local_stack
+            .into_iter()
+            .map(|child| PendingPath {
+                ancestor_barriers: vec![barrier],
+                ..child
+            })
+            .collect();
+        status = status.merge(run_postorder_pending_batch(
+            plan,
+            backend,
+            local_batch,
+            Some(barrier),
+            worker,
+            barriers,
+            context,
+            sink,
+            had_runtime_errors,
+        )?);
+    }
+
+    if !sink.control.accepts_new_work() || status.is_stop_requested() {
+        return Ok(status);
+    }
+
+    for chunk in chunk_plan.spilled_chunks {
+        let pending = chunk
+            .into_iter()
+            .map(|child| PendingPath {
+                ancestor_barriers: vec![barrier],
+                ..child
+            })
+            .collect::<Vec<_>>();
+        worker.push_local(
+            ParallelTask::SiblingChunk(SiblingChunkTask {
+                pending,
+                completion_barrier: Some(barrier),
+            }),
+            sink.control.as_ref(),
+        );
+    }
+
+    Ok(status)
+}
+
+fn complete_postorder_entry(
+    plan: &ExecutionPlan,
+    entry: EntryContext,
+    notify_parent: Option<SubtreeBarrierId>,
+    worker: &mut WorkerHandle,
+    barriers: &BarrierTable,
+    context: &EvalContext,
+    sink: &mut WorkerActionSink,
+) -> Result<RuntimeStatus, Diagnostic> {
+    let mut status = RuntimeStatus::default();
+
+    if entry.depth >= plan.traversal.min_depth {
+        status = status.merge(process_entry_preorder_fast_path(
+            plan,
+            &entry,
+            plan.follow_mode,
+            context,
+            sink,
+        )?);
+        if status.is_stop_requested() {
+            return Ok(status);
+        }
+    }
+
+    if let Some(parent) = notify_parent {
         notify_parent_barrier(parent, barriers, worker, sink.control.as_ref())?;
     }
 
@@ -736,18 +785,28 @@ fn notify_parent_barrier(
     worker: &mut WorkerHandle,
     control: &GlobalControl,
 ) -> Result<(), Diagnostic> {
-    if let Some(resume) = barriers.finish_spilled_child(parent)? {
-        worker.push_local(ParallelTask::PostOrderResume(resume), control);
+    let mut next = Some(parent);
+    while let Some(barrier) = next.take() {
+        match barriers.finish_spilled_chunk(barrier)? {
+            Some(BarrierRelease::Resume(resume)) => {
+                worker.push_local(ParallelTask::PostOrderResume(resume), control);
+            }
+            Some(BarrierRelease::NotifyParent(parent)) => {
+                next = Some(parent);
+            }
+            None => {}
+        }
     }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{WorkerActionSink, run_preorder_root_serial};
+    use super::{WorkerActionSink, run_postorder_root_task, run_preorder_root_serial};
     use crate::eval::{EvalContext, RuntimeStatus};
     use crate::file_output::SharedFileOutputs;
     use crate::parallel::control::GlobalControl;
+    use crate::parallel::postorder::BarrierTable;
     use crate::parallel::scheduler::Scheduler;
     use crate::parallel::task::{ParallelTask, PreOrderRootTask};
     use crate::parser::parse_command;
@@ -793,5 +852,47 @@ mod tests {
         assert_eq!(status, RuntimeStatus::default());
         assert!(!had_runtime_errors);
         assert!(matches!(worker.pop(), Some(ParallelTask::SiblingChunk(_))));
+    }
+
+    #[test]
+    fn postorder_wide_directory_publishes_chunked_sibling_task_with_completion_barrier() {
+        let root = tempdir().unwrap();
+        for index in 0..40 {
+            fs::create_dir(root.path().join(format!("dir-{index:02}"))).unwrap();
+        }
+
+        let argv = vec![
+            root.path().as_os_str().to_os_string(),
+            OsString::from("-depth"),
+            OsString::from("-false"),
+        ];
+        let plan = plan_command(parse_command(&argv).unwrap(), 4).unwrap();
+        let scheduler = Scheduler::new(1);
+        let mut worker = scheduler.worker_handle(0);
+        let control = Arc::new(GlobalControl::new());
+        let (broker, _rx) = unbounded();
+        let file_outputs = SharedFileOutputs::open_all(&[]).unwrap();
+        let mut sink = WorkerActionSink::new(control.clone(), broker, file_outputs);
+        let mut had_runtime_errors = false;
+        let barriers = BarrierTable::default();
+
+        let status = run_postorder_root_task(
+            &plan,
+            &FsWalkBackend,
+            PreOrderRootTask::for_path(root.path().to_path_buf(), 0),
+            &mut worker,
+            &barriers,
+            &EvalContext::default(),
+            &mut sink,
+            &mut had_runtime_errors,
+        )
+        .unwrap();
+
+        assert_eq!(status, RuntimeStatus::default());
+        assert!(!had_runtime_errors);
+        assert!(matches!(
+            worker.pop(),
+            Some(ParallelTask::SiblingChunk(task)) if task.completion_barrier.is_some()
+        ));
     }
 }

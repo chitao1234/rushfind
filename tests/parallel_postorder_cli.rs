@@ -55,14 +55,16 @@ fn parallel_v2_depth_prune_stays_truthy_but_does_not_block_descendants() {
 }
 
 #[test]
-fn parallel_v2_delete_keeps_descendant_before_parent_behavior_when_parent_spills_children() {
+fn parallel_v2_delete_keeps_descendant_before_parent_when_children_are_chunked() {
     let root = tempdir().unwrap();
     let parent = root.path().join("parent");
     fs::create_dir(&parent).unwrap();
-    for index in 0..40 {
-        let child = parent.join(format!("child-{index:02}"));
+    for child_index in 0..96 {
+        let child = parent.join(format!("child-{child_index:03}"));
         fs::create_dir(&child).unwrap();
-        fs::write(child.join("leaf.txt"), "x\n").unwrap();
+        for leaf_index in 0..4 {
+            fs::write(child.join(format!("leaf-{leaf_index:02}.txt")), "x\n").unwrap();
+        }
     }
 
     let output = cargo_bin_output_with_timeout(
@@ -73,10 +75,9 @@ fn parallel_v2_delete_keeps_descendant_before_parent_behavior_when_parent_spills
             "-delete".into(),
         ],
         4,
-        Duration::from_secs(5),
+        Duration::from_secs(10),
     );
 
     assert_eq!(output.status.code(), Some(0));
-    assert!(!parent.exists());
     assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
 }

@@ -7,11 +7,23 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Debug)]
-struct BarrierRecord {
-    entry: EntryContext,
-    ancestor_barriers: Vec<SubtreeBarrierId>,
-    remaining_spilled_children: usize,
-    notify_parent: Option<SubtreeBarrierId>,
+enum BarrierRecord {
+    Directory {
+        entry: EntryContext,
+        ancestor_barriers: Vec<SubtreeBarrierId>,
+        remaining_spilled_chunks: usize,
+        notify_parent: Option<SubtreeBarrierId>,
+    },
+    Batch {
+        remaining_roots: usize,
+        notify_parent: SubtreeBarrierId,
+    },
+}
+
+#[derive(Debug)]
+pub(crate) enum BarrierRelease {
+    Resume(PostOrderResumeTask),
+    NotifyParent(SubtreeBarrierId),
 }
 
 #[derive(Debug, Default)]
@@ -34,20 +46,39 @@ impl BarrierTable {
             .map_err(|_| Diagnostic::new("internal error: barrier table poisoned", 1))?
             .insert(
                 barrier,
-                BarrierRecord {
+                BarrierRecord::Directory {
                     entry,
                     ancestor_barriers,
-                    remaining_spilled_children: spilled_children,
+                    remaining_spilled_chunks: spilled_children,
                     notify_parent,
                 },
             );
         Ok(barrier)
     }
 
-    pub(crate) fn finish_spilled_child(
+    pub(crate) fn begin_batch(
+        &self,
+        roots: usize,
+        notify_parent: SubtreeBarrierId,
+    ) -> Result<SubtreeBarrierId, Diagnostic> {
+        let barrier = SubtreeBarrierId(self.next_id.fetch_add(1, Ordering::SeqCst));
+        self.records
+            .lock()
+            .map_err(|_| Diagnostic::new("internal error: barrier table poisoned", 1))?
+            .insert(
+                barrier,
+                BarrierRecord::Batch {
+                    remaining_roots: roots,
+                    notify_parent,
+                },
+            );
+        Ok(barrier)
+    }
+
+    pub(crate) fn finish_spilled_chunk(
         &self,
         barrier: SubtreeBarrierId,
-    ) -> Result<Option<PostOrderResumeTask>, Diagnostic> {
+    ) -> Result<Option<BarrierRelease>, Diagnostic> {
         let mut records = self
             .records
             .lock()
@@ -56,17 +87,42 @@ impl BarrierTable {
             return Ok(None);
         };
 
-        if record.remaining_spilled_children > 1 {
-            record.remaining_spilled_children -= 1;
-            return Ok(None);
+        match record {
+            BarrierRecord::Directory {
+                remaining_spilled_chunks,
+                ..
+            } => {
+                if *remaining_spilled_chunks > 1 {
+                    *remaining_spilled_chunks -= 1;
+                    return Ok(None);
+                }
+            }
+            BarrierRecord::Batch {
+                remaining_roots, ..
+            } => {
+                if *remaining_roots > 1 {
+                    *remaining_roots -= 1;
+                    return Ok(None);
+                }
+            }
         }
 
         let record = records.remove(&barrier).expect("barrier record exists");
-        Ok(Some(PostOrderResumeTask {
-            entry: record.entry,
-            ancestor_barriers: record.ancestor_barriers,
-            barrier,
-            notify_parent: record.notify_parent,
+        Ok(Some(match record {
+            BarrierRecord::Directory {
+                entry,
+                ancestor_barriers,
+                notify_parent,
+                ..
+            } => BarrierRelease::Resume(PostOrderResumeTask {
+                entry,
+                ancestor_barriers,
+                barrier,
+                notify_parent,
+            }),
+            BarrierRecord::Batch { notify_parent, .. } => {
+                BarrierRelease::NotifyParent(notify_parent)
+            }
         }))
     }
 }
@@ -77,18 +133,25 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn resume_task_is_released_only_after_the_last_spilled_child_finishes() {
+    fn resume_task_is_released_only_after_the_last_spilled_chunk_finishes() {
         let table = BarrierTable::default();
         let entry = EntryContext::new(PathBuf::from("dir"), 1, false);
         let barrier = table
             .begin_directory(entry.clone(), Vec::new(), 2, None)
             .unwrap();
 
-        assert!(table.finish_spilled_child(barrier).unwrap().is_none());
+        assert!(table.finish_spilled_chunk(barrier).unwrap().is_none());
 
-        let resume = table.finish_spilled_child(barrier).unwrap().unwrap();
-        assert_eq!(resume.entry.path, entry.path);
-        assert_eq!(resume.barrier, barrier);
+        let resume = table.finish_spilled_chunk(barrier).unwrap().unwrap();
+        match resume {
+            BarrierRelease::Resume(resume) => {
+                assert_eq!(resume.entry.path, entry.path);
+                assert_eq!(resume.barrier, barrier);
+            }
+            BarrierRelease::NotifyParent(_) => {
+                panic!("directory barrier should release a resume task");
+            }
+        }
     }
 
     #[test]
@@ -104,8 +167,15 @@ mod tests {
             )
             .unwrap();
 
-        let resume = table.finish_spilled_child(barrier).unwrap().unwrap();
-        assert_eq!(resume.notify_parent, Some(parent));
-        assert_eq!(resume.ancestor_barriers, vec![parent]);
+        let resume = table.finish_spilled_chunk(barrier).unwrap().unwrap();
+        match resume {
+            BarrierRelease::Resume(resume) => {
+                assert_eq!(resume.notify_parent, Some(parent));
+                assert_eq!(resume.ancestor_barriers, vec![parent]);
+            }
+            BarrierRelease::NotifyParent(_) => {
+                panic!("directory barrier should release a resume task");
+            }
+        }
     }
 }
