@@ -84,6 +84,19 @@ Use the `FINDOXIDE_WORKERS` environment variable to control execution mode:
 - `FINDOXIDE_WORKERS=1` keeps traversal/output close to GNU ordering
 - `FINDOXIDE_WORKERS=4` enables the worker-owned relaxed-order parallel engine by default
 
+## Regex benchmark stage
+
+Use the regex benchmark harness when you want end-to-end ordered versus parallel comparisons on
+regex-heavy workloads:
+
+```bash
+FINDOXIDE_WORKERS=8 FINDOXIDE_BENCH_REPEATS=5 bash scripts/bench_regex_stage.sh cd95653
+```
+
+The script builds baseline and current release binaries outside the timed region, reuses one
+deterministic fixture tree for both trees, and prints per-case median deltas for regex-light,
+regex-heavy, and PCRE2-fallback-heavy command families.
+
 ## Follow modes
 
 - `-P` keeps physical traversal semantics and is the default

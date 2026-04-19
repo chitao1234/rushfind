@@ -840,8 +840,8 @@ fn notify_parent_barrier(
 #[cfg(test)]
 mod tests {
     use super::{WorkerActionSink, run_postorder_root_task, run_preorder_root_serial};
-    use crate::exec::PromptCoordinator;
     use crate::eval::{EvalContext, RuntimeStatus};
+    use crate::exec::PromptCoordinator;
     use crate::file_output::SharedFileOutputs;
     use crate::parallel::control::GlobalControl;
     use crate::parallel::postorder::BarrierTable;

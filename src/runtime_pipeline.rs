@@ -123,7 +123,13 @@ pub(crate) fn begin_entry_eval(
     follow_mode: FollowMode,
     context: &EvalContext,
 ) -> Result<EvalStep, Diagnostic> {
-    step_expr(expr, entry.clone(), follow_mode, EvalContinuation::Done, context)
+    step_expr(
+        expr,
+        entry.clone(),
+        follow_mode,
+        EvalContinuation::Done,
+        context,
+    )
 }
 
 pub(crate) fn resume_entry_eval(

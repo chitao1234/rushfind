@@ -55,7 +55,9 @@ pub fn optimize_read_only_and_chains(expr: RuntimeExpr) -> RuntimeExpr {
             optimize_read_only_and_chains((*left).clone()),
             optimize_read_only_and_chains((*right).clone()),
         ),
-        RuntimeExpr::Not(inner) => RuntimeExpr::negate(optimize_read_only_and_chains((*inner).clone())),
+        RuntimeExpr::Not(inner) => {
+            RuntimeExpr::negate(optimize_read_only_and_chains((*inner).clone()))
+        }
         other => other,
     }
 }

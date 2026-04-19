@@ -83,7 +83,9 @@ fn contains_prune(expr: &RuntimeExpr) -> bool {
 
 fn project_for_traversal(expr: &RuntimeExpr) -> RuntimeExpr {
     match expr {
-        RuntimeExpr::And(items) => RuntimeExpr::and(items.iter().map(project_for_traversal).collect()),
+        RuntimeExpr::And(items) => {
+            RuntimeExpr::and(items.iter().map(project_for_traversal).collect())
+        }
         RuntimeExpr::Or(left, right) => {
             RuntimeExpr::or(project_for_traversal(left), project_for_traversal(right))
         }
