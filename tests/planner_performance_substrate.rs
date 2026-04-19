@@ -114,7 +114,7 @@ fn optimizer_barrier_cases_preserve_expected_linear_order() {
 }
 
 #[test]
-fn or_and_not_boundaries_are_not_crossed() {
+fn or_stays_a_boundary_and_not_optimizes_its_child_subtree() {
     let ast = parse_command(&argv(&[
         ".", "(", "-uid", "0", "-o", "-name", "*.rs", ")", "-type", "f",
     ]))
@@ -130,7 +130,7 @@ fn or_and_not_boundaries_are_not_crossed() {
     let plan = plan_command(ast, 1).unwrap();
 
     assert_eq!(linear_labels(&plan.expr), vec!["not", "type", "print"]);
-    assert_eq!(not_inner_labels(&plan.expr), vec!["uid", "name"]);
+    assert_eq!(not_inner_labels(&plan.expr), vec!["name", "uid"]);
 }
 
 fn predicate_labels(expr: &RuntimeExpr) -> Vec<&'static str> {
