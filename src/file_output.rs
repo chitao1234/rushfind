@@ -1,4 +1,5 @@
 use crate::diagnostics::{Diagnostic, failed_to_write, internal_poisoned};
+use crate::entry::EntryContext;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
@@ -16,6 +17,10 @@ pub struct PlannedFileOutput {
 pub enum FileOutputTerminator {
     Newline,
     Nul,
+}
+
+pub fn render_file_print_bytes(entry: &EntryContext, terminator: FileOutputTerminator) -> Vec<u8> {
+    crate::action_output::render_file_print_bytes(entry, terminator)
 }
 
 pub struct OrderedFileOutputs {

@@ -3,7 +3,7 @@ use crate::diagnostics::{Diagnostic, failed_to_write};
 use crate::entry::EntryContext;
 use crate::eval::{ActionOutcome, ActionSink, EvalContext};
 use crate::follow::FollowMode;
-use crate::planner::RuntimeAction;
+use crate::planner::{OutputAction, RuntimeAction};
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use std::io::Write;
 use std::thread::{Scope, ScopedJoinHandle};
@@ -52,6 +52,10 @@ fn broker_loop<W: Write, E: Write>(
 
 pub struct StdoutSink<'a, W: Write> {
     writer: &'a mut W,
+}
+
+pub fn render_output_bytes(action: OutputAction, entry: &EntryContext) -> Vec<u8> {
+    crate::action_output::render_output_bytes(action, entry)
 }
 
 impl<'a, W: Write> StdoutSink<'a, W> {

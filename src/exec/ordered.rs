@@ -81,7 +81,7 @@ impl<'a, W: std::io::Write, E: std::io::Write> OrderedActionSink<'a, W, E> {
             }
             Ok(None) => {}
             Err(error) => {
-                self.write_diagnostic(&format!("findoxide: {error}"))?;
+                self.write_diagnostic(format!("findoxide: {error}"))?;
                 self.had_action_failures = true;
                 status = status.merge(RuntimeStatus::action_failure());
             }
@@ -90,10 +90,7 @@ impl<'a, W: std::io::Write, E: std::io::Write> OrderedActionSink<'a, W, E> {
         Ok(status)
     }
 
-    pub fn write_diagnostic(
-        &mut self,
-        message: impl std::fmt::Display,
-    ) -> Result<(), Diagnostic> {
+    pub fn write_diagnostic(&mut self, message: impl std::fmt::Display) -> Result<(), Diagnostic> {
         self.stderr
             .write_all(&runtime_stderr_line(message))
             .map_err(|error| failed_to_write("stderr", error))

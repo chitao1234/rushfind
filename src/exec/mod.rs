@@ -10,8 +10,8 @@ pub use child::SpillBuffer;
 pub use ordered::OrderedActionSink;
 pub use parallel::ParallelActionSink;
 pub use template::{
-    BatchedExecAction, ExecBatchId, ExecTemplateSegment, ImmediateExecAction,
-    build_batched_argv, compile_batched_exec, compile_immediate_exec, render_immediate_argv,
+    BatchedExecAction, ExecBatchId, ExecTemplateSegment, ImmediateExecAction, build_batched_argv,
+    compile_batched_exec, compile_immediate_exec, render_immediate_argv,
 };
 
 pub(crate) use batch::fixed_batch_cost;
