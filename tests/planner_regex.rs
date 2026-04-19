@@ -82,6 +82,25 @@ fn unsupported_regextype_is_a_planning_error() {
     assert!(error.message.contains("posix-extended"));
     assert!(error.message.contains("posix-basic"));
     assert!(error.message.contains("rust"));
+    assert!(error.message.contains("pcre2"));
+}
+
+#[test]
+fn pcre2_regextype_lowers_into_pcre2_matchers() {
+    let plan = plan_command(
+        parse_command(&argv(&[
+            ".",
+            "-regextype",
+            "pcre2",
+            "-regex",
+            ".*/(?:src|docs)/.+\\.(?:rs|txt)",
+        ]))
+        .unwrap(),
+        1,
+    )
+    .unwrap();
+
+    assert_eq!(regex_dialects(&plan.expr), vec![RegexDialect::Pcre2]);
 }
 
 #[cfg(unix)]
@@ -116,13 +135,7 @@ fn non_utf8_regex_patterns_are_accepted_by_planning() {
 
 #[test]
 fn gnu_facing_dialects_report_unsupported_constructs_clearly() {
-    for (dialect_name, pattern) in [
-        ("emacs", "\\1"),
-        ("posix-extended", "\\1"),
-        ("posix-basic", "\\1"),
-        ("posix-extended", "[[.ch.]]"),
-        ("posix-basic", "[[=a=]]"),
-    ] {
+    for (dialect_name, pattern) in [("posix-extended", "[[.ch.]]"), ("posix-basic", "[[=a=]]")] {
         let error = plan_command(
             parse_command(&argv(&[".", "-regextype", dialect_name, "-regex", pattern])).unwrap(),
             1,
@@ -131,6 +144,23 @@ fn gnu_facing_dialects_report_unsupported_constructs_clearly() {
 
         assert!(error.message.contains(dialect_name));
         assert!(error.message.contains("unsupported construct"));
+    }
+}
+
+#[test]
+fn gnu_foundation_planning_accepts_backreferences_and_gnu_escapes() {
+    for (dialect_name, pattern) in [
+        ("posix-basic", r".*/\(.\)\1"),
+        ("posix-extended", r".*/(.)\1"),
+        ("posix-extended", r".*/\<foo\>"),
+    ] {
+        let plan = plan_command(
+            parse_command(&argv(&[".", "-regextype", dialect_name, "-regex", pattern])).unwrap(),
+            1,
+        )
+        .unwrap();
+
+        assert_eq!(regex_dialects(&plan.expr).len(), 1);
     }
 }
 

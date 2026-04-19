@@ -236,7 +236,7 @@ pub(crate) fn evaluate_predicate(
             *case_insensitive,
             true,
         ),
-        RuntimePredicate::Regex(matcher) => Ok(matcher.is_match(entry.path.as_os_str())),
+        RuntimePredicate::Regex(matcher) => matcher.is_match(entry.path.as_os_str()),
         RuntimePredicate::Inum(expected) => Ok(expected.matches(entry.active_inode(follow_mode)?)),
         RuntimePredicate::Links(expected) => {
             Ok(expected.matches(entry.active_link_count(follow_mode)?))

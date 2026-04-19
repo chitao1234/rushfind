@@ -89,3 +89,30 @@ fn parses_posix_basic_regextype_as_regex_type_argument() {
         }
     );
 }
+
+#[test]
+fn pcre2_regextype_parses_as_regex_type_argument() {
+    let ast = parse_command(&argv(&[
+        ".",
+        "-regextype",
+        "pcre2",
+        "-regex",
+        ".*/(?:src|docs)/.*",
+    ]))
+    .unwrap();
+
+    assert_eq!(
+        ast,
+        CommandAst {
+            start_paths: vec![PathBuf::from(".")],
+            global_options: vec![],
+            expr: Expr::And(vec![
+                Expr::Predicate(Predicate::RegexType("pcre2".into())),
+                Expr::Predicate(Predicate::Regex {
+                    pattern: ".*/(?:src|docs)/.*".into(),
+                    case_insensitive: false,
+                }),
+            ]),
+        }
+    );
+}

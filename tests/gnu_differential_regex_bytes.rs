@@ -100,3 +100,35 @@ fn regex_and_iregex_match_gnu_for_non_utf8_operands() {
         assert_eq!(fox.stderr, gnu.stderr, "args: {:?}", args);
     }
 }
+
+#[test]
+fn regex_foundation_matrix_gnu_and_pcre2_preserve_non_utf8_subject_matching() {
+    let root = build_non_utf8_regex_tree();
+
+    for args in [
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-regextype".into(),
+            "posix-extended".into(),
+            "-regex".into(),
+            os(b".*/ReadMe-\xff\\.TXT"),
+            "-print0".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-regextype".into(),
+            "pcre2".into(),
+            "-regex".into(),
+            OsString::from(".*/ReadMe-\\xFF\\.TXT"),
+            "-print0".into(),
+        ],
+    ] {
+        let fox = run_fox(&args);
+        assert!(fox.status.success(), "args: {:?}", args);
+        assert!(!fox.stdout.is_empty(), "args: {:?}", args);
+    }
+}
