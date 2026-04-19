@@ -5,42 +5,112 @@ use findoxide::parser::parse_command;
 use findoxide::planner::{
     OutputAction, RuntimeAction, RuntimeExpr, RuntimePredicate, plan_command,
 };
-use support::argv;
+use support::{argv, predicate_labels as collect_predicate_labels};
 
 #[test]
-fn pure_read_only_and_chain_reorders_to_stable_cheap_first_order() {
-    let ast = parse_command(&argv(&[
-        ".", "-uid", "0", "-name", "*.rs", "-false", "-type", "f", "-perm", "644",
-    ]))
-    .unwrap();
-    let plan = plan_command(ast, 1).unwrap();
-
-    assert_eq!(
-        predicate_labels(&plan.expr),
-        vec!["false", "name", "type", "uid", "perm"]
-    );
+fn predicate_reordering_cases_match_expected_order() {
+    for (case, args, expected) in [
+        (
+            "pure read-only chain",
+            &[
+                ".", "-uid", "0", "-name", "*.rs", "-false", "-type", "f", "-perm", "644",
+            ][..],
+            &["false", "name", "type", "uid", "perm"][..],
+        ),
+        (
+            "equal-cost predicates keep relative order",
+            &[".", "-gid", "0", "-uid", "0", "-links", "+1", "-inum", "1"][..],
+            &["gid", "uid", "links", "inum"][..],
+        ),
+        (
+            "directory probe stays after cheaper type checks",
+            &[".", "-empty", "-type", "f", "-name", "*.rs"][..],
+            &["name", "type", "empty"][..],
+        ),
+        (
+            "birth time stays after active metadata checks",
+            &[
+                ".",
+                "-newerBm",
+                "/proc/self/stat",
+                "-size",
+                "+0c",
+                "-name",
+                "*.rs",
+            ][..],
+            &["name", "size", "newer"][..],
+        ),
+        (
+            "fstype is reorderable in read-only segments",
+            &[".", "-uid", "0", "-fstype", "tmpfs", "-name", "*.rs"][..],
+            &["name", "uid", "fstype"][..],
+        ),
+        (
+            "access predicates are reorderable in read-only segments",
+            &[".", "-uid", "0", "-readable", "-name", "*.rs"][..],
+            &["name", "uid", "readable"][..],
+        ),
+        (
+            "regex sorts after path and before metadata checks",
+            &[".", "-uid", "0", "-regex", ".*\\.rs", "-path", "./src/*"][..],
+            &["path", "regex", "uid"][..],
+        ),
+    ] {
+        let ast = parse_command(&argv(args)).unwrap();
+        let plan = plan_command(ast, 1).unwrap();
+        assert_eq!(predicate_labels(&plan.expr), expected, "{case}");
+    }
 }
 
 #[test]
-fn equal_cost_predicates_keep_original_relative_order() {
-    let ast = parse_command(&argv(&[
-        ".", "-gid", "0", "-uid", "0", "-links", "+1", "-inum", "1",
-    ]))
-    .unwrap();
-    let plan = plan_command(ast, 1).unwrap();
-
-    assert_eq!(
-        predicate_labels(&plan.expr),
-        vec!["gid", "uid", "links", "inum"]
-    );
-}
-
-#[test]
-fn actions_block_cross_boundary_reordering() {
-    let ast = parse_command(&argv(&[".", "-uid", "0", "-print", "-name", "*.rs"])).unwrap();
-    let plan = plan_command(ast, 1).unwrap();
-
-    assert_eq!(linear_labels(&plan.expr), vec!["uid", "print", "name"]);
+fn optimizer_barrier_cases_preserve_expected_linear_order() {
+    for (case, args, expected) in [
+        (
+            "actions block cross-boundary reordering",
+            &[".", "-uid", "0", "-print", "-name", "*.rs"][..],
+            &["uid", "print", "name"][..],
+        ),
+        (
+            "traversal controls are optimizer barriers",
+            &[".", "-uid", "0", "-maxdepth", "1", "-name", "*.rs"][..],
+            &["uid", "barrier", "name", "print"][..],
+        ),
+        (
+            "prune is an optimizer barrier",
+            &[".", "-uid", "0", "-prune", "-name", "*.rs"][..],
+            &["uid", "prune", "name", "print"][..],
+        ),
+        (
+            "daystart is an optimizer barrier",
+            &[
+                ".",
+                "-uid",
+                "0",
+                "-daystart",
+                "-mtime",
+                "0",
+                "-name",
+                "*.rs",
+            ][..],
+            &["uid", "barrier", "name", "mtime", "print"][..],
+        ),
+        (
+            "exec actions are optimizer barriers",
+            &[
+                ".", "-name", "*.rs", "-exec", "echo", "{}", ";", "-uid", "0",
+            ][..],
+            &["name", "exec:semicolon", "uid"][..],
+        ),
+        (
+            "depth and delete are optimizer barriers",
+            &[".", "-uid", "0", "-depth", "-name", "*.tmp", "-delete"][..],
+            &["uid", "barrier", "name", "delete"][..],
+        ),
+    ] {
+        let ast = parse_command(&argv(args)).unwrap();
+        let plan = plan_command(ast, 1).unwrap();
+        assert_eq!(linear_labels(&plan.expr), expected, "{case}");
+    }
 }
 
 #[test]
@@ -63,165 +133,8 @@ fn or_and_not_boundaries_are_not_crossed() {
     assert_eq!(not_inner_labels(&plan.expr), vec!["uid", "name"]);
 }
 
-#[test]
-fn traversal_controls_are_optimizer_barriers() {
-    let ast = parse_command(&argv(&[
-        ".",
-        "-uid",
-        "0",
-        "-maxdepth",
-        "1",
-        "-name",
-        "*.rs",
-    ]))
-    .unwrap();
-    let plan = plan_command(ast, 1).unwrap();
-
-    assert_eq!(
-        linear_labels(&plan.expr),
-        vec!["uid", "barrier", "name", "print"]
-    );
-}
-
-#[test]
-fn prune_is_an_optimizer_barrier() {
-    let ast = parse_command(&argv(&[".", "-uid", "0", "-prune", "-name", "*.rs"])).unwrap();
-    let plan = plan_command(ast, 1).unwrap();
-
-    assert_eq!(
-        linear_labels(&plan.expr),
-        vec!["uid", "prune", "name", "print"]
-    );
-}
-
-#[test]
-fn daystart_is_an_optimizer_barrier() {
-    let ast = parse_command(&argv(&[
-        ".",
-        "-uid",
-        "0",
-        "-daystart",
-        "-mtime",
-        "0",
-        "-name",
-        "*.rs",
-    ]))
-    .unwrap();
-    let plan = plan_command(ast, 1).unwrap();
-
-    assert_eq!(
-        linear_labels(&plan.expr),
-        vec!["uid", "barrier", "name", "mtime", "print"]
-    );
-}
-
-#[test]
-fn directory_probe_predicates_stay_after_cheaper_type_checks() {
-    let ast = parse_command(&argv(&[".", "-empty", "-type", "f", "-name", "*.rs"])).unwrap();
-    let plan = plan_command(ast, 1).unwrap();
-
-    assert_eq!(predicate_labels(&plan.expr), vec!["name", "type", "empty"]);
-}
-
-#[test]
-fn birth_time_predicates_stay_after_ordinary_active_metadata_checks() {
-    let ast = parse_command(&argv(&[
-        ".",
-        "-newerBm",
-        "/proc/self/stat",
-        "-size",
-        "+0c",
-        "-name",
-        "*.rs",
-    ]))
-    .unwrap();
-    let plan = plan_command(ast, 1).unwrap();
-
-    assert_eq!(predicate_labels(&plan.expr), vec!["name", "size", "newer"]);
-}
-
-#[test]
-fn fstype_is_reorderable_inside_read_only_and_segments() {
-    let ast = parse_command(&argv(&[
-        ".", "-uid", "0", "-fstype", "tmpfs", "-name", "*.rs",
-    ]))
-    .unwrap();
-    let plan = plan_command(ast, 1).unwrap();
-
-    assert_eq!(predicate_labels(&plan.expr), vec!["name", "uid", "fstype"]);
-}
-
-#[test]
-fn access_predicates_are_reorderable_inside_read_only_and_segments() {
-    let ast = parse_command(&argv(&[".", "-uid", "0", "-readable", "-name", "*.rs"])).unwrap();
-    let plan = plan_command(ast, 1).unwrap();
-
-    assert_eq!(
-        predicate_labels(&plan.expr),
-        vec!["name", "uid", "readable"]
-    );
-}
-
-#[test]
-fn regex_sorts_after_path_but_before_metadata_checks() {
-    let ast = parse_command(&argv(&[
-        ".", "-uid", "0", "-regex", ".*\\.rs", "-path", "./src/*",
-    ]))
-    .unwrap();
-    let plan = plan_command(ast, 1).unwrap();
-
-    assert_eq!(predicate_labels(&plan.expr), vec!["path", "regex", "uid"]);
-}
-
-#[test]
-fn exec_actions_are_optimizer_barriers() {
-    let ast = parse_command(&argv(&[
-        ".", "-name", "*.rs", "-exec", "echo", "{}", ";", "-uid", "0",
-    ]))
-    .unwrap();
-    let plan = plan_command(ast, 1).unwrap();
-
-    assert_eq!(
-        linear_labels(&plan.expr),
-        vec!["name", "exec:semicolon", "uid"]
-    );
-}
-
-#[test]
-fn depth_and_delete_are_optimizer_barriers() {
-    let ast = parse_command(&argv(&[
-        ".", "-uid", "0", "-depth", "-name", "*.tmp", "-delete",
-    ]))
-    .unwrap();
-    let plan = plan_command(ast, 1).unwrap();
-
-    assert_eq!(
-        linear_labels(&plan.expr),
-        vec!["uid", "barrier", "name", "delete"]
-    );
-}
-
 fn predicate_labels(expr: &RuntimeExpr) -> Vec<&'static str> {
-    let mut labels = Vec::new();
-    collect_predicate_labels(expr, &mut labels);
-    labels
-}
-
-fn collect_predicate_labels(expr: &RuntimeExpr, labels: &mut Vec<&'static str>) {
-    match expr {
-        RuntimeExpr::And(items) => {
-            for item in items {
-                collect_predicate_labels(item, labels);
-            }
-        }
-        RuntimeExpr::Or(left, right) => {
-            collect_predicate_labels(left, labels);
-            collect_predicate_labels(right, labels);
-        }
-        RuntimeExpr::Not(inner) => collect_predicate_labels(inner, labels),
-        RuntimeExpr::Predicate(predicate) => labels.push(predicate_label(predicate)),
-        RuntimeExpr::Action(_) | RuntimeExpr::Barrier => {}
-    }
+    collect_predicate_labels(expr, |predicate| Some(predicate_label(predicate)))
 }
 
 fn linear_labels(expr: &RuntimeExpr) -> Vec<&'static str> {

@@ -1,13 +1,28 @@
 mod support;
 
 use findoxide::parser::parse_command;
-use findoxide::planner::{OutputAction, RuntimeAction, RuntimeExpr, plan_command};
-use support::argv;
+use findoxide::planner::{OutputAction, RuntimeAction, plan_command};
+use support::{argv, contains_action};
 
 #[test]
-fn printf_counts_as_an_explicit_action_for_implicit_print_suppression() {
-    let plan = plan_command(parse_command(&argv(&[".", "-printf", "%p\\n"])).unwrap(), 1).unwrap();
-    assert!(!contains_plain_print(&plan.expr));
+fn supported_printf_formats_lower_as_explicit_actions_with_expected_runtime_requirements() {
+    for (format, mount_snapshot) in [
+        ("%p\\n", false),
+        (r"A\cB", false),
+        ("%Y\\n", false),
+        ("%S\\n", false),
+        ("[%a][%T+]\\n", false),
+        ("%F\\n", true),
+    ] {
+        let plan =
+            plan_command(parse_command(&argv(&[".", "-printf", format])).unwrap(), 1).unwrap();
+        assert!(!contains_action(&plan.expr, |action| matches!(
+            action,
+            RuntimeAction::Output(OutputAction::Print)
+        )));
+        assert_eq!(plan.runtime.mount_snapshot, mount_snapshot, "{format}");
+        assert!(plan.startup_warnings.is_empty(), "{format}");
+    }
 }
 
 #[test]
@@ -48,39 +63,6 @@ fn printf_unknown_escapes_lower_successfully_and_collect_startup_warnings() {
 }
 
 #[test]
-fn printf_backslash_c_is_accepted_during_planning() {
-    let plan = plan_command(parse_command(&argv(&[".", "-printf", r"A\cB"])).unwrap(), 1).unwrap();
-
-    assert!(!contains_plain_print(&plan.expr));
-    assert!(plan.startup_warnings.is_empty());
-}
-
-#[test]
-fn printf_percent_upper_y_is_a_supported_directive() {
-    let plan = plan_command(parse_command(&argv(&[".", "-printf", "%Y\\n"])).unwrap(), 1).unwrap();
-
-    assert!(!contains_plain_print(&plan.expr));
-}
-
-#[test]
-fn printf_percent_upper_s_is_a_supported_directive() {
-    let plan = plan_command(parse_command(&argv(&[".", "-printf", "%S\\n"])).unwrap(), 1).unwrap();
-
-    assert!(!contains_plain_print(&plan.expr));
-}
-
-#[test]
-fn printf_time_directives_count_as_supported_explicit_actions() {
-    let plan = plan_command(
-        parse_command(&argv(&[".", "-printf", "[%a][%T+]\\n"])).unwrap(),
-        1,
-    )
-    .unwrap();
-    assert!(!contains_plain_print(&plan.expr));
-    assert!(!plan.runtime.mount_snapshot);
-}
-
-#[test]
 fn rejects_unknown_or_malformed_printf_time_directives() {
     for (format, needle) in [
         ("%A", "missing selector for %A"),
@@ -94,29 +76,5 @@ fn rejects_unknown_or_malformed_printf_time_directives() {
             "{format} -> {}",
             error.message
         );
-    }
-}
-
-#[test]
-fn printf_with_fstype_requests_mount_snapshot_runtime_support() {
-    let plan = plan_command(parse_command(&argv(&[".", "-printf", "%F\\n"])).unwrap(), 1).unwrap();
-
-    assert!(plan.runtime.mount_snapshot);
-}
-
-#[test]
-fn printf_without_fstype_keeps_mount_snapshot_disabled() {
-    let plan = plan_command(parse_command(&argv(&[".", "-printf", "%p\\n"])).unwrap(), 1).unwrap();
-
-    assert!(!plan.runtime.mount_snapshot);
-}
-
-fn contains_plain_print(expr: &RuntimeExpr) -> bool {
-    match expr {
-        RuntimeExpr::And(items) => items.iter().any(contains_plain_print),
-        RuntimeExpr::Or(left, right) => contains_plain_print(left) || contains_plain_print(right),
-        RuntimeExpr::Not(inner) => contains_plain_print(inner),
-        RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)) => true,
-        RuntimeExpr::Predicate(_) | RuntimeExpr::Action(_) | RuntimeExpr::Barrier => false,
     }
 }
