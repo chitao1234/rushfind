@@ -257,11 +257,7 @@ fn lex_bre_or_emacs_escape(
             b'{' if can_repeat_atom => Ok(GnuToken::Quantifier(lex_basic_bound(
                 flag, dialect, pattern, index,
             )?)),
-            b'1'..=b'9' => Err(unsupported_construct(
-                flag,
-                dialect,
-                "backreferences are out of scope",
-            )),
+            b'1'..=b'9' => Ok(GnuToken::Backreference((escaped - b'0') as u16)),
             b'\\' | b'.' | b'^' | b'$' | b'*' | b'+' | b'?' | b'[' | b']' | b'}' => {
                 Ok(GnuToken::Literal(escaped))
             }
