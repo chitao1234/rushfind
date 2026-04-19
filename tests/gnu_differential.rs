@@ -200,6 +200,18 @@ fn build_exec_tree() -> tempfile::TempDir {
     root
 }
 
+fn build_execdir_tree() -> tempfile::TempDir {
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("dir")).unwrap();
+    fs::create_dir(root.path().join("start")).unwrap();
+    fs::create_dir(root.path().join("real")).unwrap();
+    fs::write(root.path().join("dir/alpha.txt"), "alpha\n").unwrap();
+    fs::write(root.path().join("dir/beta.txt"), "beta\n").unwrap();
+    fs::write(root.path().join("real/file.txt"), "file\n").unwrap();
+    unix_fs::symlink("../real/file.txt", root.path().join("start/link")).unwrap();
+    root
+}
+
 fn build_printf_tree() -> tempfile::TempDir {
     let root = tempdir().unwrap();
     fs::create_dir(root.path().join("dir")).unwrap();
@@ -415,6 +427,115 @@ fn ordered_exec_plus_matches_gnu_find_exactly() {
         "+".into(),
         "-print".into(),
     ]);
+}
+
+#[test]
+fn ordered_execdir_semicolon_matches_gnu_find_exactly() {
+    let root = build_execdir_tree();
+    let args_sets = vec![
+        vec![
+            path_arg(&root.path().join("dir")),
+            "-name".into(),
+            "*.txt".into(),
+            "-execdir".into(),
+            "printf".into(),
+            "%s\\n".into(),
+            "{}".into(),
+            ";".into(),
+        ],
+        vec![
+            path_arg(&root.path().join("dir")),
+            "-name".into(),
+            "*.txt".into(),
+            "-execdir".into(),
+            "sh".into(),
+            "-c".into(),
+            "pwd; printf '%s\\n' \"$1\"".into(),
+            "sh".into(),
+            "{}".into(),
+            ";".into(),
+        ],
+    ];
+
+    for args in args_sets {
+        assert_matches_gnu_exact(&args);
+    }
+}
+
+#[test]
+fn ordered_execdir_plus_matches_gnu_find_exactly() {
+    let root = build_execdir_tree();
+    let args = vec![
+        path_arg(&root.path().join("dir")),
+        "-name".into(),
+        "*.txt".into(),
+        "-execdir".into(),
+        "sh".into(),
+        "-c".into(),
+        "printf '%s|' \"$PWD\"; printf '%s ' \"$@\"; printf '\\n'".into(),
+        "sh".into(),
+        "{}".into(),
+        "+".into(),
+    ];
+
+    assert_matches_gnu_exact(&args);
+}
+
+#[test]
+fn ordered_execdir_on_symlink_roots_matches_gnu_exactly() {
+    let root = build_execdir_tree();
+    for flag in ["-P", "-H", "-L"] {
+        assert_matches_gnu_exact(&[
+            flag.into(),
+            path_arg(&root.path().join("start/link")),
+            "-maxdepth".into(),
+            "0".into(),
+            "-execdir".into(),
+            "sh".into(),
+            "-c".into(),
+            "pwd; printf '%s\\n' \"$1\"".into(),
+            "sh".into(),
+            "{}".into(),
+            ";".into(),
+        ]);
+    }
+}
+
+#[test]
+fn unsafe_execdir_path_rejection_matches_gnu_semantics() {
+    let root = build_execdir_tree();
+    for command in [
+        vec!["echo", "{}", ";"],
+        vec!["/bin/true", "{}", ";"],
+        vec!["./sub/cmd", "{}", ";"],
+    ] {
+        let mut args = vec![
+            path_arg(&root.path().join("dir")),
+            "-name".into(),
+            "*.txt".into(),
+            "-execdir".into(),
+        ];
+        args.extend(command.into_iter().map(Into::into));
+
+        let expected = Command::new("find")
+            .env("PATH", ".:/usr/bin:/bin")
+            .args(&args)
+            .output()
+            .unwrap();
+        let actual = Command::cargo_bin("findoxide")
+            .unwrap()
+            .env("FINDOXIDE_WORKERS", "1")
+            .env("PATH", ".:/usr/bin:/bin")
+            .args(&args)
+            .output()
+            .unwrap();
+
+        assert_eq!(actual.status.success(), expected.status.success());
+        assert!(actual.stdout.is_empty());
+        assert!(expected.stdout.is_empty());
+        assert!(!actual.stderr.is_empty());
+        assert!(!expected.stderr.is_empty());
+    }
 }
 
 #[test]
