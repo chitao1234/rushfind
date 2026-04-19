@@ -46,8 +46,8 @@ fn lowers_supported_birth_and_literal_newerxy_forms() {
         "2026-04-15T12:34:56+08:00",
     ] {
         let expected = parse_literal_time(OsStr::new(raw)).unwrap();
-        let literal = plan_command(parse_command(&argv(&[".", "-newerBt", raw])).unwrap(), 1)
-            .unwrap();
+        let literal =
+            plan_command(parse_command(&argv(&[".", "-newerBt", raw])).unwrap(), 1).unwrap();
 
         assert!(
             predicate_items(&literal.expr)

@@ -321,6 +321,31 @@ fn current_fstype(path: &Path) -> OsString {
     OsString::from(String::from_utf8(output.stdout).unwrap().trim().to_owned())
 }
 
+fn assert_newermt_literal_rejection_matches_gnu(root: &Path, raw: &str) {
+    let args = vec![path_arg(root), "-newermt".into(), raw.into()];
+
+    let expected = Command::new("find")
+        .env("LC_ALL", "C")
+        .env("TZ", PRINTF_TIME_TZ)
+        .args(&args)
+        .output()
+        .unwrap();
+
+    let actual = Command::cargo_bin("findoxide")
+        .unwrap()
+        .env("FINDOXIDE_WORKERS", "1")
+        .env("LC_ALL", "C")
+        .env("TZ", PRINTF_TIME_TZ)
+        .args(&args)
+        .output()
+        .unwrap();
+
+    assert!(!expected.status.success(), "{raw}");
+    assert_eq!(actual.status.success(), expected.status.success(), "{raw}");
+    assert!(actual.stdout.is_empty(), "{raw}");
+    assert!(expected.stdout.is_empty(), "{raw}");
+}
+
 fn proc_path_without_birth_time() -> Option<&'static Path> {
     let candidate = Path::new("/proc/self/status");
     match read_birth_time(candidate, true) {
@@ -1729,6 +1754,132 @@ fn ordered_fractional_time_predicates_match_gnu_find_exactly() {
 
     for args in args_sets {
         assert_matches_gnu_exact(&args);
+    }
+}
+
+#[test]
+fn ordered_newermt_literal_time_acceptance_matches_gnu_find_exactly() {
+    let root = build_size_time_tree();
+    let args_sets = vec![
+        vec![
+            path_arg(root.path()),
+            "-newermt".into(),
+            "@1700000000.25".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-newermt".into(),
+            "2026-04-15".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-newermt".into(),
+            "2026-04-15 1234".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-newermt".into(),
+            "2026-04-15 12:34".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-newermt".into(),
+            "2026-04-15T12:34".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-newermt".into(),
+            "2026-04-15T12:34:56".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-newermt".into(),
+            "2026-04-15 12:34:56.123456789".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-newermt".into(),
+            "2026-04-15T12:34:56Z".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-newermt".into(),
+            "2026-04-15T12:34:56+08".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-newermt".into(),
+            "2026-04-15T12:34:56+0800".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-newermt".into(),
+            "2026-04-15T12:34:56+08:00".into(),
+        ],
+        vec![path_arg(root.path()), "-newermt".into(), "20260415".into()],
+        vec![
+            path_arg(root.path()),
+            "-newermt".into(),
+            "20260415 1234".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-newermt".into(),
+            "20260415 12:34".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-newermt".into(),
+            "20260415 12:34:56".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-newermt".into(),
+            "20260415T1234".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-newermt".into(),
+            "20260415T12:34".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-newermt".into(),
+            "20260415T12:34:56".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-newermt".into(),
+            "20260415T12:34:56.25".into(),
+        ],
+    ];
+
+    for args in args_sets {
+        assert_matches_gnu_exact_with_env(&args);
+    }
+}
+
+#[test]
+fn ordered_newermt_literal_time_rejection_matches_gnu_find() {
+    let root = build_size_time_tree();
+
+    for raw in [
+        "202604151234",
+        "20260415123456",
+        "202604151234.56",
+        "2026-04-15T12:34.5",
+        "20260415 123456",
+        "20260415 123456.25",
+        "20260415T12:34Z",
+        "20260415T12:34:56Z",
+        "20260415T12:34+08:00",
+        "20260415T12:34:56+08:00",
+        "20260415 1234+08:00",
+        "2026-04-15T1234",
+        "2026-04-15T123456",
+        "2026-04-15 123456",
+    ] {
+        assert_newermt_literal_rejection_matches_gnu(root.path(), raw);
     }
 }
 
