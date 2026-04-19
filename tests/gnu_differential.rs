@@ -257,6 +257,14 @@ fn build_regex_tree() -> tempfile::TempDir {
     root
 }
 
+fn build_regex_extension_tree() -> tempfile::TempDir {
+    let root = tempdir().unwrap();
+    for name in ["paren)", "+foo", "?foo", "aa", "ab", "foo", "foobar"] {
+        fs::write(root.path().join(name), "x\n").unwrap();
+    }
+    root
+}
+
 fn build_emacs_regex_edge_tree() -> tempfile::TempDir {
     let root = tempdir().unwrap();
     for name in ["a", "aa", "a+", "a^b", "ab", "]", "\\]"] {
@@ -2115,6 +2123,66 @@ fn parallel_expanded_regex_subset_matches_gnu_find_as_sets() {
         "emacs".into(),
         "-regex".into(),
         r".*/[[:upper:]][[:alpha:]]*\.MD".into(),
+        ")".into(),
+    ];
+
+    assert_matches_gnu_as_sets(&args);
+}
+
+#[test]
+fn regex_foundation_matrix_ordered_gnu_extensions_match_gnu_find_exactly() {
+    let root = build_regex_extension_tree();
+    let args_sets = vec![
+        vec![
+            path_arg(root.path()),
+            "-regextype".into(),
+            "posix-extended".into(),
+            "-regex".into(),
+            ".*/paren)".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-regextype".into(),
+            "posix-basic".into(),
+            "-regex".into(),
+            r".*/\(\+foo\)".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-regextype".into(),
+            "posix-basic".into(),
+            "-regex".into(),
+            r".*/\(.\)\1".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-regextype".into(),
+            "posix-extended".into(),
+            "-regex".into(),
+            r".*/\<foo\>".into(),
+        ],
+    ];
+
+    for args in args_sets {
+        assert_matches_gnu_exact(&args);
+    }
+}
+
+#[test]
+fn regex_foundation_matrix_parallel_gnu_extensions_match_gnu_find_as_sets() {
+    let root = build_regex_extension_tree();
+    let args = vec![
+        path_arg(root.path()),
+        "(".into(),
+        "-regextype".into(),
+        "posix-basic".into(),
+        "-regex".into(),
+        r".*/\(.\)\1".into(),
+        "-o".into(),
+        "-regextype".into(),
+        "posix-extended".into(),
+        "-regex".into(),
+        r".*/\<foo\>".into(),
         ")".into(),
     ];
 
