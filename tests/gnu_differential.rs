@@ -12,8 +12,9 @@ use std::process::Command;
 use support::{
     PRINTF_TIME_TZ, assert_file_output_matches_gnu_with_env, assert_matches_gnu_as_sets,
     assert_matches_gnu_as_sets_with_env, assert_matches_gnu_exact,
-    assert_matches_gnu_exact_with_env, assert_matches_gnu_regex_outcome,
-    assert_matches_gnu_regex_outcome_as_sets, lines, normalize_warning_program, path_arg,
+    assert_matches_gnu_exact_with_env, assert_matches_gnu_exact_with_input,
+    assert_matches_gnu_regex_outcome, assert_matches_gnu_regex_outcome_as_sets, lines,
+    normalize_warning_program, path_arg,
 };
 use tempfile::tempdir;
 
@@ -508,6 +509,72 @@ fn ordered_execdir_on_symlink_roots_matches_gnu_exactly() {
             ";".into(),
         ]);
     }
+}
+
+#[test]
+fn gnu_ok_eof_still_prints_prompt_and_skips_child() {
+    let root = build_exec_tree();
+    let args = vec![
+        path_arg(root.path()),
+        "-type".into(),
+        "f".into(),
+        "-ok".into(),
+        "printf".into(),
+        "RUN:%s\\n".into(),
+        "{}".into(),
+        ";".into(),
+    ];
+
+    assert_matches_gnu_exact_with_input(&args, b"", true);
+}
+
+#[test]
+fn gnu_okdir_prompts_with_matched_path_but_executes_with_dirlocal_basename() {
+    let root = build_execdir_tree();
+    let args = vec![
+        path_arg(root.path()),
+        "-name".into(),
+        "alpha.txt".into(),
+        "-okdir".into(),
+        "sh".into(),
+        "-c".into(),
+        "printf 'PWD:%s\\nARG:%s\\n' \"$PWD\" \"$1\"".into(),
+        "sh".into(),
+        "{}".into(),
+        ";".into(),
+    ];
+
+    assert_matches_gnu_exact_with_input(&args, b"yes\n", true);
+}
+
+#[test]
+fn gnu_ok_plus_is_rejected() {
+    let root = build_exec_tree();
+    let args = vec![
+        path_arg(root.path()),
+        "-type".into(),
+        "f".into(),
+        "-ok".into(),
+        "echo".into(),
+        "{}".into(),
+        "+".into(),
+    ];
+
+    let expected = Command::new("find")
+        .env("LC_ALL", "C")
+        .args(&args)
+        .output()
+        .unwrap();
+    let actual = Command::cargo_bin("findoxide")
+        .unwrap()
+        .env("FINDOXIDE_WORKERS", "1")
+        .env("LC_ALL", "C")
+        .args(&args)
+        .output()
+        .unwrap();
+
+    assert_eq!(actual.status.code(), expected.status.code());
+    assert!(String::from_utf8(actual.stderr).unwrap().contains("`-ok`"));
 }
 
 #[test]
@@ -2546,8 +2613,8 @@ fn build_regex_bracket_review_tree() -> tempfile::TempDir {
 fn build_gnu_regex_hardening_tree() -> tempfile::TempDir {
     let root = tempdir().unwrap();
     for name in [
-        "a", "aa", "ab", "abab", "abcd", "cdcd", "foo", "foobar", "paren)", "+foo", "?foo",
-        "-", "\\",
+        "a", "aa", "ab", "abab", "abcd", "cdcd", "foo", "foobar", "paren)", "+foo", "?foo", "-",
+        "\\",
     ] {
         fs::write(root.path().join(name), "x\n").unwrap();
     }

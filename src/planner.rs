@@ -676,9 +676,9 @@ fn lower_action(
         Action::Ok { argv, batch: false } => Ok(RuntimeExpr::Action(RuntimeAction::ExecPrompt(
             compile_immediate_exec(ExecSemantics::Normal, &argv),
         ))),
-        Action::Ok { batch: true, .. } => Err(Diagnostic::parse(
-            "`-ok` only supports the `;` terminator",
-        )),
+        Action::Ok { batch: true, .. } => {
+            Err(Diagnostic::parse("`-ok` only supports the `;` terminator"))
+        }
         Action::OkDir { argv, batch: false } => {
             runtime.execdir_requires_safe_path = true;
             Ok(RuntimeExpr::Action(RuntimeAction::ExecPrompt(

@@ -2,7 +2,8 @@ use super::lines;
 use assert_cmd::cargo::CommandCargoExt;
 use std::ffi::OsString;
 use std::fs;
-use std::process::{Command, Output};
+use std::io::Write;
+use std::process::{Command, Output, Stdio};
 use tempfile::tempdir;
 
 pub const PRINTF_TIME_TZ: &str = "Asia/Shanghai";
@@ -55,6 +56,45 @@ pub fn assert_matches_gnu_exact_with_env(args: &[OsString]) {
     assert_eq!(actual.stderr, expected.stderr);
 }
 
+pub fn assert_matches_gnu_exact_with_input(args: &[OsString], input: &[u8], with_env: bool) {
+    let mut expected = Command::new("find");
+    if with_env {
+        apply_common_env(&mut expected);
+    }
+    expected
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut expected = expected.spawn().unwrap();
+    if !input.is_empty() {
+        expected.stdin.as_mut().unwrap().write_all(input).unwrap();
+    }
+    drop(expected.stdin.take());
+    let expected = expected.wait_with_output().unwrap();
+
+    let mut actual = Command::cargo_bin("findoxide").unwrap();
+    actual
+        .env("FINDOXIDE_WORKERS", "1")
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if with_env {
+        apply_common_env(&mut actual);
+    }
+    let mut actual = actual.spawn().unwrap();
+    if !input.is_empty() {
+        actual.stdin.as_mut().unwrap().write_all(input).unwrap();
+    }
+    drop(actual.stdin.take());
+    let actual = actual.wait_with_output().unwrap();
+
+    assert_eq!(actual.status.code(), expected.status.code());
+    assert_eq!(actual.stdout, expected.stdout);
+    assert_eq!(actual.stderr, expected.stderr);
+}
+
 pub fn assert_matches_gnu_as_sets_with_env(args: &[OsString]) {
     let expected = gnu_find_output(args, true);
     let actual = findoxide_output(args, 4, true);
@@ -68,8 +108,18 @@ pub fn assert_matches_gnu_regex_outcome(args: &[OsString]) {
     let expected = gnu_find_output(args, false);
     let actual = findoxide_output(args, 1, false);
 
-    assert_eq!(actual.status.success(), expected.status.success(), "args: {:?}", args);
-    assert_eq!(actual.status.code(), expected.status.code(), "args: {:?}", args);
+    assert_eq!(
+        actual.status.success(),
+        expected.status.success(),
+        "args: {:?}",
+        args
+    );
+    assert_eq!(
+        actual.status.code(),
+        expected.status.code(),
+        "args: {:?}",
+        args
+    );
     assert_eq!(actual.stdout, expected.stdout, "args: {:?}", args);
 
     if expected.status.success() {
@@ -84,12 +134,32 @@ pub fn assert_matches_gnu_regex_outcome_as_sets(args: &[OsString]) {
     let expected = gnu_find_output(args, false);
     let actual = findoxide_output(args, 4, false);
 
-    assert_eq!(actual.status.success(), expected.status.success(), "args: {:?}", args);
-    assert_eq!(actual.status.code(), expected.status.code(), "args: {:?}", args);
-    assert_eq!(lines(&actual.stdout), lines(&expected.stdout), "args: {:?}", args);
+    assert_eq!(
+        actual.status.success(),
+        expected.status.success(),
+        "args: {:?}",
+        args
+    );
+    assert_eq!(
+        actual.status.code(),
+        expected.status.code(),
+        "args: {:?}",
+        args
+    );
+    assert_eq!(
+        lines(&actual.stdout),
+        lines(&expected.stdout),
+        "args: {:?}",
+        args
+    );
 
     if expected.status.success() {
-        assert_eq!(lines(&actual.stderr), lines(&expected.stderr), "args: {:?}", args);
+        assert_eq!(
+            lines(&actual.stderr),
+            lines(&expected.stderr),
+            "args: {:?}",
+            args
+        );
     } else {
         assert!(!expected.stderr.is_empty(), "args: {:?}", args);
         assert!(!actual.stderr.is_empty(), "args: {:?}", args);

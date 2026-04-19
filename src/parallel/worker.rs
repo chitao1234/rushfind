@@ -87,10 +87,12 @@ impl WorkerActionSink {
     ) -> Result<ActionOutcome, Diagnostic> {
         let prompt_argv = render_prompt_argv(spec, path);
         let prepared = build_immediate_command(spec, path);
-        match self.prompt.confirm_prepared(&prompt_argv, &prepared, |prepared| {
-            let mut stderr = std::io::stderr();
-            run_prepared_inherited(prepared, &mut stderr)
-        }) {
+        match self
+            .prompt
+            .confirm_prepared(&prompt_argv, &prepared, |prepared| {
+                let mut stderr = std::io::stderr();
+                run_prepared_inherited(prepared, &mut stderr)
+            }) {
             Ok(ConfirmOutcome::Accepted(true)) => Ok(ActionOutcome::matched_true()),
             Ok(ConfirmOutcome::Accepted(false)) => Ok(ActionOutcome {
                 matched: false,
@@ -838,6 +840,7 @@ fn notify_parent_barrier(
 #[cfg(test)]
 mod tests {
     use super::{WorkerActionSink, run_postorder_root_task, run_preorder_root_serial};
+    use crate::exec::PromptCoordinator;
     use crate::eval::{EvalContext, RuntimeStatus};
     use crate::file_output::SharedFileOutputs;
     use crate::parallel::control::GlobalControl;
@@ -870,7 +873,8 @@ mod tests {
         let control = Arc::new(GlobalControl::new());
         let (broker, _rx) = unbounded();
         let file_outputs = SharedFileOutputs::open_all(&[]).unwrap();
-        let mut sink = WorkerActionSink::new(control.clone(), broker, file_outputs);
+        let prompt = Arc::new(PromptCoordinator::open_process());
+        let mut sink = WorkerActionSink::new(control.clone(), broker, file_outputs, prompt);
         let mut had_runtime_errors = false;
 
         let status = run_preorder_root_serial(
@@ -907,7 +911,8 @@ mod tests {
         let control = Arc::new(GlobalControl::new());
         let (broker, _rx) = unbounded();
         let file_outputs = SharedFileOutputs::open_all(&[]).unwrap();
-        let mut sink = WorkerActionSink::new(control.clone(), broker, file_outputs);
+        let prompt = Arc::new(PromptCoordinator::open_process());
+        let mut sink = WorkerActionSink::new(control.clone(), broker, file_outputs, prompt);
         let mut had_runtime_errors = false;
         let barriers = BarrierTable::default();
 

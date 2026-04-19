@@ -11,9 +11,12 @@ use std::path::Path;
 
 use super::batch::{BatchLimit, ExecBatchKey, PendingBatch, ReadyBatch, fixed_batch_cost};
 use super::child::run_ready_batch;
-use super::{ConfirmOutcome, PromptCoordinator, build_immediate_command, render_prompt_argv, run_prepared_inherited};
 use super::delete::delete_path;
 use super::template::BatchedExecAction;
+use super::{
+    ConfirmOutcome, PromptCoordinator, build_immediate_command, render_prompt_argv,
+    run_prepared_inherited,
+};
 
 pub struct OrderedActionSink<'a, W: std::io::Write, E: std::io::Write> {
     output: StdoutSink<'a, W>,
@@ -156,9 +159,11 @@ impl<W: std::io::Write, E: std::io::Write> ActionSink for OrderedActionSink<'_, 
             RuntimeAction::ExecPrompt(spec) => {
                 let prompt_argv = render_prompt_argv(spec, entry.path.as_path());
                 let prepared = build_immediate_command(spec, entry.path.as_path());
-                match self.prompt.confirm_prepared(&prompt_argv, &prepared, |prepared| {
-                    run_prepared_inherited(prepared, self.stderr)
-                }) {
+                match self
+                    .prompt
+                    .confirm_prepared(&prompt_argv, &prepared, |prepared| {
+                        run_prepared_inherited(prepared, self.stderr)
+                    }) {
                     Ok(ConfirmOutcome::Accepted(true)) => Ok(action_success(true)),
                     Ok(ConfirmOutcome::Accepted(false)) => {
                         self.had_action_failures = true;

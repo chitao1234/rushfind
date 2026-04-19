@@ -19,7 +19,7 @@
 - Traversal controls: `-mindepth`, `-maxdepth`, `-depth`, `-prune`, `-xdev`, `-mount`
 - Output and mutation actions: `-print`, `-print0`, `-printf`, `-fprint`, `-fprint0`,
   `-fprintf`, `-ls`, `-fls`, `-exec ... ;`, `-exec ... +`, `-execdir ... ;`,
-  `-execdir ... +`, `-delete`, `-quit`
+  `-execdir ... +`, `-ok ... ;`, `-okdir ... ;`, `-delete`, `-quit`
 - `-printf` currently supports `%p`, `%P`, `%H`, `%f`, `%h`, `%d`, `%y`, `%s`, `%m`, `%M`,
   `%l`, `%i`, `%n`, `%D`, `%b`, `%k`, `%u`, `%U`, `%g`, `%G`, `%F`, `%a`, `%c`, `%t`, `%B`,
   `%A*`, `%C*`, `%T*`, `%B*`, `%%`, `\\`, `\n`, `\t`, and `\0`
@@ -93,7 +93,7 @@ Use the `FINDOXIDE_WORKERS` environment variable to control execution mode:
 
 ## Unsupported in stage 14
 
-Stage 14 supports `-exec ... ;`, `-exec ... +`, `-execdir ... ;`, `-execdir ... +`, and
-`-delete`.
+Stage 14 supports `-exec ... ;`, `-exec ... +`, `-execdir ... ;`, `-execdir ... +`,
+`-ok ... ;`, `-okdir ... ;`, and `-delete`.
 
-`-ok` and `-okdir` remain unsupported.
+`-ok ... +` and `-okdir ... +` remain unsupported.

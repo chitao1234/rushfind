@@ -162,11 +162,15 @@ pub(crate) fn parse_affirmative_reply(bytes: &[u8]) -> bool {
 
 pub(crate) fn render_prompt(prompt_argv: &[OsString]) -> Vec<u8> {
     let mut out = b"< ".to_vec();
-    for (index, arg) in prompt_argv.iter().enumerate() {
-        if index > 0 {
+    if let Some(program) = prompt_argv.first() {
+        out.extend_from_slice(program.as_encoded_bytes());
+    }
+    if prompt_argv.len() > 1 {
+        out.extend_from_slice(b" ...");
+        if let Some(last) = prompt_argv.last() {
             out.push(b' ');
+            out.extend_from_slice(last.as_encoded_bytes());
         }
-        out.extend_from_slice(arg.as_encoded_bytes());
     }
     out.extend_from_slice(b" > ? ");
     out

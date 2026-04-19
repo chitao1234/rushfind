@@ -13,8 +13,7 @@ use std::sync::{Arc, Mutex};
 
 use super::batch::{BatchLimit, PendingBatch, ReadyBatch, fixed_batch_cost};
 use super::child::{
-    run_immediate_parallel, run_parallel_ready_batch, run_prepared_inherited,
-    send_broker_message,
+    run_immediate_parallel, run_parallel_ready_batch, run_prepared_inherited, send_broker_message,
 };
 use super::delete::delete_path;
 use super::ordered::{action_failure, action_success};

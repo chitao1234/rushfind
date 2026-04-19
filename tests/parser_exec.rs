@@ -29,16 +29,7 @@ fn parses_exec_semicolon_and_plus_forms() {
 #[test]
 fn parses_ok_and_okdir_semicolon_and_plus_forms() {
     let ast = parse_command(&argv(&[
-        ".",
-        "-ok",
-        "echo",
-        "{}",
-        ";",
-        "-okdir",
-        "printf",
-        "%s\\n",
-        "{}",
-        "+",
+        ".", "-ok", "echo", "{}", ";", "-okdir", "printf", "%s\\n", "{}", "+",
     ]))
     .unwrap();
 

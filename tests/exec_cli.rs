@@ -463,7 +463,11 @@ fn okdir_rejects_unsafe_path_before_prompting() {
 
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());
-    assert!(String::from_utf8(output.stderr).unwrap().contains("unsafe PATH"));
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("unsafe PATH")
+    );
 }
 
 #[test]

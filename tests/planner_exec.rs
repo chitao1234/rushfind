@@ -108,16 +108,7 @@ fn execdir_plus_keeps_the_existing_final_placeholder_rule() {
 fn ok_and_okdir_lower_to_exec_prompt_actions() {
     let plan = plan_command(
         parse_command(&argv(&[
-            ".",
-            "-ok",
-            "echo",
-            "{}",
-            ";",
-            "-okdir",
-            "printf",
-            "%s\\n",
-            "{}",
-            ";",
+            ".", "-ok", "echo", "{}", ";", "-okdir", "printf", "%s\\n", "{}", ";",
         ]))
         .unwrap(),
         1,
