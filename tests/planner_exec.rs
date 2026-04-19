@@ -93,6 +93,7 @@ fn collect(expr: &RuntimeExpr, labels: &mut Vec<&'static str>) {
             RuntimeAction::ExecImmediate(_) => "exec:semicolon",
             RuntimeAction::ExecBatched(_) => "exec:batch",
             RuntimeAction::Delete => "delete",
+            _ => panic!("unexpected action in exec planner test: {action:?}"),
         }),
         RuntimeExpr::Predicate(_) | RuntimeExpr::Barrier => {}
     }
