@@ -5,7 +5,7 @@ mod ordered;
 mod parallel;
 mod template;
 
-pub use batch::{BatchLimit, PendingBatch, ReadyBatch};
+pub use batch::{BatchLimit, ExecBatchKey, PendingBatch, ReadyBatch};
 pub use child::SpillBuffer;
 pub use ordered::OrderedActionSink;
 pub use parallel::ParallelActionSink;
@@ -113,6 +113,35 @@ mod tests {
             .unwrap()
             .expect("expected flush");
         assert_eq!(flushed.paths, vec![PathBuf::from("dir/abcdef")]);
+    }
+
+    #[test]
+    fn execdir_batch_cwd_comes_from_path_parent() {
+        use super::ExecBatchKey;
+
+        let spec = compile_batched_exec(21, ExecSemantics::DirLocal, &["echo".into(), "{}".into()])
+            .unwrap();
+
+        assert_eq!(
+            ExecBatchKey {
+                id: spec.id,
+                cwd: spec.batch_cwd(Path::new("left/a")),
+            },
+            ExecBatchKey {
+                id: 21,
+                cwd: Some(PathBuf::from("left")),
+            }
+        );
+        assert_eq!(
+            ExecBatchKey {
+                id: spec.id,
+                cwd: spec.batch_cwd(Path::new("solo")),
+            },
+            ExecBatchKey {
+                id: 21,
+                cwd: Some(PathBuf::from(".")),
+            }
+        );
     }
 
     #[test]

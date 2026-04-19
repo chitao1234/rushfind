@@ -9,16 +9,16 @@ use crate::planner::RuntimeAction;
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use super::batch::{BatchLimit, PendingBatch, ReadyBatch, fixed_batch_cost};
+use super::batch::{BatchLimit, ExecBatchKey, PendingBatch, ReadyBatch, fixed_batch_cost};
 use super::child::run_ready_batch;
 use super::delete::delete_path;
-use super::template::{BatchedExecAction, ExecBatchId};
+use super::template::BatchedExecAction;
 
 pub struct OrderedActionSink<'a, W: std::io::Write, E: std::io::Write> {
     output: StdoutSink<'a, W>,
     stderr: &'a mut E,
     file_outputs: OrderedFileOutputs,
-    pending: BTreeMap<ExecBatchId, PendingBatch>,
+    pending: BTreeMap<ExecBatchKey, PendingBatch>,
     batch_limit: BatchLimit,
     had_action_failures: bool,
 }
@@ -44,9 +44,13 @@ impl<'a, W: std::io::Write, E: std::io::Write> OrderedActionSink<'a, W, E> {
         spec: &BatchedExecAction,
         path: &Path,
     ) -> Result<RuntimeStatus, Diagnostic> {
+        let key = ExecBatchKey {
+            id: spec.id,
+            cwd: spec.batch_cwd(path),
+        };
         let mut status = RuntimeStatus::default();
         let ready = {
-            let batch = self.pending.entry(spec.id).or_insert_with(|| {
+            let batch = self.pending.entry(key.clone()).or_insert_with(|| {
                 PendingBatch::new(spec.clone(), self.batch_limit, fixed_batch_cost(spec))
             });
 
@@ -67,7 +71,7 @@ impl<'a, W: std::io::Write, E: std::io::Write> OrderedActionSink<'a, W, E> {
         let push_result = {
             let batch = self
                 .pending
-                .get_mut(&spec.id)
+                .get_mut(&key)
                 .expect("pending batch must exist");
             batch.push(path)
         };

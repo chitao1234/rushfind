@@ -201,6 +201,167 @@ fn ordered_exec_false_still_blocks_later_print_under_the_pipeline() {
 }
 
 #[test]
+fn ordered_execdir_semicolon_uses_parent_cwd_and_dot_slash_basename() {
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("dir")).unwrap();
+    fs::write(root.path().join("dir/file.txt"), "x\n").unwrap();
+
+    let output = cargo_bin_output_with_timeout(
+        &[
+            path_arg(root.path()),
+            "-name".into(),
+            "file.txt".into(),
+            "-execdir".into(),
+            "sh".into(),
+            "-c".into(),
+            "pwd; printf '%s\\n' \"$1\"".into(),
+            "sh".into(),
+            "{}".into(),
+            ";".into(),
+        ],
+        1,
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.lines().any(|line| line.ends_with("/dir")));
+    assert!(stdout.lines().any(|line| line == "./file.txt"));
+}
+
+#[test]
+fn ordered_execdir_on_symlink_root_uses_typed_parent_and_link_name() {
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("start")).unwrap();
+    fs::create_dir(root.path().join("real")).unwrap();
+    fs::write(root.path().join("real/file.txt"), "x\n").unwrap();
+    std::os::unix::fs::symlink("../real/file.txt", root.path().join("start/link")).unwrap();
+
+    let output = cargo_bin_output_with_timeout(
+        &[
+            path_arg(&root.path().join("start/link")),
+            "-maxdepth".into(),
+            "0".into(),
+            "-execdir".into(),
+            "sh".into(),
+            "-c".into(),
+            "pwd; printf '%s\\n' \"$1\"".into(),
+            "sh".into(),
+            "{}".into(),
+            ";".into(),
+        ],
+        1,
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.lines().any(|line| line.ends_with("/start")));
+    assert!(stdout.lines().any(|line| line == "./link"));
+}
+
+#[test]
+fn ordered_execdir_plus_batches_only_within_each_directory() {
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("a")).unwrap();
+    fs::create_dir(root.path().join("b")).unwrap();
+    fs::write(root.path().join("a/one"), "1\n").unwrap();
+    fs::write(root.path().join("a/two"), "2\n").unwrap();
+    fs::write(root.path().join("b/three"), "3\n").unwrap();
+
+    let output = cargo_bin_output_with_timeout(
+        &[
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-execdir".into(),
+            "sh".into(),
+            "-c".into(),
+            "printf '%s|' \"$PWD\"; printf '%s ' \"$@\"; printf '\\n'".into(),
+            "sh".into(),
+            "{}".into(),
+            "+".into(),
+        ],
+        1,
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        stdout
+            .lines()
+            .any(|line| line.contains("/a|") && line.contains("./one") && line.contains("./two"))
+    );
+    assert!(stdout.lines().any(|line| line.contains("/b|./three ")));
+    assert!(
+        !stdout
+            .lines()
+            .any(|line| line.contains("/a|") && line.contains("./three"))
+    );
+    assert!(
+        !stdout
+            .lines()
+            .any(|line| line.contains("/b|") && (line.contains("./one") || line.contains("./two")))
+    );
+}
+
+#[test]
+fn ordered_execdir_plus_flushes_before_quit() {
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("dir")).unwrap();
+    fs::write(root.path().join("dir/a"), "a\n").unwrap();
+    fs::write(root.path().join("dir/b"), "b\n").unwrap();
+
+    let output = cargo_bin_output_with_timeout(
+        &[
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-execdir".into(),
+            "printf".into(),
+            "%s\\n".into(),
+            "{}".into(),
+            "+".into(),
+            "-quit".into(),
+        ],
+        1,
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("./a") || stdout.contains("./b"));
+}
+
+#[test]
+fn execdir_rejects_unsafe_path_before_traversal_side_effects_even_for_absolute_command() {
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("file.txt"), "x\n").unwrap();
+
+    let output = support::cargo_bin_output_with_env_timeout(
+        &[
+            path_arg(root.path()),
+            "-execdir".into(),
+            "/bin/true".into(),
+            "{}".into(),
+            ";".into(),
+        ],
+        1,
+        &[("PATH", ".:/usr/bin:/bin")],
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("unsafe PATH for `-execdir`")
+    );
+}
+
+#[test]
 fn parallel_exec_child_output_is_replayed_in_atomic_chunks() {
     let root = tempdir().unwrap();
     fs::write(root.path().join("alpha.txt"), "a\n").unwrap();
