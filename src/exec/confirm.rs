@@ -1,9 +1,16 @@
 use crate::diagnostics::Diagnostic;
 use crate::exec::PreparedExecCommand;
+use crate::messages_locale::{MessagesLocale, PromptLocale};
 use std::ffi::OsString;
 use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, Write};
 use std::sync::{Arc, Mutex};
+
+type AffirmativeParser = fn(&[u8]) -> bool;
+
+unsafe extern "C" {
+    fn rpmatch(response: *const libc::c_char) -> libc::c_int;
+}
 
 pub(crate) enum ConfirmOutcome<T> {
     Accepted(T),
@@ -80,17 +87,38 @@ impl PromptState {
 
 pub(crate) struct PromptCoordinator {
     inner: Arc<Mutex<PromptState>>,
+    locale: MessagesLocale,
+    affirmative_parser: AffirmativeParser,
 }
 
 impl PromptCoordinator {
     pub(crate) fn open_process() -> Self {
+        Self::open_process_with_locale(default_messages_locale())
+    }
+
+    pub(crate) fn open_process_with_locale(locale: MessagesLocale) -> Self {
         Self {
             inner: Arc::new(Mutex::new(PromptState::ProcessUnopened)),
+            locale,
+            affirmative_parser: libc_rpmatch_is_affirmative,
         }
     }
 
     #[cfg(test)]
     pub(crate) fn for_tests(scripted_replies: Vec<Vec<u8>>) -> Self {
+        Self::for_tests_with(
+            scripted_replies,
+            default_messages_locale(),
+            ascii_c_locale_yes_is_affirmative,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_tests_with(
+        scripted_replies: Vec<Vec<u8>>,
+        locale: MessagesLocale,
+        affirmative_parser: AffirmativeParser,
+    ) -> Self {
         use std::collections::VecDeque;
 
         struct ScriptedPromptChannel {
@@ -123,6 +151,8 @@ impl PromptCoordinator {
                     replies: scripted_replies.into_iter().collect(),
                 },
             )))),
+            locale,
+            affirmative_parser,
         }
     }
 
@@ -140,13 +170,13 @@ impl PromptCoordinator {
             .lock()
             .map_err(|_| Diagnostic::new("internal error: prompt channel poisoned", 1))?;
         let channel = state.channel_mut()?;
-        let prompt = render_prompt(prompt_argv);
+        let prompt = render_prompt(prompt_argv, &self.locale);
         channel.write_prompt(&prompt).map_err(io_error)?;
         channel.flush_prompt().map_err(io_error)?;
 
         let mut reply = Vec::new();
         let read = channel.read_reply(&mut reply).map_err(io_error)?;
-        if read == 0 || !parse_affirmative_reply(&reply) {
+        if read == 0 || !(self.affirmative_parser)(trim_reply_line(&reply)) {
             return Ok(ConfirmOutcome::Rejected);
         }
 
@@ -154,25 +184,50 @@ impl PromptCoordinator {
     }
 }
 
-pub(crate) fn parse_affirmative_reply(bytes: &[u8]) -> bool {
+fn trim_reply_line(bytes: &[u8]) -> &[u8] {
     let bytes = bytes.strip_suffix(b"\n").unwrap_or(bytes);
-    let bytes = bytes.strip_suffix(b"\r").unwrap_or(bytes);
+    bytes.strip_suffix(b"\r").unwrap_or(bytes)
+}
+
+#[cfg(test)]
+fn ascii_c_locale_yes_is_affirmative(bytes: &[u8]) -> bool {
     bytes.eq_ignore_ascii_case(b"y") || bytes.eq_ignore_ascii_case(b"yes")
 }
 
-pub(crate) fn render_prompt(prompt_argv: &[OsString]) -> Vec<u8> {
-    let mut out = b"< ".to_vec();
+fn libc_rpmatch_is_affirmative(bytes: &[u8]) -> bool {
+    if bytes.is_empty() || bytes.contains(&0) {
+        return false;
+    }
+
+    let reply = match std::ffi::CString::new(bytes) {
+        Ok(reply) => reply,
+        Err(_) => return false,
+    };
+
+    unsafe { rpmatch(reply.as_ptr()) == 1 }
+}
+
+fn default_messages_locale() -> MessagesLocale {
+    MessagesLocale {
+        resolved_name: "C".into(),
+        prompt_locale: PromptLocale::C,
+    }
+}
+
+pub(crate) fn render_prompt(prompt_argv: &[OsString], locale: &MessagesLocale) -> Vec<u8> {
+    let fragments = locale.prompt_fragments();
+    let mut out = fragments.prefix.to_vec();
     if let Some(program) = prompt_argv.first() {
         out.extend_from_slice(program.as_encoded_bytes());
     }
     if prompt_argv.len() > 1 {
-        out.extend_from_slice(b" ...");
+        out.extend_from_slice(fragments.ellipsis);
         if let Some(last) = prompt_argv.last() {
             out.push(b' ');
             out.extend_from_slice(last.as_encoded_bytes());
         }
     }
-    out.extend_from_slice(b" > ? ");
+    out.extend_from_slice(fragments.suffix);
     out
 }
 
@@ -182,22 +237,76 @@ fn io_error(error: std::io::Error) -> Diagnostic {
 
 #[cfg(test)]
 mod tests {
-    use super::{ConfirmOutcome, PromptCoordinator, parse_affirmative_reply};
+    use super::{ConfirmOutcome, PromptCoordinator, render_prompt};
     use crate::exec::PreparedExecCommand;
+    use crate::messages_locale::{MessagesLocale, PromptLocale};
     use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
     use std::thread;
     use std::time::Duration;
 
     #[test]
-    fn parse_affirmative_reply_accepts_c_locale_ascii_yes_variants() {
-        for reply in [b"y\n".as_slice(), b"Y\n", b"yes\n", b"YeS\r\n"] {
-            assert!(parse_affirmative_reply(reply));
+    fn render_prompt_uses_catalog_fragments_from_messages_locale() {
+        let locale = MessagesLocale {
+            resolved_name: "fr_FR.UTF-8".into(),
+            prompt_locale: PromptLocale::Fr,
+        };
+
+        let prompt = render_prompt(
+            &[OsString::from("printf"), OsString::from("alpha.txt")],
+            &locale,
+        );
+
+        assert_eq!(prompt, b"< printf ... alpha.txt > ? ".to_vec());
+    }
+
+    #[test]
+    fn render_prompt_preserves_non_utf8_payload_bytes() {
+        let locale = MessagesLocale {
+            resolved_name: "C".into(),
+            prompt_locale: PromptLocale::C,
+        };
+        let argv = vec![
+            OsString::from_vec(b"printf".to_vec()),
+            OsString::from_vec(b"bad-\xff-name".to_vec()),
+        ];
+
+        let prompt = render_prompt(&argv, &locale);
+        assert!(
+            prompt
+                .windows(b"bad-\xff-name".len())
+                .any(|window| window == b"bad-\xff-name")
+        );
+    }
+
+    #[test]
+    fn confirm_prepared_uses_injected_affirmative_parser() {
+        fn accepts_oui(bytes: &[u8]) -> bool {
+            bytes == b"oui"
         }
-        for reply in [b"\n".as_slice(), b"no\n", b"oui\n", b"1\n"] {
-            assert!(!parse_affirmative_reply(reply));
-        }
+
+        let locale = MessagesLocale {
+            resolved_name: "fr".into(),
+            prompt_locale: PromptLocale::Fr,
+        };
+        let coordinator =
+            PromptCoordinator::for_tests_with(vec![b"oui\n".to_vec()], locale, accepts_oui);
+        let prepared = PreparedExecCommand {
+            cwd: None,
+            argv: vec!["echo".into(), "file.txt".into()],
+        };
+
+        let outcome = coordinator
+            .confirm_prepared(
+                &[OsString::from("echo"), OsString::from("file.txt")],
+                &prepared,
+                |_prepared| Ok(true),
+            )
+            .unwrap();
+
+        assert!(matches!(outcome, ConfirmOutcome::Accepted(true)));
     }
 
     #[test]

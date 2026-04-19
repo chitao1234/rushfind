@@ -2,9 +2,7 @@ mod support;
 
 use rushfind::file_output::FileOutputTerminator;
 use rushfind::parser::parse_command;
-use rushfind::planner::{
-    OutputAction, RuntimeAction, RuntimeExpr, RuntimePredicate, plan_command,
-};
+use rushfind::planner::{OutputAction, RuntimeAction, RuntimeExpr, RuntimePredicate, plan_command};
 use support::{argv, predicate_labels as collect_predicate_labels};
 
 #[test]
@@ -237,14 +235,12 @@ fn predicate_label(predicate: &RuntimePredicate) -> &'static str {
                 rushfind::time::TimestampKind::Modification,
                 rushfind::time::RelativeTimeUnit::Days,
             ) => "mtime",
-            (
-                rushfind::time::TimestampKind::Access,
-                rushfind::time::RelativeTimeUnit::Minutes,
-            ) => "amin",
-            (
-                rushfind::time::TimestampKind::Change,
-                rushfind::time::RelativeTimeUnit::Minutes,
-            ) => "cmin",
+            (rushfind::time::TimestampKind::Access, rushfind::time::RelativeTimeUnit::Minutes) => {
+                "amin"
+            }
+            (rushfind::time::TimestampKind::Change, rushfind::time::RelativeTimeUnit::Minutes) => {
+                "cmin"
+            }
             (
                 rushfind::time::TimestampKind::Modification,
                 rushfind::time::RelativeTimeUnit::Minutes,

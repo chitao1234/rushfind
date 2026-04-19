@@ -4,7 +4,10 @@ use assert_cmd::cargo::CommandCargoExt;
 use std::fs;
 use std::process::Command;
 use std::time::Duration;
-use support::{cargo_bin_output_with_input_timeout, cargo_bin_output_with_timeout, path_arg};
+use support::{
+    cargo_bin_output_with_env_and_input_timeout, cargo_bin_output_with_input_timeout,
+    cargo_bin_output_with_timeout, first_available_locale, path_arg,
+};
 use tempfile::tempdir;
 
 #[test]
@@ -411,6 +414,92 @@ fn ordered_ok_eof_still_prints_prompt_and_skips_child() {
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stdout.is_empty());
     assert!(String::from_utf8(output.stderr).unwrap().contains("? "));
+}
+
+#[test]
+fn invalid_lc_messages_is_ignored_when_no_ok_action_is_present() {
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("a.txt"), "a\n").unwrap();
+
+    let output = support::cargo_bin_output_with_env_timeout(
+        &[
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-print".into(),
+        ],
+        1,
+        &[
+            ("LANG", "C"),
+            ("LC_MESSAGES", "definitely-not-a-real-locale.UTF-8"),
+        ],
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(String::from_utf8(output.stdout).unwrap().contains("a.txt"));
+}
+
+#[test]
+fn invalid_lc_messages_falls_back_to_c_for_ok_prompts() {
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("a.txt"), "a\n").unwrap();
+
+    let output = cargo_bin_output_with_env_and_input_timeout(
+        &[
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-ok".into(),
+            "printf".into(),
+            "RUN:%s\\n".into(),
+            "{}".into(),
+            ";".into(),
+        ],
+        1,
+        &[
+            ("LANG", "C"),
+            ("LC_MESSAGES", "definitely-not-a-real-locale.UTF-8"),
+        ],
+        b"yes\n",
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(String::from_utf8(output.stdout).unwrap().contains("RUN:"));
+    assert!(String::from_utf8(output.stderr).unwrap().contains("? "));
+}
+
+#[test]
+fn ok_accepts_oui_when_french_locale_is_available() {
+    let Some(locale) =
+        first_available_locale(&["fr_FR.UTF-8", "fr_FR.utf8", "fr_FR", "fr.UTF-8", "fr"])
+    else {
+        return;
+    };
+
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("bonjour.txt"), "salut\n").unwrap();
+
+    let output = cargo_bin_output_with_env_and_input_timeout(
+        &[
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-ok".into(),
+            "printf".into(),
+            "RUN:%s\\n".into(),
+            "{}".into(),
+            ";".into(),
+        ],
+        1,
+        &[("LANG", "C"), ("LC_MESSAGES", locale.as_str())],
+        b"oui\n",
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(String::from_utf8(output.stdout).unwrap().contains("RUN:"));
 }
 
 #[test]

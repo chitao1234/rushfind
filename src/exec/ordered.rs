@@ -34,6 +34,20 @@ impl<'a, W: std::io::Write, E: std::io::Write> OrderedActionSink<'a, W, E> {
         stderr: &'a mut E,
         planned_file_outputs: &[PlannedFileOutput],
     ) -> Result<Self, Diagnostic> {
+        Self::with_prompt(
+            stdout,
+            stderr,
+            planned_file_outputs,
+            PromptCoordinator::open_process(),
+        )
+    }
+
+    pub(crate) fn with_prompt(
+        stdout: &'a mut W,
+        stderr: &'a mut E,
+        planned_file_outputs: &[PlannedFileOutput],
+        prompt: PromptCoordinator,
+    ) -> Result<Self, Diagnostic> {
         Ok(Self {
             output: StdoutSink::new(stdout),
             stderr,
@@ -41,7 +55,7 @@ impl<'a, W: std::io::Write, E: std::io::Write> OrderedActionSink<'a, W, E> {
             pending: BTreeMap::new(),
             batch_limit: BatchLimit::detect(),
             had_action_failures: false,
-            prompt: PromptCoordinator::open_process(),
+            prompt,
         })
     }
 

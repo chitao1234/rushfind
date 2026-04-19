@@ -1,6 +1,7 @@
 use crate::diagnostics::Diagnostic;
 use crate::exec::PromptCoordinator;
 use crate::file_output::SharedFileOutputs;
+use crate::messages_locale::MessagesLocale;
 use crate::parallel::broker::spawn_broker;
 use crate::parallel::control::GlobalControl;
 use crate::parallel::postorder::BarrierTable;
@@ -17,6 +18,7 @@ pub(crate) fn run_parallel_v2<W, E>(
     plan: &ExecutionPlan,
     stdout: &mut W,
     stderr: &mut E,
+    messages_locale: Option<MessagesLocale>,
 ) -> Result<RunSummary, Diagnostic>
 where
     W: Write + Send,
@@ -28,7 +30,11 @@ where
     let control = Arc::new(GlobalControl::new());
     let scheduler = Arc::new(Scheduler::new(worker_count));
     let barriers = Arc::new(BarrierTable::default());
-    let prompt = Arc::new(PromptCoordinator::open_process());
+    let prompt = Arc::new(
+        messages_locale
+            .map(PromptCoordinator::open_process_with_locale)
+            .unwrap_or_else(PromptCoordinator::open_process),
+    );
 
     std::thread::scope(|scope| -> Result<RunSummary, Diagnostic> {
         let (broker, broker_handle) = spawn_broker(scope, stdout, stderr);

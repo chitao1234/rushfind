@@ -125,3 +125,48 @@ pub fn cargo_bin_output_with_input_timeout(
         }
     }
 }
+
+pub fn cargo_bin_output_with_env_and_input_timeout(
+    args: &[OsString],
+    workers: usize,
+    envs: &[(&str, &str)],
+    input: &[u8],
+    timeout: Duration,
+) -> Output {
+    let mut command = Command::new(cargo_bin("rfd"));
+    command.env("RUSHFIND_WORKERS", workers.to_string());
+    for (key, value) in envs {
+        command.env(key, value);
+    }
+    command
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = command.spawn().unwrap();
+    if !input.is_empty() {
+        child.stdin.as_mut().unwrap().write_all(input).unwrap();
+    }
+    drop(child.stdin.take());
+
+    match child.wait_timeout(timeout).unwrap() {
+        Some(_) => child.wait_with_output().unwrap(),
+        None => {
+            child.kill().unwrap();
+            let _ = child.wait();
+            panic!("rfd did not exit within {:?}", timeout);
+        }
+    }
+}
+
+pub fn first_available_locale(candidates: &[&str]) -> Option<String> {
+    let output = Command::new("locale").arg("-a").output().ok()?;
+    let available = String::from_utf8_lossy(&output.stdout);
+    candidates.iter().find_map(|candidate| {
+        available
+            .lines()
+            .find(|line| *line == *candidate)
+            .map(str::to_string)
+    })
+}
