@@ -388,6 +388,45 @@ mod tests {
     }
 
     #[test]
+    fn gnu_review_followup_bre_and_ere_treat_backslash_as_literal_inside_bracket_expressions() {
+        for dialect in [RegexDialect::PosixBasic, RegexDialect::PosixExtended] {
+            let matcher =
+                RegexMatcher::compile("-regex", dialect, OsStr::new(r".*/[a\b]"), false)
+                    .unwrap();
+
+            assert!(matcher.is_match(OsStr::new("./a")).unwrap());
+            assert!(matcher.is_match(OsStr::new("./b")).unwrap());
+            assert!(matcher.is_match(OsStr::new("./\\")).unwrap());
+            assert!(!matcher.is_match(OsStr::new("./c")).unwrap());
+        }
+    }
+
+    #[test]
+    fn gnu_review_followup_bre_and_ere_support_byte_ranges() {
+        for dialect in [RegexDialect::PosixBasic, RegexDialect::PosixExtended] {
+            let matcher =
+                RegexMatcher::compile("-regex", dialect, OsStr::new(r".*/[a-c]"), false)
+                    .unwrap();
+
+            assert!(matcher.is_match(OsStr::new("./a")).unwrap());
+            assert!(matcher.is_match(OsStr::new("./b")).unwrap());
+            assert!(matcher.is_match(OsStr::new("./c")).unwrap());
+            assert!(!matcher.is_match(OsStr::new("./d")).unwrap());
+        }
+    }
+
+    #[test]
+    fn gnu_review_followup_bre_and_ere_reject_backward_ranges() {
+        for dialect in [RegexDialect::PosixBasic, RegexDialect::PosixExtended] {
+            let error =
+                RegexMatcher::compile("-regex", dialect, OsStr::new(r".*/[z-a]"), false)
+                    .unwrap_err();
+
+            assert!(error.message.contains("invalid range"));
+        }
+    }
+
+    #[test]
     fn gnu_foundation_boundary_escapes_use_pcre2_backend() {
         let matcher = RegexMatcher::compile(
             "-regex",

@@ -177,6 +177,21 @@ fn emacs_followup_planning_accepts_backreferences() {
     }
 }
 
+#[test]
+fn gnu_review_followup_planning_rejects_backward_ranges() {
+    for dialect_name in ["posix-basic", "posix-extended"] {
+        let error = plan_command(
+            parse_command(&argv(&[".", "-regextype", dialect_name, "-regex", r".*/[z-a]"]))
+                .unwrap(),
+            1,
+        )
+        .unwrap_err();
+
+        assert!(error.message.contains(dialect_name));
+        assert!(error.message.contains("invalid range"));
+    }
+}
+
 fn regex_dialects(expr: &RuntimeExpr) -> Vec<RegexDialect> {
     let mut out = Vec::new();
     collect_regex_dialects(expr, &mut out);

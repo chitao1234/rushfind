@@ -413,42 +413,37 @@ fn lex_class(
     }
 
     while let Some(byte) = pattern.get(*index).copied() {
-        *index += 1;
-        match byte {
-            b']' => return Ok(ClassExpr { negated, items }),
-            b'[' => match pattern.get(*index).copied() {
-                Some(b':') => {
-                    *index += 1;
-                    let name = take_posix_class_name(flag, dialect, pattern, index)?;
-                    items.push(ClassItem::PosixClass(name));
+        if byte == b']' {
+            *index += 1;
+            return Ok(ClassExpr { negated, items });
+        }
+
+        let item = lex_class_item(flag, dialect, pattern, index)?;
+        if matches!(item, ClassItem::Byte(b'-'))
+            && !items.is_empty()
+            && pattern.get(*index) != Some(&b']')
+        {
+            let start = items.pop().unwrap();
+            let end = lex_class_item(flag, dialect, pattern, index)?;
+            match (start, end) {
+                (ClassItem::Byte(start), ClassItem::Byte(end)) => {
+                    if start > end {
+                        return Err(malformed_regex(
+                            flag,
+                            dialect,
+                            "invalid range in bracket expression",
+                        ));
+                    }
+                    items.push(ClassItem::Range(start, end));
                 }
-                Some(b'.') => {
-                    return Err(unsupported_construct(
-                        flag,
-                        dialect,
-                        "POSIX collating symbols are out of scope",
-                    ));
+                (start, end) => {
+                    items.push(start);
+                    items.push(ClassItem::Byte(b'-'));
+                    items.push(end);
                 }
-                Some(b'=') => {
-                    return Err(unsupported_construct(
-                        flag,
-                        dialect,
-                        "POSIX equivalence classes are out of scope",
-                    ));
-                }
-                _ => items.push(ClassItem::Byte(b'[')),
-            },
-            b'\\' if matches!(dialect, RegexDialect::Emacs) => {
-                items.push(ClassItem::Byte(b'\\'));
             }
-            b'\\' => {
-                let escaped = pattern.get(*index).copied().ok_or_else(|| {
-                    malformed_regex(flag, dialect, "unterminated bracket expression")
-                })?;
-                *index += 1;
-                items.push(ClassItem::Byte(escaped));
-            }
-            other => items.push(ClassItem::Byte(other)),
+        } else {
+            items.push(item);
         }
     }
 
@@ -457,6 +452,42 @@ fn lex_class(
         dialect,
         "unterminated bracket expression",
     ))
+}
+
+fn lex_class_item(
+    flag: &str,
+    dialect: RegexDialect,
+    pattern: &[u8],
+    index: &mut usize,
+) -> Result<ClassItem, Diagnostic> {
+    let byte = pattern
+        .get(*index)
+        .copied()
+        .ok_or_else(|| malformed_regex(flag, dialect, "unterminated bracket expression"))?;
+    *index += 1;
+
+    match byte {
+        b'[' => match pattern.get(*index).copied() {
+            Some(b':') => {
+                *index += 1;
+                let name = take_posix_class_name(flag, dialect, pattern, index)?;
+                Ok(ClassItem::PosixClass(name))
+            }
+            Some(b'.') => Err(unsupported_construct(
+                flag,
+                dialect,
+                "POSIX collating symbols are out of scope",
+            )),
+            Some(b'=') => Err(unsupported_construct(
+                flag,
+                dialect,
+                "POSIX equivalence classes are out of scope",
+            )),
+            _ => Ok(ClassItem::Byte(b'[')),
+        },
+        b'\\' => Ok(ClassItem::Byte(b'\\')),
+        other => Ok(ClassItem::Byte(other)),
+    }
 }
 
 fn take_posix_class_name(
@@ -685,6 +716,11 @@ fn render_expr(
             for item in &class.items {
                 match item {
                     ClassItem::Byte(byte) => push_bracket_escaped_byte(out, *byte),
+                    ClassItem::Range(start, end) => {
+                        push_bracket_range_endpoint_byte(out, *start);
+                        out.push('-');
+                        push_bracket_range_endpoint_byte(out, *end);
+                    }
                     ClassItem::PosixClass(name) => out.push_str(posix_named_class_fragment(name)),
                 }
             }
@@ -770,6 +806,17 @@ fn push_literal_regex_byte(out: &mut String, byte: u8) {
 fn push_bracket_escaped_byte(out: &mut String, byte: u8) {
     match byte {
         b'\\' | b']' | b'^' | b'-' => {
+            out.push('\\');
+            out.push(char::from(byte));
+        }
+        0x20..=0x7e => out.push(char::from(byte)),
+        other => push_hex_byte(out, other),
+    }
+}
+
+fn push_bracket_range_endpoint_byte(out: &mut String, byte: u8) {
+    match byte {
+        b'\\' | b']' | b'^' => {
             out.push('\\');
             out.push(char::from(byte));
         }

@@ -42,6 +42,7 @@ pub struct ClassExpr {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClassItem {
     Byte(u8),
+    Range(u8, u8),
     PosixClass(&'static str),
 }
 

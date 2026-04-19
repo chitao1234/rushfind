@@ -2533,3 +2533,132 @@ fn regex_emacs_followup_matrix_parallel_matches_gnu_find_as_sets() {
 
     assert_matches_gnu_as_sets(&args);
 }
+
+fn build_regex_bracket_review_tree() -> tempfile::TempDir {
+    let root = tempdir().unwrap();
+    for name in ["a", "b", "c", "d", "z", "-", "\\"] {
+        fs::write(root.path().join(name), "x\n").unwrap();
+    }
+    root
+}
+
+#[test]
+fn gnu_review_followup_ordered_bracket_semantics_match_gnu_find_exactly() {
+    let root = build_regex_bracket_review_tree();
+    let args_sets = vec![
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-mindepth".into(),
+            "1".into(),
+            "-regextype".into(),
+            "posix-basic".into(),
+            "-regex".into(),
+            r".*/[a\b]".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-mindepth".into(),
+            "1".into(),
+            "-regextype".into(),
+            "posix-extended".into(),
+            "-regex".into(),
+            r".*/[a\b]".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-mindepth".into(),
+            "1".into(),
+            "-regextype".into(),
+            "posix-basic".into(),
+            "-regex".into(),
+            r".*/[a-c]".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-mindepth".into(),
+            "1".into(),
+            "-regextype".into(),
+            "posix-extended".into(),
+            "-regex".into(),
+            r".*/[a-c]".into(),
+        ],
+    ];
+
+    for args in args_sets {
+        assert_matches_gnu_exact(&args);
+    }
+}
+
+#[test]
+fn gnu_review_followup_parallel_bracket_semantics_match_gnu_find_as_sets() {
+    let root = build_regex_bracket_review_tree();
+    let args = vec![
+        path_arg(root.path()),
+        "(".into(),
+        "-regextype".into(),
+        "posix-basic".into(),
+        "-regex".into(),
+        r".*/[a\b]".into(),
+        "-o".into(),
+        "-regextype".into(),
+        "posix-extended".into(),
+        "-regex".into(),
+        r".*/[a-c]".into(),
+        ")".into(),
+    ];
+
+    assert_matches_gnu_as_sets(&args);
+}
+
+#[test]
+fn gnu_review_followup_backward_ranges_are_rejected_like_gnu_find() {
+    let root = build_regex_bracket_review_tree();
+
+    for args in [
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-mindepth".into(),
+            "1".into(),
+            "-regextype".into(),
+            "posix-basic".into(),
+            "-regex".into(),
+            r".*/[z-a]".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-mindepth".into(),
+            "1".into(),
+            "-regextype".into(),
+            "posix-extended".into(),
+            "-regex".into(),
+            r".*/[z-a]".into(),
+        ],
+    ] {
+        let expected = Command::new("find").args(&args).output().unwrap();
+        let actual = Command::cargo_bin("findoxide")
+            .unwrap()
+            .env("FINDOXIDE_WORKERS", "1")
+            .args(&args)
+            .output()
+            .unwrap();
+
+        assert_eq!(actual.status.code(), expected.status.code());
+        assert!(actual.status.code() != Some(0));
+        assert!(actual.stdout.is_empty());
+        assert!(expected.stdout.is_empty());
+        assert!(!actual.stderr.is_empty());
+        assert!(!expected.stderr.is_empty());
+    }
+}
