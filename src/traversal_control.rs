@@ -209,10 +209,10 @@ mod tests {
         let entry = EntryContext::new(dir, 0, true);
 
         let expr = RuntimeExpr::And(vec![
-            RuntimeExpr::Action(RuntimeAction::ExecImmediate(compile_immediate_exec(&[
-                "echo".into(),
-                "{}".into(),
-            ]))),
+            RuntimeExpr::Action(RuntimeAction::ExecImmediate(compile_immediate_exec(
+                crate::exec::ExecSemantics::Normal,
+                &["echo".into(), "{}".into()],
+            ))),
             RuntimeExpr::Predicate(RuntimePredicate::Prune),
         ]);
 

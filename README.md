@@ -18,7 +18,8 @@
 - Symlink-content predicates: `-lname`, `-ilname`
 - Traversal controls: `-mindepth`, `-maxdepth`, `-depth`, `-prune`, `-xdev`, `-mount`
 - Output and mutation actions: `-print`, `-print0`, `-printf`, `-fprint`, `-fprint0`,
-  `-fprintf`, `-ls`, `-fls`, `-exec ... ;`, `-exec ... +`, `-delete`, `-quit`
+  `-fprintf`, `-ls`, `-fls`, `-exec ... ;`, `-exec ... +`, `-execdir ... ;`,
+  `-execdir ... +`, `-delete`, `-quit`
 - `-printf` currently supports `%p`, `%P`, `%H`, `%f`, `%h`, `%d`, `%y`, `%s`, `%m`, `%M`,
   `%l`, `%i`, `%n`, `%D`, `%b`, `%k`, `%u`, `%U`, `%g`, `%G`, `%F`, `%a`, `%c`, `%t`, `%B`,
   `%A*`, `%C*`, `%T*`, `%B*`, `%%`, `\\`, `\n`, `\t`, and `\0`
@@ -46,10 +47,13 @@
 - Relaxed-order parallel `-ls` stdout emission and `-fls` destination writes are atomic per
   rendered record but do not promise GNU sibling order
 - Relaxed-order parallel mode treats `-quit` as cancellation: no new subtree tasks are published
-  after it is observed, already granted work may still finish, and buffered `-exec ... +` batches
-  still flush
-- Ordered single-worker mode inherits child stdio for `-exec`
-- Relaxed-order parallel mode buffers child stdout/stderr for atomic replay
+  after it is observed, already granted work may still finish, and buffered `-exec ... +` and
+  `-execdir ... +` batches still flush
+- Ordered single-worker mode inherits child stdio for `-exec` and `-execdir`
+- Relaxed-order parallel mode buffers child stdout/stderr for atomic replay for `-exec` and
+  `-execdir`
+- `-execdir` uses GNU-style `./basename` substitution and rejects unsafe `PATH` entries eagerly
+  before traversal begins
 - `-delete` implies depth-mode traversal, so directories are evaluated and removed after their
   scheduled descendants
 - In depth mode, `-prune` remains boolean-true in expression flow but does not block descendant
@@ -89,6 +93,7 @@ Use the `FINDOXIDE_WORKERS` environment variable to control execution mode:
 
 ## Unsupported in stage 14
 
-Stage 14 supports `-exec ... ;`, `-exec ... +`, and `-delete`.
+Stage 14 supports `-exec ... ;`, `-exec ... +`, `-execdir ... ;`, `-execdir ... +`, and
+`-delete`.
 
-`-execdir`, `-ok`, and `-okdir` remain unsupported.
+`-ok` and `-okdir` remain unsupported.

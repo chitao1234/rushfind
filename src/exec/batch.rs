@@ -4,7 +4,7 @@ use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
-use super::template::BatchedExecAction;
+use super::template::{BatchedExecAction, ExecBatchId};
 
 #[derive(Debug, Clone, Copy)]
 pub struct BatchLimit {
@@ -38,6 +38,12 @@ pub struct ReadyBatch {
     pub paths: Vec<PathBuf>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ExecBatchKey {
+    pub id: ExecBatchId,
+    pub cwd: Option<PathBuf>,
+}
+
 #[derive(Debug, Clone)]
 pub struct PendingBatch {
     pub spec: BatchedExecAction,
@@ -59,10 +65,14 @@ impl PendingBatch {
     }
 
     pub fn push(&mut self, path: &Path) -> Result<Option<ReadyBatch>, Diagnostic> {
-        let path_bytes = batch_path_cost(path);
+        let path_bytes = crate::exec::template::batched_path_cost(&self.spec, path);
         if self.paths.is_empty() && self.used_bytes + path_bytes > self.limit.max_bytes {
             return Err(Diagnostic::new(
-                format!("{}: path is too large for `-exec ... +`", path.display()),
+                format!(
+                    "{}: path is too large for `{}`",
+                    path.display(),
+                    self.spec.batch_flag()
+                ),
                 1,
             ));
         }
@@ -80,7 +90,8 @@ impl PendingBatch {
     }
 
     pub fn would_overflow(&self, path: &Path) -> bool {
-        self.used_bytes + batch_path_cost(path) > self.limit.max_bytes
+        self.used_bytes + crate::exec::template::batched_path_cost(&self.spec, path)
+            > self.limit.max_bytes
     }
 
     pub fn take_ready(&mut self) -> ReadyBatch {
@@ -98,10 +109,6 @@ pub(crate) fn fixed_batch_cost(spec: &BatchedExecAction) -> usize {
         .iter()
         .map(|arg| os_bytes_len(arg.as_os_str()) + 1)
         .sum()
-}
-
-fn batch_path_cost(path: &Path) -> usize {
-    os_bytes_len(path.as_os_str()) + 1
 }
 
 fn os_bytes_len(value: &OsStr) -> usize {
