@@ -52,7 +52,7 @@ where
 {
     match expr {
         RuntimeExpr::And(items) => {
-            for item in items {
+            for item in items.iter() {
                 walk_actions(item, visit);
             }
         }
@@ -72,7 +72,7 @@ where
 {
     match expr {
         RuntimeExpr::And(items) => {
-            for item in items {
+            for item in items.iter() {
                 walk_predicates(item, visit);
             }
         }

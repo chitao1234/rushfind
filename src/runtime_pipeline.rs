@@ -5,6 +5,7 @@ use crate::follow::FollowMode;
 use crate::planner::{RuntimeAction, RuntimeExpr};
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct SubtreeBarrierId(pub(crate) usize);
@@ -54,12 +55,13 @@ impl ActionRequest {
 enum EvalContinuation {
     Done,
     AfterAnd {
-        remaining: Vec<RuntimeExpr>,
+        items: Arc<[RuntimeExpr]>,
+        next_index: usize,
         accumulated: RuntimeStatus,
         parent: Box<EvalContinuation>,
     },
     AfterOrLeft {
-        right: RuntimeExpr,
+        right: Arc<RuntimeExpr>,
         parent: Box<EvalContinuation>,
     },
     AfterOrRight {
@@ -121,13 +123,7 @@ pub(crate) fn begin_entry_eval(
     follow_mode: FollowMode,
     context: &EvalContext,
 ) -> Result<EvalStep, Diagnostic> {
-    step_expr(
-        expr.clone(),
-        entry.clone(),
-        follow_mode,
-        EvalContinuation::Done,
-        context,
-    )
+    step_expr(expr, entry.clone(), follow_mode, EvalContinuation::Done, context)
 }
 
 pub(crate) fn resume_entry_eval(
@@ -148,7 +144,7 @@ pub(crate) fn resume_entry_eval(
 }
 
 fn step_expr(
-    expr: RuntimeExpr,
+    expr: &RuntimeExpr,
     entry: EntryContext,
     follow_mode: FollowMode,
     continuation: EvalContinuation,
@@ -156,7 +152,7 @@ fn step_expr(
 ) -> Result<EvalStep, Diagnostic> {
     match expr {
         RuntimeExpr::Predicate(predicate) => {
-            let matched = evaluate_predicate(&predicate, &entry, follow_mode, context)?;
+            let matched = evaluate_predicate(predicate, &entry, follow_mode, context)?;
             finish_with_outcome(
                 continuation,
                 entry,
@@ -169,52 +165,52 @@ fn step_expr(
             )
         }
         RuntimeExpr::Action(action) => Ok(EvalStep::PendingAction {
-            request: ActionRequest::new(action, entry.clone(), follow_mode),
+            request: ActionRequest::new(action.clone(), entry.clone(), follow_mode),
             continuation: PendingEntryEval {
                 entry,
                 follow_mode,
                 continuation,
             },
         }),
-        RuntimeExpr::And(mut items) => {
-            if items.is_empty() {
-                return finish_with_outcome(
-                    continuation,
+        RuntimeExpr::And(items) => {
+            if let Some(first) = items.first() {
+                return step_expr(
+                    first,
                     entry,
                     follow_mode,
-                    EvalOutcome {
-                        matched: true,
-                        status: RuntimeStatus::default(),
+                    EvalContinuation::AfterAnd {
+                        items: items.clone(),
+                        next_index: 1,
+                        accumulated: RuntimeStatus::default(),
+                        parent: Box::new(continuation),
                     },
                     context,
                 );
             }
 
-            let first = items.remove(0);
-            step_expr(
-                first,
+            finish_with_outcome(
+                continuation,
                 entry,
                 follow_mode,
-                EvalContinuation::AfterAnd {
-                    remaining: items,
-                    accumulated: RuntimeStatus::default(),
-                    parent: Box::new(continuation),
+                EvalOutcome {
+                    matched: true,
+                    status: RuntimeStatus::default(),
                 },
                 context,
             )
         }
         RuntimeExpr::Or(left, right) => step_expr(
-            *left,
+            left.as_ref(),
             entry,
             follow_mode,
             EvalContinuation::AfterOrLeft {
-                right: *right,
+                right: right.clone(),
                 parent: Box::new(continuation),
             },
             context,
         ),
         RuntimeExpr::Not(inner) => step_expr(
-            *inner,
+            inner.as_ref(),
             entry,
             follow_mode,
             EvalContinuation::AfterNot {
@@ -245,7 +241,8 @@ fn finish_with_outcome(
     match continuation {
         EvalContinuation::Done => Ok(EvalStep::Complete(outcome)),
         EvalContinuation::AfterAnd {
-            mut remaining,
+            items,
+            next_index,
             accumulated,
             parent,
         } => {
@@ -263,7 +260,7 @@ fn finish_with_outcome(
                 );
             }
 
-            if remaining.is_empty() {
+            if next_index >= items.len() {
                 return finish_with_outcome(
                     *parent,
                     entry,
@@ -276,13 +273,13 @@ fn finish_with_outcome(
                 );
             }
 
-            let next = remaining.remove(0);
             step_expr(
-                next,
+                &items[next_index],
                 entry,
                 follow_mode,
                 EvalContinuation::AfterAnd {
-                    remaining,
+                    items: items.clone(),
+                    next_index: next_index + 1,
                     accumulated,
                     parent,
                 },
@@ -295,7 +292,7 @@ fn finish_with_outcome(
             }
 
             step_expr(
-                right,
+                right.as_ref(),
                 entry,
                 follow_mode,
                 EvalContinuation::AfterOrRight {
@@ -381,7 +378,7 @@ mod tests {
         let path = root.path().join("file.txt");
         fs::write(&path, "hello\n").unwrap();
         let entry = EntryContext::new(path, 0, true);
-        let expr = RuntimeExpr::And(vec![
+        let expr = RuntimeExpr::and(vec![
             RuntimeExpr::Action(RuntimeAction::ExecImmediate(compile_immediate_exec(
                 crate::exec::ExecSemantics::Normal,
                 &["false".into()],
@@ -415,9 +412,9 @@ mod tests {
         let path = root.path().join("file.txt");
         fs::write(&path, "hello\n").unwrap();
         let entry = EntryContext::new(path, 0, true);
-        let expr = RuntimeExpr::Or(
-            Box::new(RuntimeExpr::Action(RuntimeAction::Delete)),
-            Box::new(RuntimeExpr::Predicate(RuntimePredicate::True)),
+        let expr = RuntimeExpr::or(
+            RuntimeExpr::Action(RuntimeAction::Delete),
+            RuntimeExpr::Predicate(RuntimePredicate::True),
         );
 
         let step =
@@ -446,7 +443,7 @@ mod tests {
         let path = root.path().join("file.txt");
         fs::write(&path, "hello\n").unwrap();
         let entry = EntryContext::new(path, 0, true);
-        let expr = RuntimeExpr::And(vec![
+        let expr = RuntimeExpr::and(vec![
             RuntimeExpr::Action(RuntimeAction::Quit),
             RuntimeExpr::Predicate(RuntimePredicate::False),
         ]);
@@ -464,6 +461,60 @@ mod tests {
 
         assert!(matches!(complete, EvalStep::Complete(outcome)
             if outcome.matched && outcome.status.is_stop_requested()));
+    }
+
+    #[test]
+    fn and_chain_with_multiple_actions_resumes_in_original_order() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("file.txt");
+        fs::write(&path, "hello\n").unwrap();
+        let entry = EntryContext::new(path.clone(), 0, true);
+        let expr = RuntimeExpr::and(vec![
+            RuntimeExpr::Predicate(RuntimePredicate::True),
+            RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)),
+            RuntimeExpr::Predicate(RuntimePredicate::True),
+            RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print0)),
+        ]);
+
+        let first =
+            begin_entry_eval(&expr, &entry, FollowMode::Physical, &EvalContext::default()).unwrap();
+        let EvalStep::PendingAction {
+            request,
+            continuation,
+        } = first
+        else {
+            panic!("expected first action request");
+        };
+        assert!(matches!(
+            request.action(),
+            RuntimeAction::Output(OutputAction::Print)
+        ));
+
+        let second = resume_entry_eval(
+            continuation,
+            ActionOutcome::matched_true(),
+            &EvalContext::default(),
+        )
+        .unwrap();
+        let EvalStep::PendingAction {
+            request,
+            continuation,
+        } = second
+        else {
+            panic!("expected second action request");
+        };
+        assert!(matches!(
+            request.action(),
+            RuntimeAction::Output(OutputAction::Print0)
+        ));
+
+        let complete = resume_entry_eval(
+            continuation,
+            ActionOutcome::matched_true(),
+            &EvalContext::default(),
+        )
+        .unwrap();
+        assert!(matches!(complete, EvalStep::Complete(outcome) if outcome.matched));
     }
 
     #[test]

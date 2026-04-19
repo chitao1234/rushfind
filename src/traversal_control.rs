@@ -46,7 +46,7 @@ pub(crate) fn evaluate_for_traversal_with_context(
         RuntimeExpr::And(items) => {
             let mut verdict = TraversalControl::allow();
 
-            for item in items {
+            for item in items.iter() {
                 let next =
                     evaluate_for_traversal_with_context(item, entry, follow_mode, order, context)?;
                 verdict.prune |= next.prune;
@@ -153,8 +153,8 @@ mod tests {
         fs::create_dir(&dir).unwrap();
         let entry = EntryContext::new(dir, 0, true);
 
-        let expr = RuntimeExpr::And(vec![
-            RuntimeExpr::Not(Box::new(RuntimeExpr::Predicate(RuntimePredicate::Prune))),
+        let expr = RuntimeExpr::and(vec![
+            RuntimeExpr::negate(RuntimeExpr::Predicate(RuntimePredicate::Prune)),
             RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print0)),
         ]);
 
@@ -179,7 +179,7 @@ mod tests {
             MountSnapshot::from_mountinfo(&format!("{mount_id} 1 8:1 / / rw - tmpfs tmpfs rw\n"))
                 .unwrap(),
         );
-        let expr = RuntimeExpr::And(vec![
+        let expr = RuntimeExpr::and(vec![
             RuntimeExpr::Predicate(RuntimePredicate::FsType("tmpfs".into())),
             RuntimeExpr::Predicate(RuntimePredicate::Prune),
         ]);
@@ -208,7 +208,7 @@ mod tests {
         fs::create_dir(&dir).unwrap();
         let entry = EntryContext::new(dir, 0, true);
 
-        let expr = RuntimeExpr::And(vec![
+        let expr = RuntimeExpr::and(vec![
             RuntimeExpr::Action(RuntimeAction::ExecImmediate(compile_immediate_exec(
                 crate::exec::ExecSemantics::Normal,
                 &["echo".into(), "{}".into()],

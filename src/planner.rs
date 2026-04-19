@@ -24,6 +24,7 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::SystemTime;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,12 +87,26 @@ pub enum ExecutionMode {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimeExpr {
-    And(Vec<RuntimeExpr>),
-    Or(Box<RuntimeExpr>, Box<RuntimeExpr>),
-    Not(Box<RuntimeExpr>),
+    And(Arc<[RuntimeExpr]>),
+    Or(Arc<RuntimeExpr>, Arc<RuntimeExpr>),
+    Not(Arc<RuntimeExpr>),
     Predicate(RuntimePredicate),
     Action(RuntimeAction),
     Barrier,
+}
+
+impl RuntimeExpr {
+    pub fn and(items: Vec<Self>) -> Self {
+        Self::And(items.into())
+    }
+
+    pub fn or(left: Self, right: Self) -> Self {
+        Self::Or(Arc::new(left), Arc::new(right))
+    }
+
+    pub fn negate(inner: Self) -> Self {
+        Self::Not(Arc::new(inner))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -215,7 +230,7 @@ pub fn plan_command_with_now(
     let expr = if state.saw_action {
         lowered
     } else {
-        RuntimeExpr::And(vec![
+        RuntimeExpr::and(vec![
             lowered,
             RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)),
         ])
@@ -278,7 +293,7 @@ fn compute_action_profile(expr: &RuntimeExpr) -> ActionProfile {
 fn populate_action_profile(expr: &RuntimeExpr, profile: &mut ActionProfile) {
     match expr {
         RuntimeExpr::And(items) => {
-            for item in items {
+            for item in items.iter() {
                 populate_action_profile(item, profile);
             }
         }
@@ -326,19 +341,19 @@ fn lower_expr(
             for item in items {
                 lowered.push(lower_expr(item, traversal, runtime, state, follow_mode)?);
             }
-            Ok(RuntimeExpr::And(lowered))
+            Ok(RuntimeExpr::and(lowered))
         }
-        Expr::Or(left, right) => Ok(RuntimeExpr::Or(
-            Box::new(lower_expr(*left, traversal, runtime, state, follow_mode)?),
-            Box::new(lower_expr(*right, traversal, runtime, state, follow_mode)?),
+        Expr::Or(left, right) => Ok(RuntimeExpr::or(
+            lower_expr(*left, traversal, runtime, state, follow_mode)?,
+            lower_expr(*right, traversal, runtime, state, follow_mode)?,
         )),
-        Expr::Not(inner) => Ok(RuntimeExpr::Not(Box::new(lower_expr(
+        Expr::Not(inner) => Ok(RuntimeExpr::negate(lower_expr(
             *inner,
             traversal,
             runtime,
             state,
             follow_mode,
-        )?))),
+        )?)),
         Expr::Predicate(predicate) => {
             lower_predicate(predicate, traversal, runtime, state, follow_mode)
         }

@@ -237,7 +237,7 @@ fn regex_dialects(expr: &RuntimeExpr) -> Vec<RegexDialect> {
 fn collect_regex_dialects(expr: &RuntimeExpr, out: &mut Vec<RegexDialect>) {
     match expr {
         RuntimeExpr::And(items) => {
-            for item in items {
+            for item in items.iter() {
                 collect_regex_dialects(item, out);
             }
         }
@@ -260,7 +260,7 @@ fn linear_labels(expr: &RuntimeExpr) -> Vec<&'static str> {
 fn collect_linear_labels(expr: &RuntimeExpr, labels: &mut Vec<&'static str>) {
     match expr {
         RuntimeExpr::And(items) => {
-            for item in items {
+            for item in items.iter() {
                 collect_linear_labels(item, labels);
             }
         }

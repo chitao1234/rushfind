@@ -389,7 +389,7 @@ mod tests {
         let path = root.path().join("file.txt");
         fs::write(&path, "hello\n").unwrap();
         let entry = EntryContext::new(path, 0, true);
-        let expr = RuntimeExpr::And(vec![
+        let expr = RuntimeExpr::and(vec![
             RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)),
             RuntimeExpr::Predicate(RuntimePredicate::True),
         ]);
@@ -419,11 +419,9 @@ mod tests {
         let path = root.path().join("file.txt");
         fs::write(&path, "hello\n").unwrap();
         let entry = EntryContext::new(path, 0, true);
-        let expr = RuntimeExpr::Or(
-            Box::new(RuntimeExpr::Action(RuntimeAction::Output(
-                OutputAction::Print,
-            ))),
-            Box::new(RuntimeExpr::Predicate(RuntimePredicate::True)),
+        let expr = RuntimeExpr::or(
+            RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)),
+            RuntimeExpr::Predicate(RuntimePredicate::True),
         );
         let mut sink = ScriptedSink {
             scripted: VecDeque::from([ActionOutcome {
@@ -451,9 +449,9 @@ mod tests {
         let path = root.path().join("file.txt");
         fs::write(&path, "hello\n").unwrap();
         let entry = EntryContext::new(path, 0, true);
-        let expr = RuntimeExpr::Not(Box::new(RuntimeExpr::Action(RuntimeAction::Output(
+        let expr = RuntimeExpr::negate(RuntimeExpr::Action(RuntimeAction::Output(
             OutputAction::Print,
-        ))));
+        )));
         let mut sink = ScriptedSink {
             scripted: VecDeque::from([ActionOutcome {
                 matched: false,

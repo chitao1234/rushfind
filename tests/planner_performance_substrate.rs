@@ -146,7 +146,7 @@ fn linear_labels(expr: &RuntimeExpr) -> Vec<&'static str> {
 fn collect_linear_labels(expr: &RuntimeExpr, labels: &mut Vec<&'static str>) {
     match expr {
         RuntimeExpr::And(items) => {
-            for item in items {
+            for item in items.iter() {
                 collect_linear_labels(item, labels);
             }
         }

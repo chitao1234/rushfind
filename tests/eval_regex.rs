@@ -390,7 +390,7 @@ fn repeated_regex_predicates_can_share_one_compiled_matcher() {
         false,
     )
     .unwrap();
-    let expr = RuntimeExpr::And(vec![
+    let expr = RuntimeExpr::and(vec![
         RuntimeExpr::Predicate(RuntimePredicate::Regex(matcher.clone())),
         RuntimeExpr::Predicate(RuntimePredicate::Regex(matcher)),
     ]);

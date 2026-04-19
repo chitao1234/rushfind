@@ -392,7 +392,7 @@ fn predicate_items(expr: &RuntimeExpr) -> Vec<RuntimePredicate> {
 fn collect_predicates(expr: &RuntimeExpr, predicates: &mut Vec<RuntimePredicate>) {
     match expr {
         RuntimeExpr::And(items) => {
-            for item in items {
+            for item in items.iter() {
                 collect_predicates(item, predicates);
             }
         }

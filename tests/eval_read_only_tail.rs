@@ -149,20 +149,20 @@ fn nonempty_directory_empty_probe_does_not_flip_used_when_atime_is_older_than_ct
     let metadata = fs::metadata(root.path()).unwrap();
     assert!(metadata.atime() < metadata.ctime());
 
-    let expr = RuntimeExpr::Or(
-        Box::new(RuntimeExpr::Or(
-            Box::new(RuntimeExpr::Predicate(RuntimePredicate::Empty)),
-            Box::new(RuntimeExpr::Predicate(RuntimePredicate::Used(
+    let expr = RuntimeExpr::or(
+        RuntimeExpr::or(
+            RuntimeExpr::Predicate(RuntimePredicate::Empty),
+            RuntimeExpr::Predicate(RuntimePredicate::Used(
                 UsedMatcher {
                     comparison: TimeComparison::Exactly("1".parse().unwrap()),
                 },
-            ))),
-        )),
-        Box::new(RuntimeExpr::Predicate(RuntimePredicate::Used(
+            )),
+        ),
+        RuntimeExpr::Predicate(RuntimePredicate::Used(
             UsedMatcher {
                 comparison: TimeComparison::LessThan("1".parse().unwrap()),
             },
-        ))),
+        )),
     );
     let entry = EntryContext::new(root.path().to_path_buf(), 0, true);
     let mut sink = RecordingSink::default();

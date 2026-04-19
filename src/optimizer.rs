@@ -48,12 +48,14 @@ const ACTIVE_METADATA_AND_NSS: &[Requirement] = &[Requirement::ActiveMetadata, R
 
 pub fn optimize_read_only_and_chains(expr: RuntimeExpr) -> RuntimeExpr {
     match expr {
-        RuntimeExpr::And(items) => RuntimeExpr::And(optimize_and_items(items)),
-        RuntimeExpr::Or(left, right) => RuntimeExpr::Or(
-            Box::new(optimize_read_only_and_chains(*left)),
-            Box::new(optimize_read_only_and_chains(*right)),
+        RuntimeExpr::And(items) => {
+            RuntimeExpr::and(optimize_and_items(items.iter().cloned().collect()))
+        }
+        RuntimeExpr::Or(left, right) => RuntimeExpr::or(
+            optimize_read_only_and_chains((*left).clone()),
+            optimize_read_only_and_chains((*right).clone()),
         ),
-        RuntimeExpr::Not(inner) => RuntimeExpr::Not(inner),
+        RuntimeExpr::Not(inner) => RuntimeExpr::negate(optimize_read_only_and_chains((*inner).clone())),
         other => other,
     }
 }

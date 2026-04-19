@@ -14,7 +14,7 @@ fn matching_name_predicate_prints_the_entry_path() {
     let path = root.path().join("src/lib.rs");
     fs::write(&path, "pub fn lib() {}\n").unwrap();
     let entry = entry_for(&path, 1);
-    let expr = RuntimeExpr::And(vec![
+    let expr = RuntimeExpr::and(vec![
         RuntimeExpr::Predicate(RuntimePredicate::Name {
             pattern: "*.rs".into(),
             case_insensitive: false,
