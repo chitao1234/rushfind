@@ -1,10 +1,10 @@
+use super::RegexDialect;
 use super::backend::{
     CompiledRegex, RegexBackendKind, compile_pcre2_anchored, compile_rust_anchored,
 };
 use super::ir::{
     AnchorKind, AssertionKind, ClassExpr, ClassItem, GnuExpr, GnuRegex, RepetitionKind,
 };
-use super::RegexDialect;
 use crate::diagnostics::Diagnostic;
 use std::fmt::Write as _;
 
@@ -317,9 +317,8 @@ fn lex_extended_bound(
     while let Some(byte) = pattern.get(*index).copied() {
         *index += 1;
         if byte == b'}' {
-            let body = std::str::from_utf8(&pattern[start..*index - 1]).map_err(|_| {
-                malformed_regex(flag, dialect, "malformed bounded repetition")
-            })?;
+            let body = std::str::from_utf8(&pattern[start..*index - 1])
+                .map_err(|_| malformed_regex(flag, dialect, "malformed bounded repetition"))?;
             return parse_repetition_body(flag, dialect, body);
         }
     }
@@ -340,9 +339,8 @@ fn lex_basic_bound(
     let start = *index;
     while *index + 1 < pattern.len() {
         if pattern[*index] == b'\\' && pattern[*index + 1] == b'}' {
-            let body = std::str::from_utf8(&pattern[start..*index]).map_err(|_| {
-                malformed_regex(flag, dialect, "malformed bounded repetition")
-            })?;
+            let body = std::str::from_utf8(&pattern[start..*index])
+                .map_err(|_| malformed_regex(flag, dialect, "malformed bounded repetition"))?;
             *index += 2;
             return parse_repetition_body(flag, dialect, body);
         }
@@ -887,9 +885,12 @@ mod tests {
 
     #[test]
     fn gnu_ir_subset_tracks_capturing_groups_for_basic_regexes() {
-        let expr =
-            parse_gnu_regex("-regex", RegexDialect::PosixBasic, br".*/src/\(lib\|main\)\.rs")
-                .unwrap();
+        let expr = parse_gnu_regex(
+            "-regex",
+            RegexDialect::PosixBasic,
+            br".*/src/\(lib\|main\)\.rs",
+        )
+        .unwrap();
 
         assert_eq!(expr.capture_count(), 1);
         assert_eq!(choose_backend(&expr), RegexBackendKind::Rust);

@@ -50,16 +50,22 @@ fn regex_foundation_matrix_pcre2_reports_invalid_patterns() {
         .unwrap();
 
     assert!(!output.status.success());
-    assert!(String::from_utf8(output.stderr).unwrap().contains("failed to compile pcre2 regex"));
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("failed to compile pcre2 regex")
+    );
 }
 
 #[cfg(unix)]
 #[test]
 fn regex_foundation_matrix_pcre2_matches_non_utf8_candidates_via_hex_escape() {
     let root = tempdir().unwrap();
-    let path = root.path().join(std::path::PathBuf::from(OsString::from_vec(vec![
-        b'f', b'o', b'o', 0xff,
-    ])));
+    let path = root
+        .path()
+        .join(std::path::PathBuf::from(OsString::from_vec(vec![
+            b'f', b'o', b'o', 0xff,
+        ])));
     fs::write(&path, "target\n").unwrap();
 
     let output = Command::cargo_bin("findoxide")

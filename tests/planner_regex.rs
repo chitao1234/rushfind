@@ -181,8 +181,14 @@ fn emacs_followup_planning_accepts_backreferences() {
 fn gnu_review_followup_planning_rejects_backward_ranges() {
     for dialect_name in ["posix-basic", "posix-extended"] {
         let error = plan_command(
-            parse_command(&argv(&[".", "-regextype", dialect_name, "-regex", r".*/[z-a]"]))
-                .unwrap(),
+            parse_command(&argv(&[
+                ".",
+                "-regextype",
+                dialect_name,
+                "-regex",
+                r".*/[z-a]",
+            ]))
+            .unwrap(),
             1,
         )
         .unwrap_err();

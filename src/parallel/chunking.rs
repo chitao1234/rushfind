@@ -39,7 +39,8 @@ impl ChunkAccumulator {
 
         self.spill_buffer.push(child);
         if self.spill_buffer.len() >= self.chunk_size {
-            self.spilled_chunks.push(std::mem::take(&mut self.spill_buffer));
+            self.spilled_chunks
+                .push(std::mem::take(&mut self.spill_buffer));
         }
     }
 
@@ -56,7 +57,8 @@ impl ChunkAccumulator {
 
     pub(crate) fn finish(mut self) -> ChunkPlan {
         if !self.spill_buffer.is_empty() {
-            self.spilled_chunks.push(std::mem::take(&mut self.spill_buffer));
+            self.spilled_chunks
+                .push(std::mem::take(&mut self.spill_buffer));
         }
 
         ChunkPlan {

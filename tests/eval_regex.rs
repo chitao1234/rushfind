@@ -205,8 +205,8 @@ fn gnu_facing_named_classes_use_ascii_c_locale_semantics() {
 
 #[test]
 fn pcre2_regextype_remains_whole_path_anchored() {
-    let matcher = RegexMatcher::compile("-regex", RegexDialect::Pcre2, OsStr::new("lib"), false)
-        .unwrap();
+    let matcher =
+        RegexMatcher::compile("-regex", RegexDialect::Pcre2, OsStr::new("lib"), false).unwrap();
 
     assert!(!matcher.is_match(OsStr::new("./src/lib.rs")).unwrap());
 }

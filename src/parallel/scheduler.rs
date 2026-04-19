@@ -142,7 +142,9 @@ impl WorkerHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parallel::task::{ParallelTask, PostOrderResumeTask, PreOrderRootTask, SiblingChunkTask};
+    use crate::parallel::task::{
+        ParallelTask, PostOrderResumeTask, PreOrderRootTask, SiblingChunkTask,
+    };
     use crate::runtime_pipeline::SubtreeBarrierId;
     use std::path::PathBuf;
     use std::thread;

@@ -3,9 +3,7 @@ mod gnu;
 mod ir;
 
 use crate::diagnostics::Diagnostic;
-use backend::{
-    CompiledRegex, RegexBackendKind, compile_pcre2_anchored, compile_rust_anchored,
-};
+use backend::{CompiledRegex, RegexBackendKind, compile_pcre2_anchored, compile_rust_anchored};
 use gnu::compile_gnu_regex;
 use std::ffi::OsStr;
 use std::fmt::Write as _;
@@ -84,14 +82,23 @@ impl RegexMatcher {
 
         let (backend, translated_pattern, compiled) = match dialect {
             RegexDialect::Emacs | RegexDialect::PosixExtended | RegexDialect::PosixBasic => {
-                let compiled = compile_gnu_regex(flag, dialect, &original_pattern, case_insensitive)?;
-                (compiled.backend, compiled.translated_pattern, compiled.compiled)
+                let compiled =
+                    compile_gnu_regex(flag, dialect, &original_pattern, case_insensitive)?;
+                (
+                    compiled.backend,
+                    compiled.translated_pattern,
+                    compiled.compiled,
+                )
             }
             RegexDialect::Rust => {
                 let translated_pattern = translate_rust_bytes(&original_pattern);
                 let anchored_pattern = format!(r"\A(?:{})\z", translated_pattern);
-                let compiled =
-                    compile_rust_anchored(flag, dialect.label(), &anchored_pattern, case_insensitive)?;
+                let compiled = compile_rust_anchored(
+                    flag,
+                    dialect.label(),
+                    &anchored_pattern,
+                    case_insensitive,
+                )?;
                 (RegexBackendKind::Rust, translated_pattern, compiled)
             }
             RegexDialect::Pcre2 => {
@@ -352,8 +359,8 @@ mod tests {
             (RegexDialect::PosixBasic, r".*/\(.\)\1"),
             (RegexDialect::PosixExtended, r".*/(.)\1"),
         ] {
-            let matcher = RegexMatcher::compile("-regex", dialect, OsStr::new(pattern), false)
-                .unwrap();
+            let matcher =
+                RegexMatcher::compile("-regex", dialect, OsStr::new(pattern), false).unwrap();
 
             assert_eq!(matcher.backend_kind(), RegexBackendKind::Pcre2);
             assert!(matcher.is_match(OsStr::new("./aa")).unwrap());
@@ -362,9 +369,13 @@ mod tests {
 
     #[test]
     fn emacs_followup_backreferences_use_pcre2_backend() {
-        let matcher =
-            RegexMatcher::compile("-regex", RegexDialect::Emacs, OsStr::new(r".*/\(.\)\1"), false)
-                .unwrap();
+        let matcher = RegexMatcher::compile(
+            "-regex",
+            RegexDialect::Emacs,
+            OsStr::new(r".*/\(.\)\1"),
+            false,
+        )
+        .unwrap();
 
         assert_eq!(matcher.backend_kind(), RegexBackendKind::Pcre2);
         assert!(matcher.is_match(OsStr::new("./aa")).unwrap());
@@ -391,8 +402,7 @@ mod tests {
     fn gnu_review_followup_bre_and_ere_treat_backslash_as_literal_inside_bracket_expressions() {
         for dialect in [RegexDialect::PosixBasic, RegexDialect::PosixExtended] {
             let matcher =
-                RegexMatcher::compile("-regex", dialect, OsStr::new(r".*/[a\b]"), false)
-                    .unwrap();
+                RegexMatcher::compile("-regex", dialect, OsStr::new(r".*/[a\b]"), false).unwrap();
 
             assert!(matcher.is_match(OsStr::new("./a")).unwrap());
             assert!(matcher.is_match(OsStr::new("./b")).unwrap());
@@ -405,8 +415,7 @@ mod tests {
     fn gnu_review_followup_bre_and_ere_support_byte_ranges() {
         for dialect in [RegexDialect::PosixBasic, RegexDialect::PosixExtended] {
             let matcher =
-                RegexMatcher::compile("-regex", dialect, OsStr::new(r".*/[a-c]"), false)
-                    .unwrap();
+                RegexMatcher::compile("-regex", dialect, OsStr::new(r".*/[a-c]"), false).unwrap();
 
             assert!(matcher.is_match(OsStr::new("./a")).unwrap());
             assert!(matcher.is_match(OsStr::new("./b")).unwrap());
@@ -418,9 +427,8 @@ mod tests {
     #[test]
     fn gnu_review_followup_bre_and_ere_reject_backward_ranges() {
         for dialect in [RegexDialect::PosixBasic, RegexDialect::PosixExtended] {
-            let error =
-                RegexMatcher::compile("-regex", dialect, OsStr::new(r".*/[z-a]"), false)
-                    .unwrap_err();
+            let error = RegexMatcher::compile("-regex", dialect, OsStr::new(r".*/[z-a]"), false)
+                .unwrap_err();
 
             assert!(error.message.contains("invalid range"));
         }

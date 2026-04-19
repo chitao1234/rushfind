@@ -30,7 +30,9 @@ pub enum GnuExpr {
     Anchor(AnchorKind),
     Backreference(u16),
     Assertion(AssertionKind),
-    WordByteClass { negated: bool },
+    WordByteClass {
+        negated: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

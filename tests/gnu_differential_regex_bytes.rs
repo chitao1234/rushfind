@@ -135,8 +135,16 @@ fn regex_foundation_matrix_gnu_and_pcre2_preserve_non_utf8_subject_matching() {
 
 fn build_non_utf8_emacs_tree() -> tempfile::TempDir {
     let root = tempdir().unwrap();
-    fs::write(root.path().join(path_from_bytes(b"pair-\xff\xff")), "repeat\n").unwrap();
-    fs::write(root.path().join(path_from_bytes(b"pair-\xff\xfe")), "mixed\n").unwrap();
+    fs::write(
+        root.path().join(path_from_bytes(b"pair-\xff\xff")),
+        "repeat\n",
+    )
+    .unwrap();
+    fs::write(
+        root.path().join(path_from_bytes(b"pair-\xff\xfe")),
+        "mixed\n",
+    )
+    .unwrap();
     fs::write(root.path().join("pair-ascii"), "ascii\n").unwrap();
     root
 }
