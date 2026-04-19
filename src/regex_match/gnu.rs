@@ -1004,6 +1004,21 @@ mod tests {
     }
 
     #[test]
+    fn gnu_hardening_focus_invalid_backreference_is_rejected_before_backend_compile() {
+        let error = parse_gnu_regex("-regex", RegexDialect::PosixExtended, br".*/\1").unwrap_err();
+
+        assert!(error.message.contains("invalid back reference"));
+    }
+
+    #[test]
+    fn gnu_hardening_focus_invalid_bounded_repetition_is_rejected_before_backend_compile() {
+        let error =
+            parse_gnu_regex("-regex", RegexDialect::PosixBasic, br".*/a\{2,1\}").unwrap_err();
+
+        assert!(error.message.contains("invalid bounded repetition"));
+    }
+
+    #[test]
     fn gnu_foundation_boundary_escapes_force_pcre2_fallback() {
         let expr = parse_gnu_regex("-regex", RegexDialect::PosixExtended, br".*/\<foo\>").unwrap();
 

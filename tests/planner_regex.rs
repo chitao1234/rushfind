@@ -217,6 +217,17 @@ fn gnu_hardening_invalid_regexes_are_planning_errors() {
     }
 }
 
+#[test]
+fn gnu_hardening_focus_planning_rejects_invalid_backreferences_early() {
+    let error = plan_command(
+        parse_command(&argv(&[".", "-regextype", "posix-basic", "-regex", r".*/\1"])).unwrap(),
+        1,
+    )
+    .unwrap_err();
+
+    assert!(error.message.contains("invalid back reference"));
+}
+
 fn regex_dialects(expr: &RuntimeExpr) -> Vec<RegexDialect> {
     let mut out = Vec::new();
     collect_regex_dialects(expr, &mut out);

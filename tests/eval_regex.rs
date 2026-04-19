@@ -353,6 +353,29 @@ fn gnu_foundation_bre_and_ere_gnu_escapes_match() {
     assert!(!word.is_match(OsStr::new("./foobar")).unwrap());
 }
 
+#[test]
+fn gnu_hardening_focus_emacs_backreference_eval_stays_correct() {
+    let root = tempdir().unwrap();
+    let abab = root.path().join("abab");
+    let abcd = root.path().join("abcd");
+    fs::write(&abab, "abab\n").unwrap();
+    fs::write(&abcd, "abcd\n").unwrap();
+
+    let expr = RuntimeExpr::Predicate(RuntimePredicate::Regex(
+        RegexMatcher::compile(
+            "-regex",
+            RegexDialect::Emacs,
+            OsStr::new(r".*/\(ab\|cd\)\1"),
+            false,
+        )
+        .unwrap(),
+    ));
+    let mut sink = RecordingSink::default();
+
+    assert!(evaluate(&expr, &entry_for(&abab, 0), FollowMode::Physical, &mut sink).unwrap());
+    assert!(!evaluate(&expr, &entry_for(&abcd, 0), FollowMode::Physical, &mut sink).unwrap());
+}
+
 fn entry_for(path: &Path, depth: usize) -> EntryContext {
     EntryContext::new(PathBuf::from(path), depth, true)
 }

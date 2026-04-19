@@ -399,6 +399,21 @@ mod tests {
     }
 
     #[test]
+    fn gnu_hardening_focus_backreferences_still_choose_pcre2() {
+        let matcher = RegexMatcher::compile(
+            "-regex",
+            RegexDialect::PosixExtended,
+            OsStr::new(r".*/(ab|cd)\1"),
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(matcher.backend_kind(), RegexBackendKind::Pcre2);
+        assert!(matcher.is_match(OsStr::new("./abab")).unwrap());
+        assert!(!matcher.is_match(OsStr::new("./abcd")).unwrap());
+    }
+
+    #[test]
     fn gnu_review_followup_bre_and_ere_treat_backslash_as_literal_inside_bracket_expressions() {
         for dialect in [RegexDialect::PosixBasic, RegexDialect::PosixExtended] {
             let matcher =
