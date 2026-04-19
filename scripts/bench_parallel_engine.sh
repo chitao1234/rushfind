@@ -31,5 +31,6 @@ run_case() {
     )
 }
 
+echo "Benchmark baseline ref: $baseline_ref"
 run_case baseline "$baseline_tree"
 run_case current "$repo_root"
