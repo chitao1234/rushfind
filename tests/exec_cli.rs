@@ -399,6 +399,131 @@ fn parallel_exec_child_output_is_replayed_in_atomic_chunks() {
 }
 
 #[test]
+fn parallel_execdir_semicolon_replays_each_child_output_atomically() {
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("left")).unwrap();
+    fs::create_dir(root.path().join("right")).unwrap();
+    fs::write(root.path().join("left/a.txt"), "a\n").unwrap();
+    fs::write(root.path().join("right/b.txt"), "b\n").unwrap();
+
+    let output = cargo_bin_output_with_timeout(
+        &[
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-execdir".into(),
+            "sh".into(),
+            "-c".into(),
+            "printf 'BEGIN:%s:%s\\n' \"$PWD\" \"$1\"; sleep 0.05; printf 'END:%s:%s\\n' \"$PWD\" \"$1\"".into(),
+            "sh".into(),
+            "{}".into(),
+            ";".into(),
+        ],
+        4,
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    let lines = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    assert_eq!(lines.len(), 4);
+    assert!(lines.chunks_exact(2).all(|chunk| {
+        let begin = chunk[0].strip_prefix("BEGIN:").unwrap();
+        let end = chunk[1].strip_prefix("END:").unwrap();
+        begin == end
+    }));
+}
+
+#[test]
+fn parallel_execdir_plus_never_mixes_directories_within_one_invocation() {
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("a")).unwrap();
+    fs::create_dir(root.path().join("b")).unwrap();
+    for name in ["a1", "a2", "a3"] {
+        fs::write(root.path().join("a").join(name), "a\n").unwrap();
+    }
+    for name in ["b1", "b2", "b3"] {
+        fs::write(root.path().join("b").join(name), "b\n").unwrap();
+    }
+
+    let output = cargo_bin_output_with_timeout(
+        &[
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-execdir".into(),
+            "sh".into(),
+            "-c".into(),
+            "printf '%s|' \"$PWD\"; printf '%s ' \"$@\"; printf '\\n'".into(),
+            "sh".into(),
+            "{}".into(),
+            "+".into(),
+        ],
+        4,
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    let lines = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    assert!(!lines.is_empty());
+    for line in lines {
+        let (cwd, args) = line.split_once('|').unwrap();
+        let words = args.split_whitespace().collect::<Vec<_>>();
+        assert!(!words.is_empty());
+        if cwd.ends_with("/a") {
+            assert!(
+                words
+                    .iter()
+                    .all(|word| matches!(*word, "./a1" | "./a2" | "./a3"))
+            );
+        } else if cwd.ends_with("/b") {
+            assert!(
+                words
+                    .iter()
+                    .all(|word| matches!(*word, "./b1" | "./b2" | "./b3"))
+            );
+        } else {
+            panic!("unexpected cwd in output: {cwd}");
+        }
+    }
+}
+
+#[test]
+fn parallel_execdir_plus_flushes_before_quit() {
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("dir")).unwrap();
+    fs::write(root.path().join("dir/a"), "a\n").unwrap();
+    fs::write(root.path().join("dir/b"), "b\n").unwrap();
+
+    let output = cargo_bin_output_with_timeout(
+        &[
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-execdir".into(),
+            "printf".into(),
+            "%s\\n".into(),
+            "{}".into(),
+            "+".into(),
+            "-quit".into(),
+        ],
+        4,
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("./a") || stdout.contains("./b"));
+}
+
+#[test]
 fn parallel_exec_plus_false_still_sets_a_nonzero_final_exit() {
     let root = tempdir().unwrap();
     fs::write(root.path().join("alpha.txt"), "a\n").unwrap();

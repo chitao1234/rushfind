@@ -1,7 +1,7 @@
 use crate::diagnostics::Diagnostic;
 use crate::eval::RuntimeStatus;
 use crate::exec::{
-    BatchLimit, BatchedExecAction, ExecBatchId, PendingBatch, ReadyBatch, fixed_batch_cost,
+    BatchLimit, BatchedExecAction, ExecBatchKey, PendingBatch, ReadyBatch, fixed_batch_cost,
     run_parallel_ready_batch,
 };
 use crate::parallel::broker::BrokerMessage;
@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 pub(crate) struct WorkerBatchState {
-    pending: BTreeMap<ExecBatchId, PendingBatch>,
+    pending: BTreeMap<ExecBatchKey, PendingBatch>,
     spill_threshold: usize,
     batch_limit: BatchLimit,
 }
@@ -31,7 +31,11 @@ impl WorkerBatchState {
         broker: &Sender<BrokerMessage>,
     ) -> Result<RuntimeStatus, Diagnostic> {
         let mut status = RuntimeStatus::default();
-        let batch = self.pending.entry(spec.id).or_insert_with(|| {
+        let key = ExecBatchKey {
+            id: spec.id,
+            cwd: spec.batch_cwd(path),
+        };
+        let batch = self.pending.entry(key).or_insert_with(|| {
             PendingBatch::new(spec.clone(), self.batch_limit, fixed_batch_cost(spec))
         });
 
