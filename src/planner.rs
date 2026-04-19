@@ -57,9 +57,10 @@ pub struct ExecutionPlan {
     pub(crate) traversal_control: Option<RuntimeExpr>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeRequirements {
     pub mount_snapshot: bool,
+    pub evaluation_now: Timestamp,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,6 +152,10 @@ pub enum RuntimeAction {
         destination: FileOutputId,
         program: PrintfProgram,
     },
+    Ls,
+    FileLs {
+        destination: FileOutputId,
+    },
     Quit,
     ExecImmediate(ImmediateExecAction),
     ExecBatched(BatchedExecAction),
@@ -180,7 +185,10 @@ pub fn plan_command_with_now(
         same_file_system: false,
         order: TraversalOrder::PreOrder,
     };
-    let mut runtime = RuntimeRequirements::default();
+    let mut runtime = RuntimeRequirements {
+        mount_snapshot: false,
+        evaluation_now: now,
+    };
     let mut state = PlanningState {
         temporal: TemporalPlanningState {
             now,
@@ -280,7 +288,9 @@ fn populate_action_profile(expr: &RuntimeExpr, profile: &mut ActionProfile) {
             RuntimeAction::Output(_)
             | RuntimeAction::Printf(_)
             | RuntimeAction::FilePrint { .. }
-            | RuntimeAction::FilePrintf { .. } => {}
+            | RuntimeAction::FilePrintf { .. }
+            | RuntimeAction::Ls
+            | RuntimeAction::FileLs { .. } => {}
             RuntimeAction::Quit => profile.has_global_control = true,
             RuntimeAction::ExecImmediate(_) => profile.has_local_immediate = true,
             RuntimeAction::ExecBatched(_) => profile.has_local_batched = true,
@@ -629,6 +639,10 @@ fn lower_action(
                 program: compiled.program,
             }))
         }
+        Action::Ls => Ok(RuntimeExpr::Action(RuntimeAction::Ls)),
+        Action::Fls { path } => Ok(RuntimeExpr::Action(RuntimeAction::FileLs {
+            destination: register_file_output(state, path),
+        })),
         Action::Quit => Ok(RuntimeExpr::Action(RuntimeAction::Quit)),
         Action::Exec { argv, batch: false } => Ok(RuntimeExpr::Action(
             RuntimeAction::ExecImmediate(compile_immediate_exec(&argv)),

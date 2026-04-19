@@ -348,6 +348,12 @@ impl<'a> Parser<'a> {
                 path: PathBuf::from(self.take_os_string("-fprintf")?),
                 format: self.take_os_string("-fprintf")?,
             })
+        } else if token.matches("-ls") {
+            Expr::Action(Action::Ls)
+        } else if token.matches("-fls") {
+            Expr::Action(Action::Fls {
+                path: PathBuf::from(self.take_os_string("-fls")?),
+            })
         } else if token.matches("-quit") {
             Expr::Action(Action::Quit)
         } else if token.matches("-exec") {

@@ -260,6 +260,10 @@ impl<W: std::io::Write, E: std::io::Write> ActionSink for OrderedActionSink<'_, 
                 self.file_outputs.write_record(*destination, &bytes)?;
                 Ok(ActionOutcome::matched_true())
             }
+            RuntimeAction::Ls | RuntimeAction::FileLs { .. } => Err(Diagnostic::new(
+                "internal error: ls actions are not wired into ordered execution yet",
+                1,
+            )),
             RuntimeAction::Quit => Ok(ActionOutcome::quit()),
             RuntimeAction::ExecImmediate(spec) => {
                 run_immediate_ordered(spec, entry.path.as_path(), self.stderr).map(action_success)
@@ -420,6 +424,10 @@ impl ParallelActionSink {
                     1,
                 ))
             }
+            RuntimeAction::Ls | RuntimeAction::FileLs { .. } => Err(Diagnostic::new(
+                "internal error: ls actions are not wired into parallel execution yet",
+                1,
+            )),
             RuntimeAction::Quit => Ok(ActionOutcome::quit()),
             RuntimeAction::ExecImmediate(spec) => run_immediate_parallel(
                 spec,

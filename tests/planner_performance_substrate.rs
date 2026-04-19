@@ -270,6 +270,8 @@ fn expr_label(expr: &RuntimeExpr) -> &'static str {
             FileOutputTerminator::Nul => "fprint0",
         },
         RuntimeExpr::Action(RuntimeAction::FilePrintf { .. }) => "fprintf",
+        RuntimeExpr::Action(RuntimeAction::Ls) => "ls",
+        RuntimeExpr::Action(RuntimeAction::FileLs { .. }) => "fls",
         RuntimeExpr::Action(RuntimeAction::Quit) => "quit",
         RuntimeExpr::Action(RuntimeAction::Delete) => "delete",
         RuntimeExpr::Action(RuntimeAction::ExecImmediate(_)) => "exec:semicolon",

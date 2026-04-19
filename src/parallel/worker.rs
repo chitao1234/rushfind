@@ -130,6 +130,10 @@ impl ActionSink for WorkerActionSink {
                 self.file_outputs.write_record(*destination, &bytes)?;
                 Ok(ActionOutcome::matched_true())
             }
+            RuntimeAction::Ls | RuntimeAction::FileLs { .. } => Err(Diagnostic::new(
+                "internal error: ls actions are not wired into parallel execution yet",
+                1,
+            )),
             RuntimeAction::Quit => {
                 self.control.request_quit();
                 Ok(ActionOutcome::quit())

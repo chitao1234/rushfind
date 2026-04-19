@@ -80,6 +80,7 @@ mod tests {
         RuntimeRequirements, TraversalOptions, TraversalOrder, plan_command,
     };
     use crate::runtime_policy::RuntimePolicy;
+    use crate::time::Timestamp;
     use std::ffi::OsString;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -94,7 +95,10 @@ mod tests {
                 same_file_system: false,
                 order: TraversalOrder::PreOrder,
             },
-            runtime: RuntimeRequirements { mount_snapshot },
+            runtime: RuntimeRequirements {
+                mount_snapshot,
+                evaluation_now: Timestamp::new(0, 0),
+            },
             startup_warnings: Vec::new(),
             file_outputs: Vec::new(),
             expr: RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)),

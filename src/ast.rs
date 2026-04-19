@@ -93,6 +93,8 @@ pub enum Action {
     FPrint { path: PathBuf },
     FPrint0 { path: PathBuf },
     FPrintf { path: PathBuf, format: OsString },
+    Ls,
+    Fls { path: PathBuf },
     Quit,
     Exec { argv: Vec<OsString>, batch: bool },
     ExecDir { argv: Vec<OsString>, batch: bool },
