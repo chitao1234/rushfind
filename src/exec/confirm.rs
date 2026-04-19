@@ -140,11 +140,9 @@ impl PromptCoordinator {
         affirmative_parser: AffirmativeParser,
     ) -> Self {
         Self {
-            inner: Arc::new(Mutex::new(PromptSession::Scripted(
-                ScriptedPromptSession {
-                    replies: scripted_replies.into_iter().collect(),
-                },
-            ))),
+            inner: Arc::new(Mutex::new(PromptSession::Scripted(ScriptedPromptSession {
+                replies: scripted_replies.into_iter().collect(),
+            }))),
             locale,
             affirmative_parser,
         }
