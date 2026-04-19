@@ -2,9 +2,11 @@ use crate::diagnostics::Diagnostic;
 use crate::exec::PreparedExecCommand;
 use crate::messages_locale::{MessagesLocale, PromptLocale};
 use std::ffi::OsString;
-use std::fs::OpenOptions;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, Stderr, Stdin, Write, stderr, stdin};
 use std::sync::{Arc, Mutex};
+
+#[cfg(test)]
+use std::collections::VecDeque;
 
 type AffirmativeParser = fn(&[u8]) -> bool;
 
@@ -17,76 +19,92 @@ pub(crate) enum ConfirmOutcome<T> {
     Rejected,
 }
 
-trait PromptChannel: Send {
-    fn write_prompt(&mut self, bytes: &[u8]) -> std::io::Result<()>;
-    fn flush_prompt(&mut self) -> std::io::Result<()>;
-    fn read_reply(&mut self, out: &mut Vec<u8>) -> std::io::Result<usize>;
+struct ProcessPromptSession {
+    stdin: Stdin,
+    stderr: Stderr,
 }
 
-struct ProcessPromptChannel {
-    reader: Box<dyn BufRead + Send>,
-    writer: Box<dyn Write + Send>,
-}
-
-impl ProcessPromptChannel {
-    fn open() -> Result<Self, Diagnostic> {
-        if let Ok(tty) = OpenOptions::new().read(true).write(true).open("/dev/tty") {
-            let reader = tty.try_clone().map_err(io_error)?;
-            return Ok(Self {
-                reader: Box::new(BufReader::new(reader)),
-                writer: Box::new(tty),
-            });
+impl ProcessPromptSession {
+    fn open() -> Self {
+        Self {
+            stdin: stdin(),
+            stderr: stderr(),
         }
-
-        let stdin = OpenOptions::new()
-            .read(true)
-            .open("/dev/stdin")
-            .map_err(io_error)?;
-        let stderr = OpenOptions::new()
-            .write(true)
-            .open("/dev/stderr")
-            .map_err(io_error)?;
-        Ok(Self {
-            reader: Box::new(BufReader::new(stdin)),
-            writer: Box::new(stderr),
-        })
     }
-}
 
-impl PromptChannel for ProcessPromptChannel {
     fn write_prompt(&mut self, bytes: &[u8]) -> std::io::Result<()> {
-        self.writer.write_all(bytes)
+        self.stderr.write_all(bytes)
     }
 
     fn flush_prompt(&mut self) -> std::io::Result<()> {
-        self.writer.flush()
+        self.stderr.flush()
     }
 
     fn read_reply(&mut self, out: &mut Vec<u8>) -> std::io::Result<usize> {
-        self.reader.read_until(b'\n', out)
+        self.stdin.lock().read_until(b'\n', out)
     }
 }
 
-enum PromptState {
-    ProcessUnopened,
-    Ready(Box<dyn PromptChannel>),
+#[cfg(test)]
+struct ScriptedPromptSession {
+    replies: VecDeque<Vec<u8>>,
 }
 
-impl PromptState {
-    fn channel_mut(&mut self) -> Result<&mut dyn PromptChannel, Diagnostic> {
-        if matches!(self, PromptState::ProcessUnopened) {
-            *self = PromptState::Ready(Box::new(ProcessPromptChannel::open()?));
-        }
+#[cfg(test)]
+impl ScriptedPromptSession {
+    fn write_prompt(&mut self, _bytes: &[u8]) -> std::io::Result<()> {
+        Ok(())
+    }
 
+    fn flush_prompt(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn read_reply(&mut self, out: &mut Vec<u8>) -> std::io::Result<usize> {
+        match self.replies.pop_front() {
+            Some(reply) => {
+                out.extend_from_slice(&reply);
+                Ok(reply.len())
+            }
+            None => Ok(0),
+        }
+    }
+}
+
+enum PromptSession {
+    Process(ProcessPromptSession),
+    #[cfg(test)]
+    Scripted(ScriptedPromptSession),
+}
+
+impl PromptSession {
+    fn write_prompt(&mut self, bytes: &[u8]) -> std::io::Result<()> {
         match self {
-            PromptState::Ready(channel) => Ok(channel.as_mut()),
-            PromptState::ProcessUnopened => unreachable!("prompt channel initialized above"),
+            PromptSession::Process(session) => session.write_prompt(bytes),
+            #[cfg(test)]
+            PromptSession::Scripted(session) => session.write_prompt(bytes),
+        }
+    }
+
+    fn flush_prompt(&mut self) -> std::io::Result<()> {
+        match self {
+            PromptSession::Process(session) => session.flush_prompt(),
+            #[cfg(test)]
+            PromptSession::Scripted(session) => session.flush_prompt(),
+        }
+    }
+
+    fn read_reply(&mut self, out: &mut Vec<u8>) -> std::io::Result<usize> {
+        match self {
+            PromptSession::Process(session) => session.read_reply(out),
+            #[cfg(test)]
+            PromptSession::Scripted(session) => session.read_reply(out),
         }
     }
 }
 
 pub(crate) struct PromptCoordinator {
-    inner: Arc<Mutex<PromptState>>,
+    inner: Arc<Mutex<PromptSession>>,
     locale: MessagesLocale,
     affirmative_parser: AffirmativeParser,
 }
@@ -98,7 +116,9 @@ impl PromptCoordinator {
 
     pub(crate) fn open_process_with_locale(locale: MessagesLocale) -> Self {
         Self {
-            inner: Arc::new(Mutex::new(PromptState::ProcessUnopened)),
+            inner: Arc::new(Mutex::new(PromptSession::Process(
+                ProcessPromptSession::open(),
+            ))),
             locale,
             affirmative_parser: libc_rpmatch_is_affirmative,
         }
@@ -119,38 +139,12 @@ impl PromptCoordinator {
         locale: MessagesLocale,
         affirmative_parser: AffirmativeParser,
     ) -> Self {
-        use std::collections::VecDeque;
-
-        struct ScriptedPromptChannel {
-            replies: VecDeque<Vec<u8>>,
-        }
-
-        impl PromptChannel for ScriptedPromptChannel {
-            fn write_prompt(&mut self, _bytes: &[u8]) -> std::io::Result<()> {
-                Ok(())
-            }
-
-            fn flush_prompt(&mut self) -> std::io::Result<()> {
-                Ok(())
-            }
-
-            fn read_reply(&mut self, out: &mut Vec<u8>) -> std::io::Result<usize> {
-                match self.replies.pop_front() {
-                    Some(reply) => {
-                        out.extend_from_slice(&reply);
-                        Ok(reply.len())
-                    }
-                    None => Ok(0),
-                }
-            }
-        }
-
         Self {
-            inner: Arc::new(Mutex::new(PromptState::Ready(Box::new(
-                ScriptedPromptChannel {
+            inner: Arc::new(Mutex::new(PromptSession::Scripted(
+                ScriptedPromptSession {
                     replies: scripted_replies.into_iter().collect(),
                 },
-            )))),
+            ))),
             locale,
             affirmative_parser,
         }
@@ -165,17 +159,16 @@ impl PromptCoordinator {
     where
         F: FnOnce(&PreparedExecCommand) -> Result<T, Diagnostic>,
     {
-        let mut state = self
+        let mut session = self
             .inner
             .lock()
-            .map_err(|_| Diagnostic::new("internal error: prompt channel poisoned", 1))?;
-        let channel = state.channel_mut()?;
+            .map_err(|_| Diagnostic::new("internal error: prompt session poisoned", 1))?;
         let prompt = render_prompt(prompt_argv, &self.locale);
-        channel.write_prompt(&prompt).map_err(io_error)?;
-        channel.flush_prompt().map_err(io_error)?;
+        session.write_prompt(&prompt).map_err(io_error)?;
+        session.flush_prompt().map_err(io_error)?;
 
         let mut reply = Vec::new();
-        let read = channel.read_reply(&mut reply).map_err(io_error)?;
+        let read = session.read_reply(&mut reply).map_err(io_error)?;
         if read == 0 || !(self.affirmative_parser)(trim_reply_line(&reply)) {
             return Ok(ConfirmOutcome::Rejected);
         }
@@ -232,7 +225,7 @@ pub(crate) fn render_prompt(prompt_argv: &[OsString], locale: &MessagesLocale) -
 }
 
 fn io_error(error: std::io::Error) -> Diagnostic {
-    Diagnostic::new(format!("failed to use prompt channel: {error}"), 1)
+    Diagnostic::new(format!("failed to use prompt session: {error}"), 1)
 }
 
 #[cfg(test)]
@@ -395,7 +388,7 @@ mod tests {
     }
 
     #[test]
-    fn open_process_is_lazy_until_the_first_confirmation() {
+    fn open_process_constructs_a_process_backed_prompt_session() {
         let _coordinator = PromptCoordinator::open_process();
     }
 }
