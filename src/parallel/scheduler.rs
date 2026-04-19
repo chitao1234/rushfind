@@ -142,7 +142,7 @@ impl WorkerHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parallel::task::{ParallelTask, PostOrderResumeTask, PreOrderRootTask};
+    use crate::parallel::task::{ParallelTask, PostOrderResumeTask, PreOrderRootTask, SiblingChunkTask};
     use crate::runtime_pipeline::SubtreeBarrierId;
     use std::path::PathBuf;
     use std::thread;
@@ -256,6 +256,29 @@ mod tests {
         assert!(matches!(
             stolen,
             Some(ParallelTask::PostOrderResume(task)) if task.entry.path.ends_with("dir")
+        ));
+    }
+
+    #[test]
+    fn peer_can_steal_locally_published_sibling_chunk() {
+        let scheduler = Scheduler::new(2);
+        let control = GlobalControl::new();
+        let mut owner = scheduler.worker_handle(0);
+        let mut thief = scheduler.worker_handle(1);
+
+        owner.push_local(
+            ParallelTask::SiblingChunk(SiblingChunkTask {
+                pending: vec![PreOrderRootTask::for_path(PathBuf::from("dir"), 1).pending],
+                completion_barrier: None,
+            }),
+            &control,
+        );
+
+        let stolen = thief.pop();
+
+        assert!(matches!(
+            stolen,
+            Some(ParallelTask::SiblingChunk(task)) if task.pending[0].path.ends_with("dir")
         ));
     }
 

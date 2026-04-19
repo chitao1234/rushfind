@@ -58,7 +58,15 @@ impl PostOrderResumeTask {
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
+pub(crate) struct SiblingChunkTask {
+    pub(crate) pending: Vec<PendingPath>,
+    pub(crate) completion_barrier: Option<SubtreeBarrierId>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
 pub(crate) enum ParallelTask {
     PreOrderRoot(PreOrderRootTask),
+    SiblingChunk(SiblingChunkTask),
     PostOrderResume(PostOrderResumeTask),
 }

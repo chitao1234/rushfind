@@ -207,6 +207,10 @@ pub(crate) fn run_parallel_worker(
                     )
                 }
             }
+            ParallelTask::SiblingChunk(_) => Err(Diagnostic::new(
+                "internal error: sibling chunk tasks are not executable yet",
+                1,
+            )),
             ParallelTask::PostOrderResume(task) => run_postorder_resume(
                 &plan,
                 task,
