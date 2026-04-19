@@ -92,7 +92,11 @@ pub fn parse_gnu_regex(
     Ok(regex)
 }
 
-fn validate_gnu_regex(flag: &str, dialect: RegexDialect, regex: &GnuRegex) -> Result<(), Diagnostic> {
+fn validate_gnu_regex(
+    flag: &str,
+    dialect: RegexDialect,
+    regex: &GnuRegex,
+) -> Result<(), Diagnostic> {
     fn walk(
         expr: &GnuExpr,
         closed_captures: u16,
@@ -139,11 +143,7 @@ fn validate_gnu_regex(flag: &str, dialect: RegexDialect, regex: &GnuRegex) -> Re
                 } = kind
                 {
                     if min > max {
-                        return Err(malformed_regex(
-                            flag,
-                            dialect,
-                            "invalid bounded repetition",
-                        ));
+                        return Err(malformed_regex(flag, dialect, "invalid bounded repetition"));
                     }
                 }
                 walk(expr, closed_captures, flag, dialect)
