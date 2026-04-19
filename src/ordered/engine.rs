@@ -1,5 +1,6 @@
 use crate::diagnostics::Diagnostic;
 use crate::eval::{ActionSink, RuntimeStatus, evaluate_outcome_with_context};
+use crate::exec::PromptCoordinator;
 use crate::messages_locale::MessagesLocale;
 use crate::planner::{ExecutionPlan, RuntimeExpr};
 use crate::runner::{RunSummary, build_eval_context, traversal_control_for_entry};
@@ -12,30 +13,35 @@ pub(crate) fn run_ordered_plan<W, E>(
     plan: &ExecutionPlan,
     stdout: &mut W,
     stderr: &mut E,
-    _messages_locale: Option<MessagesLocale>,
+    messages_locale: Option<MessagesLocale>,
 ) -> Result<RunSummary, Diagnostic>
 where
     W: Write,
     E: Write,
 {
+    let prompt = messages_locale
+        .map(PromptCoordinator::open_process_with_locale)
+        .unwrap_or_else(PromptCoordinator::open_process);
     if contains_commit_sensitive_action(&plan.expr) {
-        return run_ordered_inline(plan, stdout, stderr);
+        return run_ordered_inline(plan, stdout, stderr, prompt);
     }
 
-    run_ordered_pipeline(plan, stdout, stderr)
+    run_ordered_pipeline(plan, stdout, stderr, prompt)
 }
 
 fn run_ordered_inline<W, E>(
     plan: &ExecutionPlan,
     stdout: &mut W,
     stderr: &mut E,
+    prompt: PromptCoordinator,
 ) -> Result<RunSummary, Diagnostic>
 where
     W: Write,
     E: Write,
 {
     let eval_context = build_eval_context(plan)?;
-    let mut sink = crate::exec::OrderedActionSink::new(stdout, stderr, &plan.file_outputs)?;
+    let mut sink =
+        crate::exec::OrderedActionSink::with_prompt(stdout, stderr, &plan.file_outputs, prompt)?;
     let mut had_runtime_errors = false;
 
     walk_ordered(
@@ -90,13 +96,15 @@ fn run_ordered_pipeline<W, E>(
     plan: &ExecutionPlan,
     stdout: &mut W,
     stderr: &mut E,
+    prompt: PromptCoordinator,
 ) -> Result<RunSummary, Diagnostic>
 where
     W: Write,
     E: Write,
 {
     let eval_context = build_eval_context(plan)?;
-    let mut sink = crate::exec::OrderedActionSink::new(stdout, stderr, &plan.file_outputs)?;
+    let mut sink =
+        crate::exec::OrderedActionSink::with_prompt(stdout, stderr, &plan.file_outputs, prompt)?;
     let mut had_runtime_errors = false;
     let mut had_action_failures = false;
 
