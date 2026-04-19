@@ -1,7 +1,8 @@
-use crate::diagnostics::Diagnostic;
+use crate::action_output::{RenderedAction, render_action_output};
+use crate::diagnostics::{Diagnostic, failed_to_write, runtime_stderr_line};
 use crate::entry::EntryContext;
 use crate::eval::{ActionOutcome, ActionSink, EvalContext, RuntimeStatus};
-use crate::file_output::{OrderedFileOutputs, PlannedFileOutput, render_file_print_bytes};
+use crate::file_output::{OrderedFileOutputs, PlannedFileOutput};
 use crate::follow::FollowMode;
 use crate::output::StdoutSink;
 use crate::planner::RuntimeAction;
@@ -89,9 +90,13 @@ impl<'a, W: std::io::Write, E: std::io::Write> OrderedActionSink<'a, W, E> {
         Ok(status)
     }
 
-    pub fn write_diagnostic(&mut self, message: &str) -> Result<(), Diagnostic> {
-        writeln!(self.stderr, "{message}")
-            .map_err(|error| Diagnostic::new(format!("failed to write stderr: {error}"), 1))
+    pub fn write_diagnostic(
+        &mut self,
+        message: impl std::fmt::Display,
+    ) -> Result<(), Diagnostic> {
+        self.stderr
+            .write_all(&runtime_stderr_line(message))
+            .map_err(|error| failed_to_write("stderr", error))
     }
 
     pub fn flush(&mut self) -> Result<RuntimeStatus, Diagnostic> {
@@ -128,32 +133,17 @@ impl<W: std::io::Write, E: std::io::Write> ActionSink for OrderedActionSink<'_, 
         follow_mode: FollowMode,
         context: &EvalContext,
     ) -> Result<ActionOutcome, Diagnostic> {
+        if let Some(rendered) = render_action_output(action, entry, follow_mode, context)? {
+            match rendered {
+                RenderedAction::Stdout(bytes) => self.output.write_bytes(&bytes)?,
+                RenderedAction::File { destination, bytes } => {
+                    self.file_outputs.write_record(destination, &bytes)?;
+                }
+            }
+            return Ok(ActionOutcome::matched_true());
+        }
+
         match action {
-            RuntimeAction::Output(_) | RuntimeAction::Printf(_) | RuntimeAction::Ls => {
-                self.output.dispatch(action, entry, follow_mode, context)
-            }
-            RuntimeAction::FilePrint {
-                destination,
-                terminator,
-            } => {
-                let bytes = render_file_print_bytes(entry, *terminator);
-                self.file_outputs.write_record(*destination, &bytes)?;
-                Ok(ActionOutcome::matched_true())
-            }
-            RuntimeAction::FilePrintf {
-                destination,
-                program,
-            } => {
-                let bytes =
-                    crate::printf::render_printf_bytes(program, entry, follow_mode, context)?;
-                self.file_outputs.write_record(*destination, &bytes)?;
-                Ok(ActionOutcome::matched_true())
-            }
-            RuntimeAction::FileLs { destination } => {
-                let bytes = crate::ls::render_ls_record(entry, follow_mode, context)?;
-                self.file_outputs.write_record(*destination, &bytes)?;
-                Ok(ActionOutcome::matched_true())
-            }
             RuntimeAction::Quit => Ok(ActionOutcome::quit()),
             RuntimeAction::ExecImmediate(spec) => {
                 super::child::run_immediate_ordered(spec, entry.path.as_path(), self.stderr)
@@ -166,11 +156,19 @@ impl<W: std::io::Write, E: std::io::Write> ActionSink for OrderedActionSink<'_, 
             RuntimeAction::Delete => match delete_path(entry.path.as_path()) {
                 Ok(result) => Ok(action_success(result)),
                 Err(error) => {
-                    self.write_diagnostic(&format!("findoxide: {}", error.message))?;
+                    self.write_diagnostic(error)?;
                     self.had_action_failures = true;
                     Ok(action_failure(false))
                 }
             },
+            RuntimeAction::Output(_)
+            | RuntimeAction::Printf(_)
+            | RuntimeAction::FilePrint { .. }
+            | RuntimeAction::FilePrintf { .. }
+            | RuntimeAction::Ls
+            | RuntimeAction::FileLs { .. } => {
+                unreachable!("rendered runtime action must have been handled already")
+            }
         }
     }
 }

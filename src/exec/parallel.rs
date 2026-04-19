@@ -1,8 +1,9 @@
-use crate::diagnostics::Diagnostic;
+use crate::action_output::{RenderedAction, render_action_output};
+use crate::diagnostics::{Diagnostic, internal_poisoned, runtime_stderr_line};
 use crate::entry::EntryContext;
 use crate::eval::{ActionOutcome, ActionSink, EvalContext, RuntimeStatus};
 use crate::follow::FollowMode;
-use crate::output::{BrokerMessage, render_runtime_action_bytes};
+use crate::output::BrokerMessage;
 use crate::planner::RuntimeAction;
 use crossbeam_channel::Sender;
 use std::collections::BTreeMap;
@@ -51,9 +52,11 @@ impl ParallelActionSink {
             RuntimeStatus::default()
         };
         let pending = {
-            let mut pending = self.shared.pending.lock().map_err(|_| {
-                Diagnostic::new("internal error: parallel exec batch state was poisoned", 1)
-            })?;
+            let mut pending = self
+                .shared
+                .pending
+                .lock()
+                .map_err(|_| internal_poisoned("parallel exec batch state"))?;
             std::mem::take(&mut *pending)
         };
 
@@ -78,9 +81,11 @@ impl ParallelActionSink {
     fn enqueue(&self, spec: &BatchedExecAction, path: &Path) -> Result<RuntimeStatus, Diagnostic> {
         let mut status = RuntimeStatus::default();
         let (ready, push_result) = {
-            let mut pending = self.shared.pending.lock().map_err(|_| {
-                Diagnostic::new("internal error: parallel exec batch state was poisoned", 1)
-            })?;
+            let mut pending = self
+                .shared
+                .pending
+                .lock()
+                .map_err(|_| internal_poisoned("parallel exec batch state"))?;
             let batch = pending.entry(spec.id).or_insert_with(|| {
                 PendingBatch::new(
                     spec.clone(),
@@ -139,25 +144,20 @@ impl ParallelActionSink {
         follow_mode: FollowMode,
         context: &EvalContext,
     ) -> Result<ActionOutcome, Diagnostic> {
+        if let Some(rendered) = render_action_output(action, entry, follow_mode, context)? {
+            return match rendered {
+                RenderedAction::Stdout(bytes) => {
+                    send_broker_message(&self.broker, BrokerMessage::Stdout(bytes))?;
+                    Ok(ActionOutcome::matched_true())
+                }
+                RenderedAction::File { .. } => Err(Diagnostic::new(
+                    "internal error: file-backed output actions are not wired into parallel execution yet",
+                    1,
+                )),
+            };
+        }
+
         match action {
-            RuntimeAction::Output(_) | RuntimeAction::Printf(_) | RuntimeAction::Ls => {
-                send_broker_message(
-                    &self.broker,
-                    BrokerMessage::Stdout(render_runtime_action_bytes(
-                        action,
-                        entry,
-                        follow_mode,
-                        context,
-                    )?),
-                )?;
-                Ok(ActionOutcome::matched_true())
-            }
-            RuntimeAction::FilePrint { .. }
-            | RuntimeAction::FilePrintf { .. }
-            | RuntimeAction::FileLs { .. } => Err(Diagnostic::new(
-                "internal error: file-backed output actions are not wired into parallel execution yet",
-                1,
-            )),
             RuntimeAction::Quit => Ok(ActionOutcome::quit()),
             RuntimeAction::ExecImmediate(spec) => run_immediate_parallel(
                 spec,
@@ -175,14 +175,20 @@ impl ParallelActionSink {
                 Err(error) => {
                     send_broker_message(
                         &self.broker,
-                        BrokerMessage::Stderr(
-                            format!("findoxide: {}\n", error.message).into_bytes(),
-                        ),
+                        BrokerMessage::Stderr(runtime_stderr_line(error.message)),
                     )?;
                     self.mark_action_failure();
                     Ok(action_failure(false))
                 }
             },
+            RuntimeAction::Output(_)
+            | RuntimeAction::Printf(_)
+            | RuntimeAction::FilePrint { .. }
+            | RuntimeAction::FilePrintf { .. }
+            | RuntimeAction::Ls
+            | RuntimeAction::FileLs { .. } => {
+                unreachable!("rendered runtime action must have been handled already")
+            }
         }
     }
 }

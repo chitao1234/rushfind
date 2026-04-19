@@ -1,12 +1,11 @@
-use crate::diagnostics::Diagnostic;
+use crate::action_output::{RenderedAction, render_action_output};
+use crate::diagnostics::{Diagnostic, failed_to_write};
 use crate::entry::EntryContext;
 use crate::eval::{ActionOutcome, ActionSink, EvalContext};
 use crate::follow::FollowMode;
-use crate::planner::{OutputAction, RuntimeAction};
-use crate::printf::render_printf_bytes;
+use crate::planner::RuntimeAction;
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use std::io::Write;
-use std::os::unix::ffi::OsStrExt;
 use std::thread::{Scope, ScopedJoinHandle};
 
 #[derive(Debug)]
@@ -41,45 +40,14 @@ fn broker_loop<W: Write, E: Write>(
         match message {
             BrokerMessage::Stdout(bytes) => stdout
                 .write_all(&bytes)
-                .map_err(|error| Diagnostic::new(format!("failed to write stdout: {error}"), 1))?,
+                .map_err(|error| failed_to_write("stdout", error))?,
             BrokerMessage::Stderr(bytes) => stderr
                 .write_all(&bytes)
-                .map_err(|error| Diagnostic::new(format!("failed to write stderr: {error}"), 1))?,
+                .map_err(|error| failed_to_write("stderr", error))?,
         }
     }
 
     Ok(())
-}
-
-pub fn render_output_bytes(action: OutputAction, entry: &EntryContext) -> Vec<u8> {
-    let mut bytes = entry.path.as_os_str().as_bytes().to_vec();
-    match action {
-        OutputAction::Print => {
-            bytes.push(b'\n');
-            bytes
-        }
-        OutputAction::Print0 => {
-            bytes.push(0);
-            bytes
-        }
-    }
-}
-
-pub(crate) fn render_runtime_action_bytes(
-    action: &RuntimeAction,
-    entry: &EntryContext,
-    follow_mode: FollowMode,
-    context: &EvalContext,
-) -> Result<Vec<u8>, Diagnostic> {
-    match action {
-        RuntimeAction::Output(output) => Ok(render_output_bytes(*output, entry)),
-        RuntimeAction::Printf(program) => render_printf_bytes(program, entry, follow_mode, context),
-        RuntimeAction::Ls => crate::ls::render_ls_record(entry, follow_mode, context),
-        _ => Err(Diagnostic::new(
-            "internal error: runtime action does not render to stdout bytes",
-            1,
-        )),
-    }
 }
 
 pub struct StdoutSink<'a, W: Write> {
@@ -89,6 +57,12 @@ pub struct StdoutSink<'a, W: Write> {
 impl<'a, W: Write> StdoutSink<'a, W> {
     pub fn new(writer: &'a mut W) -> Self {
         Self { writer }
+    }
+
+    pub(crate) fn write_bytes(&mut self, bytes: &[u8]) -> Result<(), Diagnostic> {
+        self.writer
+            .write_all(bytes)
+            .map_err(|error| failed_to_write("stdout", error))
     }
 }
 
@@ -100,23 +74,16 @@ impl<'a, W: Write> ActionSink for StdoutSink<'a, W> {
         follow_mode: FollowMode,
         context: &EvalContext,
     ) -> Result<ActionOutcome, Diagnostic> {
-        let (RuntimeAction::Output(_) | RuntimeAction::Printf(_) | RuntimeAction::Ls) = action
-        else {
-            return Err(Diagnostic::new(
+        match render_action_output(action, entry, follow_mode, context)? {
+            Some(RenderedAction::Stdout(bytes)) => {
+                self.write_bytes(&bytes)?;
+                Ok(ActionOutcome::matched_true())
+            }
+            Some(RenderedAction::File { .. }) | None => Err(Diagnostic::new(
                 "internal error: plain stdout sink cannot execute runtime actions",
                 1,
-            ));
-        };
-
-        self.writer
-            .write_all(&render_runtime_action_bytes(
-                action,
-                entry,
-                follow_mode,
-                context,
-            )?)
-            .map_err(|error| Diagnostic::new(format!("failed to write stdout: {error}"), 1))?;
-        Ok(ActionOutcome::matched_true())
+            )),
+        }
     }
 }
 
@@ -129,6 +96,10 @@ impl RecordingSink {
     pub fn into_utf8(self) -> String {
         String::from_utf8(self.bytes).expect("recording sink must contain utf-8")
     }
+
+    fn record_bytes(&mut self, bytes: &[u8]) {
+        self.bytes.extend_from_slice(bytes);
+    }
 }
 
 impl ActionSink for RecordingSink {
@@ -139,20 +110,15 @@ impl ActionSink for RecordingSink {
         follow_mode: FollowMode,
         context: &EvalContext,
     ) -> Result<ActionOutcome, Diagnostic> {
-        let (RuntimeAction::Output(_) | RuntimeAction::Printf(_) | RuntimeAction::Ls) = action
-        else {
-            return Err(Diagnostic::new(
+        match render_action_output(action, entry, follow_mode, context)? {
+            Some(RenderedAction::Stdout(bytes)) => {
+                self.record_bytes(&bytes);
+                Ok(ActionOutcome::matched_true())
+            }
+            Some(RenderedAction::File { .. }) | None => Err(Diagnostic::new(
                 "internal error: recording sink cannot execute runtime actions",
                 1,
-            ));
-        };
-
-        self.bytes.extend_from_slice(&render_runtime_action_bytes(
-            action,
-            entry,
-            follow_mode,
-            context,
-        )?);
-        Ok(ActionOutcome::matched_true())
+            )),
+        }
     }
 }

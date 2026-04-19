@@ -1,12 +1,12 @@
-use crate::diagnostics::Diagnostic;
+use crate::action_output::{RenderedAction, render_action_output};
+use crate::diagnostics::{Diagnostic, internal_unavailable, runtime_stderr_line};
 use crate::entry::EntryContext;
 use crate::eval::{
     ActionOutcome, ActionSink, EvalContext, RuntimeStatus, evaluate_outcome_with_context,
 };
 use crate::exec::{ImmediateExecAction, delete_path, run_immediate_parallel};
-use crate::file_output::{SharedFileOutputs, render_file_print_bytes};
+use crate::file_output::SharedFileOutputs;
 use crate::follow::FollowMode;
-use crate::output::render_runtime_action_bytes;
 use crate::parallel::batch::WorkerBatchState;
 use crate::parallel::broker::BrokerMessage;
 use crate::parallel::control::GlobalControl;
@@ -64,10 +64,8 @@ impl WorkerActionSink {
 
     pub(crate) fn emit_runtime_error(&mut self, error: Diagnostic) -> Result<(), Diagnostic> {
         self.broker
-            .send(BrokerMessage::Stderr(
-                format!("findoxide: {error}\n").into_bytes(),
-            ))
-            .map_err(|_| Diagnostic::new("internal error: v2 broker is unavailable", 1))
+            .send(BrokerMessage::Stderr(runtime_stderr_line(error)))
+            .map_err(|_| internal_unavailable("v2 broker"))
     }
 
     fn run_immediate(
@@ -84,10 +82,8 @@ impl WorkerActionSink {
             Ok(matched) => Ok(ActionOutcome::new(matched)),
             Err(error) => {
                 self.broker
-                    .send(BrokerMessage::Stderr(
-                        format!("findoxide: {}\n", error.message).into_bytes(),
-                    ))
-                    .map_err(|_| Diagnostic::new("internal error: v2 broker is unavailable", 1))?;
+                    .send(BrokerMessage::Stderr(runtime_stderr_line(&error.message)))
+                    .map_err(|_| internal_unavailable("v2 broker"))?;
                 Ok(ActionOutcome {
                     matched: false,
                     status: RuntimeStatus::action_failure(),
@@ -105,36 +101,21 @@ impl ActionSink for WorkerActionSink {
         follow_mode: FollowMode,
         context: &EvalContext,
     ) -> Result<ActionOutcome, Diagnostic> {
+        if let Some(rendered) = render_action_output(action, entry, follow_mode, context)? {
+            match rendered {
+                RenderedAction::Stdout(bytes) => {
+                    self.broker
+                        .send(BrokerMessage::Stdout(bytes))
+                        .map_err(|_| internal_unavailable("v2 broker"))?;
+                }
+                RenderedAction::File { destination, bytes } => {
+                    self.file_outputs.write_record(destination, &bytes)?;
+                }
+            }
+            return Ok(ActionOutcome::matched_true());
+        }
+
         match action {
-            RuntimeAction::Output(_) | RuntimeAction::Printf(_) | RuntimeAction::Ls => {
-                let bytes = render_runtime_action_bytes(action, entry, follow_mode, context)?;
-                self.broker
-                    .send(BrokerMessage::Stdout(bytes))
-                    .map_err(|_| Diagnostic::new("internal error: v2 broker is unavailable", 1))?;
-                Ok(ActionOutcome::matched_true())
-            }
-            RuntimeAction::FilePrint {
-                destination,
-                terminator,
-            } => {
-                let bytes = render_file_print_bytes(entry, *terminator);
-                self.file_outputs.write_record(*destination, &bytes)?;
-                Ok(ActionOutcome::matched_true())
-            }
-            RuntimeAction::FilePrintf {
-                destination,
-                program,
-            } => {
-                let bytes =
-                    crate::printf::render_printf_bytes(program, entry, follow_mode, context)?;
-                self.file_outputs.write_record(*destination, &bytes)?;
-                Ok(ActionOutcome::matched_true())
-            }
-            RuntimeAction::FileLs { destination } => {
-                let bytes = crate::ls::render_ls_record(entry, follow_mode, context)?;
-                self.file_outputs.write_record(*destination, &bytes)?;
-                Ok(ActionOutcome::matched_true())
-            }
             RuntimeAction::Quit => {
                 self.control.request_quit();
                 Ok(ActionOutcome::quit())
@@ -147,6 +128,14 @@ impl ActionSink for WorkerActionSink {
                     .enqueue(spec, entry.path.as_path(), &self.broker)?,
             }),
             RuntimeAction::Delete => self.delete_now(entry.path.as_path()),
+            RuntimeAction::Output(_)
+            | RuntimeAction::Printf(_)
+            | RuntimeAction::FilePrint { .. }
+            | RuntimeAction::FilePrintf { .. }
+            | RuntimeAction::Ls
+            | RuntimeAction::FileLs { .. } => {
+                unreachable!("rendered runtime action must have been handled already")
+            }
         }
     }
 }
@@ -177,7 +166,7 @@ pub(crate) fn run_parallel_worker(
     let send_result = |result| {
         result_tx
             .send(result)
-            .map_err(|_| Diagnostic::new("internal error: v2 result queue is unavailable", 1))
+            .map_err(|_| internal_unavailable("v2 result queue"))
     };
     let backend = FsWalkBackend;
     let mut sink = WorkerActionSink::new(control.clone(), broker, file_outputs);

@@ -23,6 +23,22 @@ impl Diagnostic {
     }
 }
 
+pub(crate) fn failed_to_write(target: &str, error: impl fmt::Display) -> Diagnostic {
+    Diagnostic::new(format!("failed to write {target}: {error}"), 1)
+}
+
+pub(crate) fn internal_unavailable(resource: &str) -> Diagnostic {
+    Diagnostic::new(format!("internal error: {resource} is unavailable"), 1)
+}
+
+pub(crate) fn internal_poisoned(resource: &str) -> Diagnostic {
+    Diagnostic::new(format!("internal error: {resource} was poisoned"), 1)
+}
+
+pub(crate) fn runtime_stderr_line(message: impl fmt::Display) -> Vec<u8> {
+    format!("findoxide: {message}\n").into_bytes()
+}
+
 impl fmt::Display for Diagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.message)
