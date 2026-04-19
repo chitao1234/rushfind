@@ -150,6 +150,10 @@ impl<W: std::io::Write, E: std::io::Write> ActionSink for OrderedActionSink<'_, 
                 super::child::run_immediate_ordered(spec, entry.path.as_path(), self.stderr)
                     .map(action_success)
             }
+            RuntimeAction::ExecPrompt(_) => Err(Diagnostic::new(
+                "internal error: prompt exec action is not wired into ordered execution yet",
+                1,
+            )),
             RuntimeAction::ExecBatched(spec) => Ok(ActionOutcome {
                 matched: true,
                 status: self.enqueue(spec, entry.path.as_path())?,

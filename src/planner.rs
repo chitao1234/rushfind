@@ -160,6 +160,7 @@ pub enum RuntimeAction {
     Quit,
     ExecImmediate(ImmediateExecAction),
     ExecBatched(BatchedExecAction),
+    ExecPrompt(ImmediateExecAction),
     Delete,
 }
 
@@ -294,7 +295,9 @@ fn populate_action_profile(expr: &RuntimeExpr, profile: &mut ActionProfile) {
             | RuntimeAction::Ls
             | RuntimeAction::FileLs { .. } => {}
             RuntimeAction::Quit => profile.has_global_control = true,
-            RuntimeAction::ExecImmediate(_) => profile.has_local_immediate = true,
+            RuntimeAction::ExecImmediate(_) | RuntimeAction::ExecPrompt(_) => {
+                profile.has_local_immediate = true;
+            }
             RuntimeAction::ExecBatched(_) => profile.has_local_batched = true,
             RuntimeAction::Delete => profile.has_subtree_finalizer = true,
         },
@@ -670,8 +673,21 @@ fn lower_action(
                 compile_batched_exec(id, ExecSemantics::DirLocal, &argv)?,
             )))
         }
-        Action::Ok { .. } => Err(Diagnostic::unsupported("unsupported: -ok")),
-        Action::OkDir { .. } => Err(Diagnostic::unsupported("unsupported: -okdir")),
+        Action::Ok { argv, batch: false } => Ok(RuntimeExpr::Action(RuntimeAction::ExecPrompt(
+            compile_immediate_exec(ExecSemantics::Normal, &argv),
+        ))),
+        Action::Ok { batch: true, .. } => Err(Diagnostic::parse(
+            "`-ok` only supports the `;` terminator",
+        )),
+        Action::OkDir { argv, batch: false } => {
+            runtime.execdir_requires_safe_path = true;
+            Ok(RuntimeExpr::Action(RuntimeAction::ExecPrompt(
+                compile_immediate_exec(ExecSemantics::DirLocal, &argv),
+            )))
+        }
+        Action::OkDir { batch: true, .. } => Err(Diagnostic::parse(
+            "`-okdir` only supports the `;` terminator",
+        )),
         Action::Delete => {
             state.saw_delete = true;
             Ok(RuntimeExpr::Action(RuntimeAction::Delete))

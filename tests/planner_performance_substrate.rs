@@ -189,6 +189,10 @@ fn expr_label(expr: &RuntimeExpr) -> &'static str {
         RuntimeExpr::Action(RuntimeAction::Delete) => "delete",
         RuntimeExpr::Action(RuntimeAction::ExecImmediate(_)) => "exec:semicolon",
         RuntimeExpr::Action(RuntimeAction::ExecBatched(_)) => "exec:batch",
+        RuntimeExpr::Action(RuntimeAction::ExecPrompt(spec)) => match spec.semantics {
+            findoxide::exec::ExecSemantics::Normal => "ok:semicolon",
+            findoxide::exec::ExecSemantics::DirLocal => "okdir:semicolon",
+        },
         RuntimeExpr::And(_) => "and",
         RuntimeExpr::Or(_, _) => "or",
         RuntimeExpr::Not(_) => "not",

@@ -166,6 +166,10 @@ impl ParallelActionSink {
                 self.shared.spill_threshold,
             )
             .map(action_success),
+            RuntimeAction::ExecPrompt(_) => Err(Diagnostic::new(
+                "internal error: prompt exec action is not wired into parallel execution yet",
+                1,
+            )),
             RuntimeAction::ExecBatched(spec) => Ok(ActionOutcome {
                 matched: true,
                 status: self.enqueue(spec, entry.path.as_path())?,

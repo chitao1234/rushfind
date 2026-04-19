@@ -74,6 +74,7 @@ pub(crate) fn render_action_output(
         RuntimeAction::Quit
         | RuntimeAction::ExecImmediate(_)
         | RuntimeAction::ExecBatched(_)
+        | RuntimeAction::ExecPrompt(_)
         | RuntimeAction::Delete => Ok(None),
     }
 }

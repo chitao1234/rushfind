@@ -441,8 +441,8 @@ impl<'a> Parser<'a> {
         Ok(match (chdir_before_exec, prompt) {
             (false, false) => Action::Exec { argv, batch },
             (true, false) => Action::ExecDir { argv, batch },
-            (false, true) => Action::Ok { argv },
-            (true, true) => Action::OkDir { argv },
+            (false, true) => Action::Ok { argv, batch },
+            (true, true) => Action::OkDir { argv, batch },
         })
     }
 

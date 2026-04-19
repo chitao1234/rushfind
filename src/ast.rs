@@ -98,8 +98,8 @@ pub enum Action {
     Quit,
     Exec { argv: Vec<OsString>, batch: bool },
     ExecDir { argv: Vec<OsString>, batch: bool },
-    Ok { argv: Vec<OsString> },
-    OkDir { argv: Vec<OsString> },
+    Ok { argv: Vec<OsString>, batch: bool },
+    OkDir { argv: Vec<OsString>, batch: bool },
     Delete,
 }
 

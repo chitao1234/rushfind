@@ -105,13 +105,49 @@ fn execdir_plus_keeps_the_existing_final_placeholder_rule() {
 }
 
 #[test]
-fn ok_and_okdir_remain_unsupported() {
+fn ok_and_okdir_lower_to_exec_prompt_actions() {
+    let plan = plan_command(
+        parse_command(&argv(&[
+            ".",
+            "-ok",
+            "echo",
+            "{}",
+            ";",
+            "-okdir",
+            "printf",
+            "%s\\n",
+            "{}",
+            ";",
+        ]))
+        .unwrap(),
+        1,
+    )
+    .unwrap();
+
+    assert!(contains_action(&plan.expr, |action| matches!(
+        action,
+        RuntimeAction::ExecPrompt(spec) if spec.semantics == ExecSemantics::Normal
+    )));
+    assert!(contains_action(&plan.expr, |action| matches!(
+        action,
+        RuntimeAction::ExecPrompt(spec) if spec.semantics == ExecSemantics::DirLocal
+    )));
+    assert!(plan.runtime.execdir_requires_safe_path);
+}
+
+#[test]
+fn ok_and_okdir_plus_are_rejected_with_explicit_diagnostics() {
     for (args, needle) in [
-        (vec![".", "-ok", "echo", "{}", ";"], "-ok"),
-        (vec![".", "-okdir", "echo", "{}", ";"], "-okdir"),
+        (
+            vec![".", "-ok", "echo", "{}", "+"],
+            "`-ok` only supports the `;` terminator",
+        ),
+        (
+            vec![".", "-okdir", "echo", "{}", "+"],
+            "`-okdir` only supports the `;` terminator",
+        ),
     ] {
         let error = plan_command(parse_command(&argv(&args)).unwrap(), 1).unwrap_err();
-        assert!(error.message.contains("unsupported"));
         assert!(error.message.contains(needle));
     }
 }
