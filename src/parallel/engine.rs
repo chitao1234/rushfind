@@ -1,4 +1,5 @@
 use crate::diagnostics::Diagnostic;
+use crate::exec::PromptCoordinator;
 use crate::file_output::SharedFileOutputs;
 use crate::parallel::broker::spawn_broker;
 use crate::parallel::control::GlobalControl;
@@ -27,6 +28,7 @@ where
     let control = Arc::new(GlobalControl::new());
     let scheduler = Arc::new(Scheduler::new(worker_count));
     let barriers = Arc::new(BarrierTable::default());
+    let prompt = Arc::new(PromptCoordinator::open_process());
 
     std::thread::scope(|scope| -> Result<RunSummary, Diagnostic> {
         let (broker, broker_handle) = spawn_broker(scope, stdout, stderr);
@@ -47,6 +49,7 @@ where
             let control = control.clone();
             let broker = broker.clone();
             let file_outputs = file_outputs.clone();
+            let prompt = prompt.clone();
             let plan = plan.clone();
             let eval_context = eval_context.clone();
             let result_tx = result_tx.clone();
@@ -58,6 +61,7 @@ where
                     control,
                     broker,
                     file_outputs,
+                    prompt,
                     plan,
                     eval_context,
                     result_tx,

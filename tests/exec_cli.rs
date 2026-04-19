@@ -467,6 +467,102 @@ fn okdir_rejects_unsafe_path_before_prompting() {
 }
 
 #[test]
+fn parallel_ok_yes_runs_children_under_serialized_sessions() {
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("alpha.txt"), "a\n").unwrap();
+    fs::write(root.path().join("beta.txt"), "b\n").unwrap();
+
+    let output = cargo_bin_output_with_input_timeout(
+        &[
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-ok".into(),
+            "sh".into(),
+            "-c".into(),
+            "printf 'BEGIN:%s\\n' \"$1\"; sleep 0.05; printf 'END:%s\\n' \"$1\"".into(),
+            "sh".into(),
+            "{}".into(),
+            ";".into(),
+        ],
+        4,
+        b"yes\nyes\n",
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    let lines = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    assert_eq!(lines.len(), 4);
+    assert!(lines.chunks_exact(2).all(|chunk| {
+        let begin = chunk[0].strip_prefix("BEGIN:").unwrap();
+        let end = chunk[1].strip_prefix("END:").unwrap();
+        begin == end
+    }));
+}
+
+#[test]
+fn parallel_ok_no_skips_children() {
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("alpha.txt"), "a\n").unwrap();
+    fs::write(root.path().join("beta.txt"), "b\n").unwrap();
+
+    let output = cargo_bin_output_with_input_timeout(
+        &[
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-ok".into(),
+            "printf".into(),
+            "RUN:%s\\n".into(),
+            "{}".into(),
+            ";".into(),
+        ],
+        4,
+        b"n\nn\n",
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn parallel_okdir_yes_uses_directory_local_execution() {
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("left")).unwrap();
+    fs::create_dir(root.path().join("right")).unwrap();
+    fs::write(root.path().join("left/a.txt"), "a\n").unwrap();
+    fs::write(root.path().join("right/b.txt"), "b\n").unwrap();
+
+    let output = cargo_bin_output_with_input_timeout(
+        &[
+            path_arg(root.path()),
+            "-type".into(),
+            "f".into(),
+            "-okdir".into(),
+            "sh".into(),
+            "-c".into(),
+            "printf '%s|%s\\n' \"$PWD\" \"$1\"".into(),
+            "sh".into(),
+            "{}".into(),
+            ";".into(),
+        ],
+        4,
+        b"yes\nyes\n",
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.lines().any(|line| line.ends_with("/left|./a.txt")));
+    assert!(stdout.lines().any(|line| line.ends_with("/right|./b.txt")));
+}
+
+#[test]
 fn parallel_exec_child_output_is_replayed_in_atomic_chunks() {
     let root = tempdir().unwrap();
     fs::write(root.path().join("alpha.txt"), "a\n").unwrap();

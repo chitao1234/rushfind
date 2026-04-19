@@ -12,10 +12,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use super::batch::{BatchLimit, PendingBatch, ReadyBatch, fixed_batch_cost};
-use super::child::{run_immediate_parallel, run_parallel_ready_batch, send_broker_message};
+use super::child::{
+    run_immediate_parallel, run_parallel_ready_batch, run_prepared_inherited,
+    send_broker_message,
+};
 use super::delete::delete_path;
 use super::ordered::{action_failure, action_success};
 use super::template::{BatchedExecAction, ExecBatchId};
+use super::{ConfirmOutcome, PromptCoordinator, build_immediate_command, render_prompt_argv};
 
 const DEFAULT_SPILL_THRESHOLD: usize = 64 * 1024;
 
@@ -30,6 +34,7 @@ struct ParallelExecShared {
     batch_limit: BatchLimit,
     had_action_failures: AtomicBool,
     spill_threshold: usize,
+    prompt: PromptCoordinator,
 }
 
 impl ParallelActionSink {
@@ -41,6 +46,7 @@ impl ParallelActionSink {
                 batch_limit: BatchLimit::detect(),
                 had_action_failures: AtomicBool::new(false),
                 spill_threshold: DEFAULT_SPILL_THRESHOLD,
+                prompt: PromptCoordinator::open_process(),
             }),
         })
     }
@@ -166,10 +172,32 @@ impl ParallelActionSink {
                 self.shared.spill_threshold,
             )
             .map(action_success),
-            RuntimeAction::ExecPrompt(_) => Err(Diagnostic::new(
-                "internal error: prompt exec action is not wired into parallel execution yet",
-                1,
-            )),
+            RuntimeAction::ExecPrompt(spec) => {
+                let prompt_argv = render_prompt_argv(spec, entry.path.as_path());
+                let prepared = build_immediate_command(spec, entry.path.as_path());
+                match self
+                    .shared
+                    .prompt
+                    .confirm_prepared(&prompt_argv, &prepared, |prepared| {
+                        let mut stderr = std::io::stderr();
+                        run_prepared_inherited(prepared, &mut stderr)
+                    }) {
+                    Ok(ConfirmOutcome::Accepted(true)) => Ok(action_success(true)),
+                    Ok(ConfirmOutcome::Accepted(false)) => {
+                        self.mark_action_failure();
+                        Ok(action_failure(false))
+                    }
+                    Ok(ConfirmOutcome::Rejected) => Ok(action_success(false)),
+                    Err(error) => {
+                        send_broker_message(
+                            &self.broker,
+                            BrokerMessage::Stderr(runtime_stderr_line(error.message)),
+                        )?;
+                        self.mark_action_failure();
+                        Ok(action_failure(false))
+                    }
+                }
+            }
             RuntimeAction::ExecBatched(spec) => Ok(ActionOutcome {
                 matched: true,
                 status: self.enqueue(spec, entry.path.as_path())?,

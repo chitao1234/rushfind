@@ -4,7 +4,10 @@ use crate::entry::EntryContext;
 use crate::eval::{
     ActionOutcome, ActionSink, EvalContext, RuntimeStatus, evaluate_outcome_with_context,
 };
-use crate::exec::{ImmediateExecAction, delete_path, run_immediate_parallel};
+use crate::exec::{
+    ConfirmOutcome, ImmediateExecAction, PromptCoordinator, build_immediate_command, delete_path,
+    render_prompt_argv, run_immediate_parallel, run_prepared_inherited,
+};
 use crate::file_output::SharedFileOutputs;
 use crate::follow::FollowMode;
 use crate::parallel::batch::WorkerBatchState;
@@ -34,6 +37,7 @@ pub(crate) struct WorkerActionSink {
     broker: Sender<BrokerMessage>,
     file_outputs: SharedFileOutputs,
     batches: WorkerBatchState,
+    prompt: Arc<PromptCoordinator>,
 }
 
 pub(crate) struct WorkerReport {
@@ -46,12 +50,14 @@ impl WorkerActionSink {
         control: Arc<GlobalControl>,
         broker: Sender<BrokerMessage>,
         file_outputs: SharedFileOutputs,
+        prompt: Arc<PromptCoordinator>,
     ) -> Self {
         Self {
             control,
             broker,
             file_outputs,
             batches: WorkerBatchState::new(DEFAULT_SPILL_THRESHOLD),
+            prompt,
         }
     }
 
@@ -72,6 +78,33 @@ impl WorkerActionSink {
     ) -> Result<ActionOutcome, Diagnostic> {
         run_immediate_parallel(spec, path, &self.broker, DEFAULT_SPILL_THRESHOLD)
             .map(ActionOutcome::new)
+    }
+
+    fn run_prompted(
+        &mut self,
+        spec: &ImmediateExecAction,
+        path: &Path,
+    ) -> Result<ActionOutcome, Diagnostic> {
+        let prompt_argv = render_prompt_argv(spec, path);
+        let prepared = build_immediate_command(spec, path);
+        match self.prompt.confirm_prepared(&prompt_argv, &prepared, |prepared| {
+            let mut stderr = std::io::stderr();
+            run_prepared_inherited(prepared, &mut stderr)
+        }) {
+            Ok(ConfirmOutcome::Accepted(true)) => Ok(ActionOutcome::matched_true()),
+            Ok(ConfirmOutcome::Accepted(false)) => Ok(ActionOutcome {
+                matched: false,
+                status: RuntimeStatus::action_failure(),
+            }),
+            Ok(ConfirmOutcome::Rejected) => Ok(ActionOutcome::new(false)),
+            Err(error) => {
+                self.emit_runtime_error(error)?;
+                Ok(ActionOutcome {
+                    matched: false,
+                    status: RuntimeStatus::action_failure(),
+                })
+            }
+        }
     }
 
     fn delete_now(&mut self, path: &Path) -> Result<ActionOutcome, Diagnostic> {
@@ -118,10 +151,7 @@ impl ActionSink for WorkerActionSink {
                 Ok(ActionOutcome::quit())
             }
             RuntimeAction::ExecImmediate(spec) => self.run_immediate(spec, entry.path.as_path()),
-            RuntimeAction::ExecPrompt(_) => Err(Diagnostic::new(
-                "internal error: prompt exec action is not wired into parallel worker execution yet",
-                1,
-            )),
+            RuntimeAction::ExecPrompt(spec) => self.run_prompted(spec, entry.path.as_path()),
             RuntimeAction::ExecBatched(spec) => Ok(ActionOutcome {
                 matched: true,
                 status: self
@@ -160,6 +190,7 @@ pub(crate) fn run_parallel_worker(
     control: Arc<GlobalControl>,
     broker: Sender<BrokerMessage>,
     file_outputs: SharedFileOutputs,
+    prompt: Arc<PromptCoordinator>,
     plan: ExecutionPlan,
     eval_context: EvalContext,
     result_tx: Sender<Result<WorkerReport, Diagnostic>>,
@@ -170,7 +201,7 @@ pub(crate) fn run_parallel_worker(
             .map_err(|_| internal_unavailable("v2 result queue"))
     };
     let backend = FsWalkBackend;
-    let mut sink = WorkerActionSink::new(control.clone(), broker, file_outputs);
+    let mut sink = WorkerActionSink::new(control.clone(), broker, file_outputs, prompt);
     let mut status = RuntimeStatus::default();
     let mut had_runtime_errors = false;
 
