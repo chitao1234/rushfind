@@ -10,10 +10,6 @@ use std::collections::VecDeque;
 
 type AffirmativeParser = fn(&[u8]) -> bool;
 
-unsafe extern "C" {
-    fn rpmatch(response: *const libc::c_char) -> libc::c_int;
-}
-
 pub(crate) enum ConfirmOutcome<T> {
     Accepted(T),
     Rejected,
@@ -120,7 +116,7 @@ impl PromptCoordinator {
                 ProcessPromptSession::open(),
             ))),
             locale,
-            affirmative_parser: libc_rpmatch_is_affirmative,
+            affirmative_parser: crate::platform::locale::backend().affirmative_parser(),
         }
     }
 
@@ -183,19 +179,6 @@ fn trim_reply_line(bytes: &[u8]) -> &[u8] {
 #[cfg(test)]
 fn ascii_c_locale_yes_is_affirmative(bytes: &[u8]) -> bool {
     bytes.eq_ignore_ascii_case(b"y") || bytes.eq_ignore_ascii_case(b"yes")
-}
-
-fn libc_rpmatch_is_affirmative(bytes: &[u8]) -> bool {
-    if bytes.is_empty() || bytes.contains(&0) {
-        return false;
-    }
-
-    let reply = match std::ffi::CString::new(bytes) {
-        Ok(reply) => reply,
-        Err(_) => return false,
-    };
-
-    unsafe { rpmatch(reply.as_ptr()) == 1 }
 }
 
 fn default_messages_locale() -> MessagesLocale {

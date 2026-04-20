@@ -39,8 +39,9 @@ Find for the occupātus.
 - GNU special time selectors `%A@`, `%C@`, `%T@`, `%B@`, `%A+`, `%C+`, `%T+`, and `%B+` are
   supported
 - Unsupported `-printf` directives fail during planning with explicit diagnostics
-- Birth-time `-printf` directives keep Linux-first `statx` behavior even on hosts where local GNU
-  `find` does not expose equivalent `%B*` output
+- Birth-time `-printf` directives and `B`-time predicates use exact Unix-family backend reads when
+  the host exposes birth time, even on hosts where local GNU `find` does not expose equivalent
+  `%B*` output
 - Ordered single-worker mode stays GNU-oriented and remains a separate engine for supported
   structural traversal controls
 - Ordered single-worker mode renders GNU-shaped `-ls` / `-fls` records with a frozen evaluation
@@ -68,8 +69,10 @@ Find for the occupātus.
 - In depth mode, `-prune` remains boolean-true in expression flow but does not block descendant
   traversal
 - Relaxed-order parallel mode preserves descendant-before-parent completion for depth-mode actions
-- `-fstype` is Linux-first in the current implementation
-- `-fstype` type names come from `/proc/self/mountinfo`
+- `-fstype` uses the active Unix-family mount snapshot backend and stays exact on Linux, macOS,
+  and the supported BSD targets
+- `-fstype` type names come from `/proc/self/mountinfo` on Linux and `getmntinfo` snapshots on
+  macOS and BSD
 - Requested filesystem types are resolved against the set known at command startup
 - Commands that do not use `-fstype` do not read mount-table state
 - Access predicates use kernel access checks and intentionally can differ from `-perm`
@@ -78,11 +81,36 @@ Find for the occupātus.
 - `-xdev` and `-mount` are normalized as traversal-wide structural limits in the current
   implementation rather than GNU-style positional controls
 - Internal performance substrate: lazy entry data access and cheap-first planning for pure read-only `-a` chains
-- `-newerXY` supports Linux-first birth-time forms and a strict literal-time subset:
+- `-newerXY` supports exact Unix-family birth-time forms where the active backend exposes birth
+  time, plus a strict literal-time subset:
   `@<unix-seconds>[.frac]`, `YYYY-MM-DD`, and `YYYY-MM-DD[ T]HH:MM[:SS][.frac][Z|±HH[:MM]]`
 - Installed GNU `find` builds can still reject `B` predicates on hosts where GNU findutils does
-  not expose birth-time support; the current implementation keeps Linux-first `B` handling in
-  `rushfind`
+  not expose birth-time support; `rushfind` keeps `B` handling enabled when the active Unix-family
+  backend can read birth time
+
+## Platform scope
+
+- Linux remains the reference platform and keeps the strongest GNU compatibility coverage.
+- macOS, FreeBSD, NetBSD, OpenBSD, and DragonFly BSD are supported through alternate Unix-family
+  backends for filesystem, account, and locale behavior.
+- `rushfind` prefers exact GNU-compatible behavior on non-Linux Unix when the host exposes the
+  needed primitive through another code path.
+- Interactive locale handling for `-ok` and `-okdir` remains approximate on non-Linux Unix and
+  emits a startup warning when planned.
+- Windows support is intentionally deferred to a later plan built on the same platform substrate.
+
+## Manual Unix verification
+
+Build the binary and run the portability smoke harness locally, then repeat it on target hosts:
+
+```bash
+cargo build
+bash scripts/check_unix_portability_surface.sh target/debug/rfd
+```
+
+The script exercises `-print`, `-print0`, `-fstype`, birth-time reads, `-xdev`, ownership/access
+rendering, `-ls`, and `-execdir`. It also prints the locale-sensitive `-ok` commands to run
+manually on the target host.
 
 ## Worker selection
 

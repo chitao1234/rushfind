@@ -190,7 +190,9 @@ fn ordered_exec_false_still_blocks_later_print_under_the_pipeline() {
         "-print".into(),
     ];
 
-    let expected = Command::new("find").args(&args).output().unwrap();
+    let Some(expected) = support::gnu_find_output(&args, false) else {
+        return;
+    };
     let actual = Command::cargo_bin("rfd")
         .unwrap()
         .env("RUSHFIND_WORKERS", "1")

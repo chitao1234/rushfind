@@ -1,5 +1,4 @@
 use crate::diagnostics::Diagnostic;
-use std::ffi::{CStr, CString};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PromptLocale {
@@ -67,29 +66,30 @@ impl MessagesLocale {
 }
 
 pub(crate) fn resolve_messages_locale() -> Result<MessagesLocale, Diagnostic> {
-    unsafe {
-        let empty = CString::new("").expect("empty C string must be valid");
-        let c_fallback = CString::new("C").expect("C locale name must be valid");
-
-        let mut active = libc::setlocale(libc::LC_MESSAGES, empty.as_ptr());
-        if active.is_null() {
-            active = libc::setlocale(libc::LC_MESSAGES, c_fallback.as_ptr());
-        }
-        if active.is_null() {
-            return Err(Diagnostic::new("failed to initialize LC_MESSAGES", 1));
-        }
-
-        let resolved_name = CStr::from_ptr(active).to_string_lossy().into_owned();
-        Ok(MessagesLocale {
-            prompt_locale: prompt_locale_for(&resolved_name),
-            resolved_name,
-        })
-    }
+    crate::platform::locale::backend().resolve_messages_locale()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{PromptLocale, prompt_locale_for};
+    use super::{MessagesLocale, PromptLocale, prompt_locale_for};
+    use crate::platform::locale::{LocaleBackend, resolve_messages_locale_with};
+
+    struct FakeLocaleBackend;
+
+    impl LocaleBackend for FakeLocaleBackend {
+        fn resolve_messages_locale(
+            &self,
+        ) -> Result<MessagesLocale, crate::diagnostics::Diagnostic> {
+            Ok(MessagesLocale {
+                resolved_name: "fr_CA.UTF-8".into(),
+                prompt_locale: PromptLocale::Fr,
+            })
+        }
+
+        fn affirmative_parser(&self) -> fn(&[u8]) -> bool {
+            |_| false
+        }
+    }
 
     #[test]
     fn prompt_locale_falls_back_from_full_name_to_language_then_c() {
@@ -98,5 +98,12 @@ mod tests {
         assert_eq!(prompt_locale_for("fr"), PromptLocale::Fr);
         assert_eq!(prompt_locale_for("C.UTF-8"), PromptLocale::C);
         assert_eq!(prompt_locale_for("zz_ZZ"), PromptLocale::C);
+    }
+
+    #[test]
+    fn prompt_locale_selection_can_be_driven_by_an_injected_backend() {
+        let locale = resolve_messages_locale_with(&FakeLocaleBackend).unwrap();
+        assert_eq!(locale.resolved_name, "fr_CA.UTF-8");
+        assert_eq!(locale.prompt_locale, PromptLocale::Fr);
     }
 }

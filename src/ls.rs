@@ -70,9 +70,8 @@ fn render_size_field(
     follow_mode: FollowMode,
     kind: EntryKind,
 ) -> Result<Vec<u8>, Diagnostic> {
-    match kind {
-        EntryKind::Block | EntryKind::Character => {
-            let device = entry.active_device(follow_mode)?;
+    match (kind, entry.active_device_number(follow_mode)?) {
+        (EntryKind::Block | EntryKind::Character, Some(device)) => {
             let major = libc::major(device as libc::dev_t) as u64;
             let minor = libc::minor(device as libc::dev_t) as u64;
             Ok(format_device_field(major, minor))

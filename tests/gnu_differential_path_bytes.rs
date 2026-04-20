@@ -7,7 +7,7 @@ use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs as unix_fs;
 use std::path::PathBuf;
 use std::process::{Command, Output};
-use support::path_arg;
+use support::{gnu_find_output, path_arg};
 use tempfile::tempdir;
 
 fn os(bytes: &[u8]) -> OsString {
@@ -18,12 +18,8 @@ fn path_from_bytes(bytes: &[u8]) -> PathBuf {
     PathBuf::from(os(bytes))
 }
 
-fn run_gnu(args: &[OsString]) -> Output {
-    Command::new("find")
-        .env("LC_ALL", "C")
-        .args(args)
-        .output()
-        .unwrap()
+fn run_gnu(args: &[OsString]) -> Option<Output> {
+    gnu_find_output(args, true)
 }
 
 fn run_fox(args: &[OsString]) -> Output {
@@ -72,7 +68,9 @@ fn print_and_printf_match_gnu_for_non_utf8_paths() {
             "[%p][%P][%H][%f][%h][%l]\\n".into(),
         ],
     ] {
-        let gnu = run_gnu(&args);
+        let Some(gnu) = run_gnu(&args) else {
+            return;
+        };
         let fox = run_fox(&args);
         assert_eq!(fox.status.code(), gnu.status.code());
         assert_eq!(fox.stdout, gnu.stdout);
@@ -136,7 +134,9 @@ fn name_path_and_lname_match_gnu_for_non_utf8_operands() {
             "-print0".into(),
         ],
     ] {
-        let gnu = run_gnu(&args);
+        let Some(gnu) = run_gnu(&args) else {
+            return;
+        };
         let fox = run_fox(&args);
         assert_eq!(fox.status.code(), gnu.status.code(), "args: {:?}", args);
         assert_eq!(fox.stdout, gnu.stdout, "args: {:?}", args);
@@ -151,13 +151,15 @@ fn fprint_matches_gnu_for_non_utf8_paths() {
     let gnu_out = outputs.path().join("gnu.txt");
     let fox_out = outputs.path().join("fox.txt");
 
-    let gnu = run_gnu(&[
+    let Some(gnu) = run_gnu(&[
         path_arg(root.path()),
         "-maxdepth".into(),
         "1".into(),
         "-fprint".into(),
         path_arg(&gnu_out),
-    ]);
+    ]) else {
+        return;
+    };
     let fox = run_fox(&[
         path_arg(root.path()),
         "-maxdepth".into(),
@@ -178,13 +180,15 @@ fn fprint0_matches_gnu_for_non_utf8_paths() {
     let gnu_out = outputs.path().join("gnu.bin");
     let fox_out = outputs.path().join("fox.bin");
 
-    let gnu = run_gnu(&[
+    let Some(gnu) = run_gnu(&[
         path_arg(root.path()),
         "-maxdepth".into(),
         "1".into(),
         "-fprint0".into(),
         path_arg(&gnu_out),
-    ]);
+    ]) else {
+        return;
+    };
     let fox = run_fox(&[
         path_arg(root.path()),
         "-maxdepth".into(),
@@ -205,7 +209,7 @@ fn fprintf_matches_gnu_for_non_utf8_paths() {
     let gnu_out = outputs.path().join("gnu-report.txt");
     let fox_out = outputs.path().join("fox-report.txt");
 
-    let gnu = run_gnu(&[
+    let Some(gnu) = run_gnu(&[
         path_arg(root.path()),
         "-maxdepth".into(),
         "1".into(),
@@ -214,7 +218,9 @@ fn fprintf_matches_gnu_for_non_utf8_paths() {
         "-fprintf".into(),
         path_arg(&gnu_out),
         "[%p][%P][%H][%f][%h][%l]\\n".into(),
-    ]);
+    ]) else {
+        return;
+    };
     let fox = run_fox(&[
         path_arg(root.path()),
         "-maxdepth".into(),

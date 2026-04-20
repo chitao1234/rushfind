@@ -112,8 +112,17 @@ fn rejects_invalid_current_t_and_unsupported_literal_forms() {
 
 #[test]
 fn reference_birth_time_unavailability_is_a_planning_error() {
+    let Some(path) = support::existing_path_without_birth_time() else {
+        return;
+    };
+
     let error = plan_command(
-        parse_command(&argv(&[".", "-newermB", "/proc/self/stat"])).unwrap(),
+        parse_command(&[
+            ".".into(),
+            "-newermB".into(),
+            path.as_os_str().to_os_string(),
+        ])
+        .unwrap(),
         1,
     )
     .unwrap_err();

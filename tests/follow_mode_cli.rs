@@ -4,7 +4,7 @@ use assert_cmd::cargo::CommandCargoExt;
 use std::fs;
 use std::os::unix::fs as unix_fs;
 use std::process::Command;
-use support::path_arg;
+use support::{gnu_find_output, path_arg};
 use tempfile::tempdir;
 
 #[test]
@@ -21,7 +21,9 @@ fn logical_mode_descends_through_symlinked_directories() {
         "file.txt".into(),
     ];
 
-    let expected = Command::new("find").args(&args).output().unwrap();
+    let Some(expected) = gnu_find_output(&args, false) else {
+        return;
+    };
     let actual = Command::cargo_bin("rfd")
         .unwrap()
         .env("RUSHFIND_WORKERS", "1")
@@ -48,7 +50,9 @@ fn command_line_only_mode_follows_symlinked_start_paths() {
         "file.txt".into(),
     ];
 
-    let expected = Command::new("find").args(&args).output().unwrap();
+    let Some(expected) = gnu_find_output(&args, false) else {
+        return;
+    };
     let actual = Command::cargo_bin("rfd")
         .unwrap()
         .env("RUSHFIND_WORKERS", "1")

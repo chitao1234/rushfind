@@ -1,9 +1,12 @@
 mod support;
 
+use rushfind::birth::read_birth_time;
 use rushfind::file_output::FileOutputTerminator;
 use rushfind::parser::parse_command;
 use rushfind::planner::{OutputAction, RuntimeAction, RuntimeExpr, RuntimePredicate, plan_command};
+use std::fs;
 use support::{argv, predicate_labels as collect_predicate_labels};
+use tempfile::tempdir;
 
 #[test]
 fn predicate_reordering_cases_match_expected_order() {
@@ -26,19 +29,6 @@ fn predicate_reordering_cases_match_expected_order() {
             &["name", "type", "empty"][..],
         ),
         (
-            "birth time stays after active metadata checks",
-            &[
-                ".",
-                "-newerBm",
-                "/proc/self/stat",
-                "-size",
-                "+0c",
-                "-name",
-                "*.rs",
-            ][..],
-            &["name", "size", "newer"][..],
-        ),
-        (
             "fstype is reorderable in read-only segments",
             &[".", "-uid", "0", "-fstype", "tmpfs", "-name", "*.rs"][..],
             &["name", "uid", "fstype"][..],
@@ -58,6 +48,30 @@ fn predicate_reordering_cases_match_expected_order() {
         let plan = plan_command(ast, 1).unwrap();
         assert_eq!(predicate_labels(&plan.expr), expected, "{case}");
     }
+
+    let root = tempdir().unwrap();
+    let reference = root.path().join("reference.txt");
+    fs::write(&reference, "reference\n").unwrap();
+    if read_birth_time(&reference, true).unwrap().is_none() {
+        return;
+    }
+
+    let args = vec![
+        ".".into(),
+        "-newerBm".into(),
+        reference.as_os_str().to_os_string(),
+        "-size".into(),
+        "+0c".into(),
+        "-name".into(),
+        "*.rs".into(),
+    ];
+    let ast = parse_command(&args).unwrap();
+    let plan = plan_command(ast, 1).unwrap();
+    assert_eq!(
+        predicate_labels(&plan.expr),
+        ["name", "size", "newer"],
+        "birth time stays after active metadata checks"
+    );
 }
 
 #[test]

@@ -335,7 +335,7 @@ fn local_timestamp(
         tm_yday: 0,
         tm_isdst: -1,
         tm_gmtoff: 0,
-        tm_zone: std::ptr::null(),
+        tm_zone: std::ptr::null_mut::<libc::c_char>() as _,
     };
 
     let seconds = unsafe { libc::mktime(&mut tm) };

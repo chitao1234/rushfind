@@ -6,7 +6,7 @@ use std::fs;
 use std::os::unix::ffi::OsStringExt;
 use std::path::PathBuf;
 use std::process::{Command, Output};
-use support::path_arg;
+use support::{gnu_find_output, path_arg};
 use tempfile::tempdir;
 
 fn os(bytes: &[u8]) -> OsString {
@@ -17,12 +17,8 @@ fn path_from_bytes(bytes: &[u8]) -> PathBuf {
     PathBuf::from(os(bytes))
 }
 
-fn run_gnu(args: &[OsString]) -> Output {
-    Command::new("find")
-        .env("LC_ALL", "C")
-        .args(args)
-        .output()
-        .unwrap()
+fn run_gnu(args: &[OsString]) -> Option<Output> {
+    gnu_find_output(args, true)
 }
 
 fn run_fox(args: &[OsString]) -> Output {
@@ -93,7 +89,9 @@ fn regex_and_iregex_match_gnu_for_non_utf8_operands() {
             "-print0".into(),
         ],
     ] {
-        let gnu = run_gnu(&args);
+        let Some(gnu) = run_gnu(&args) else {
+            return;
+        };
         let fox = run_fox(&args);
         assert_eq!(fox.status.code(), gnu.status.code(), "args: {:?}", args);
         assert_eq!(fox.stdout, gnu.stdout, "args: {:?}", args);
@@ -163,7 +161,9 @@ fn regex_emacs_followup_matrix_emacs_literal_byte_patterns_match_gnu_for_non_utf
         "-print0".into(),
     ];
 
-    let gnu = run_gnu(&args);
+    let Some(gnu) = run_gnu(&args) else {
+        return;
+    };
     let fox = run_fox(&args);
     assert_eq!(fox.status.code(), gnu.status.code(), "args: {:?}", args);
     assert_eq!(fox.stdout, gnu.stdout, "args: {:?}", args);
@@ -208,7 +208,9 @@ fn gnu_hardening_bytes_literal_backslash_and_high_bytes_match_gnu() {
             "-print0".into(),
         ],
     ] {
-        let gnu = run_gnu(&args);
+        let Some(gnu) = run_gnu(&args) else {
+            return;
+        };
         let fox = run_fox(&args);
         assert_eq!(fox.status.code(), gnu.status.code(), "args: {:?}", args);
         assert_eq!(fox.stdout, gnu.stdout, "args: {:?}", args);

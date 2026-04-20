@@ -1,9 +1,8 @@
-use crate::birth::read_birth_time;
 use crate::diagnostics::Diagnostic;
 use crate::follow::FollowMode;
 use crate::literal_time::parse_literal_time;
+use crate::platform::filesystem::{FsPlatformReader, PlatformReader};
 use std::ffi::OsStr;
-use std::fs::{self, Metadata};
 use std::mem::MaybeUninit;
 use std::path::Path;
 use std::str::{self, FromStr};
@@ -686,34 +685,45 @@ fn resolve_reference_timestamp(
     reference_arg: &OsStr,
     follow_mode: FollowMode,
 ) -> Result<Timestamp, Diagnostic> {
+    let reader = FsPlatformReader;
     match reference {
-        'a' => {
-            let metadata = reference_metadata(Path::new(reference_arg), follow_mode)?;
-            Ok(timestamp_from_metadata(TimestampKind::Access, &metadata))
-        }
-        'B' => {
-            let path = Path::new(reference_arg);
-            resolve_reference_birth_time(path, follow_mode)?.ok_or_else(|| {
+        'a' => reference_metadata_timestamp(
+            &reader,
+            Path::new(reference_arg),
+            follow_mode,
+            TimestampKind::Access,
+        ),
+        'B' => reference_metadata_timestamp(
+            &reader,
+            Path::new(reference_arg),
+            follow_mode,
+            TimestampKind::Birth,
+        )
+        .map_err(|error| {
+            if error.message.contains("birth time is not available") {
                 Diagnostic::new(
                     format!(
                         "reference birth time unavailable for `{}` in `{flag}`",
-                        path.display()
+                        Path::new(reference_arg).display()
                     ),
                     1,
                 )
-            })
-        }
-        'c' => {
-            let metadata = reference_metadata(Path::new(reference_arg), follow_mode)?;
-            Ok(timestamp_from_metadata(TimestampKind::Change, &metadata))
-        }
-        'm' => {
-            let metadata = reference_metadata(Path::new(reference_arg), follow_mode)?;
-            Ok(timestamp_from_metadata(
-                TimestampKind::Modification,
-                &metadata,
-            ))
-        }
+            } else {
+                error
+            }
+        }),
+        'c' => reference_metadata_timestamp(
+            &reader,
+            Path::new(reference_arg),
+            follow_mode,
+            TimestampKind::Change,
+        ),
+        'm' => reference_metadata_timestamp(
+            &reader,
+            Path::new(reference_arg),
+            follow_mode,
+            TimestampKind::Modification,
+        ),
         't' => parse_literal_time(reference_arg),
         other => Err(Diagnostic::new(
             format!("invalid `-newerXY` reference timestamp kind `{other}`"),
@@ -722,39 +732,30 @@ fn resolve_reference_timestamp(
     }
 }
 
-fn resolve_reference_birth_time(
+fn reference_metadata_timestamp(
+    reader: &dyn PlatformReader,
     path: &Path,
     follow_mode: FollowMode,
-) -> Result<Option<Timestamp>, Diagnostic> {
-    match follow_mode {
-        FollowMode::Physical => read_birth_time(path, false),
-        FollowMode::CommandLineOnly | FollowMode::Logical => match read_birth_time(path, true) {
-            Ok(timestamp) => Ok(timestamp),
-            Err(_) => read_birth_time(path, false),
-        },
+    kind: TimestampKind,
+) -> Result<Timestamp, Diagnostic> {
+    let view = match follow_mode {
+        FollowMode::Physical => reader.metadata_view(path, false),
+        FollowMode::CommandLineOnly | FollowMode::Logical => reader
+            .metadata_view(path, true)
+            .or_else(|_| reader.metadata_view(path, false)),
     }
-}
-
-fn reference_metadata(path: &Path, follow_mode: FollowMode) -> Result<Metadata, Diagnostic> {
-    match follow_mode {
-        FollowMode::Physical => fs::symlink_metadata(path),
-        FollowMode::CommandLineOnly | FollowMode::Logical => {
-            fs::metadata(path).or_else(|_| fs::symlink_metadata(path))
-        }
-    }
-    .map_err(|error| Diagnostic::new(format!("{}: {error}", path.display()), 1))
-}
-
-fn timestamp_from_metadata(kind: TimestampKind, metadata: &Metadata) -> Timestamp {
-    use std::os::unix::fs::MetadataExt;
+    .map_err(|error| Diagnostic::new(format!("{}: {error}", path.display()), 1))?;
 
     match kind {
-        TimestampKind::Access => Timestamp::new(metadata.atime(), metadata.atime_nsec() as i32),
-        TimestampKind::Birth => unreachable!("birth timestamps are resolved via statx"),
-        TimestampKind::Change => Timestamp::new(metadata.ctime(), metadata.ctime_nsec() as i32),
-        TimestampKind::Modification => {
-            Timestamp::new(metadata.mtime(), metadata.mtime_nsec() as i32)
-        }
+        TimestampKind::Access => Ok(view.atime),
+        TimestampKind::Birth => view.birth_time.ok_or_else(|| {
+            Diagnostic::new(
+                format!("{}: birth time is not available", path.display()),
+                1,
+            )
+        }),
+        TimestampKind::Change => Ok(view.ctime),
+        TimestampKind::Modification => Ok(view.mtime),
     }
 }
 

@@ -2,19 +2,23 @@ mod support;
 
 use assert_cmd::cargo::CommandCargoExt;
 use rushfind::birth::read_birth_time;
+use rushfind::time::Timestamp;
 use std::collections::BTreeSet;
+use std::ffi::CString;
 use std::ffi::OsString;
 use std::fs;
 use std::io::{Seek, SeekFrom, Write};
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{self as unix_fs, MetadataExt, PermissionsExt};
 use std::path::Path;
 use std::process::Command;
+use std::time::{Duration, SystemTime};
 use support::{
     PRINTF_TIME_TZ, assert_file_output_matches_gnu_with_env, assert_matches_gnu_as_sets,
     assert_matches_gnu_as_sets_with_env, assert_matches_gnu_exact,
     assert_matches_gnu_exact_with_env, assert_matches_gnu_exact_with_input,
-    assert_matches_gnu_regex_outcome, assert_matches_gnu_regex_outcome_as_sets, lines,
-    normalize_warning_program, path_arg,
+    assert_matches_gnu_regex_outcome, assert_matches_gnu_regex_outcome_as_sets, gnu_find_command,
+    gnu_find_output, lines, normalize_warning_program, path_arg,
 };
 use tempfile::tempdir;
 
@@ -86,7 +90,7 @@ fn build_perm_tree() -> tempfile::TempDir {
     fs::write(root.path().join("file-664"), "hello\n").unwrap();
     fs::write(root.path().join("file-660"), "hello\n").unwrap();
     fs::write(root.path().join("file-000"), "hello\n").unwrap();
-    fs::write(root.path().join("file-sticky"), "hello\n").unwrap();
+    fs::create_dir(root.path().join("sticky-dir")).unwrap();
     fs::set_permissions(
         root.path().join("file-664"),
         fs::Permissions::from_mode(0o664),
@@ -103,8 +107,8 @@ fn build_perm_tree() -> tempfile::TempDir {
     )
     .unwrap();
     fs::set_permissions(
-        root.path().join("file-sticky"),
-        fs::Permissions::from_mode(0o1000),
+        root.path().join("sticky-dir"),
+        fs::Permissions::from_mode(0o1777),
     )
     .unwrap();
     root
@@ -306,8 +310,90 @@ fn build_delete_tree() -> tempfile::TempDir {
 }
 
 fn touch_time(path: &Path, args: &[&str]) {
-    let status = Command::new("touch").args(args).arg(path).status().unwrap();
-    assert!(status.success(), "touch failed for {}", path.display());
+    let mut update_atime = false;
+    let mut update_mtime = false;
+    let mut date = None;
+    let mut index = 0;
+
+    while index < args.len() {
+        match args[index] {
+            "-a" => update_atime = true,
+            "-m" => update_mtime = true,
+            "-d" => {
+                index += 1;
+                date = args.get(index).copied();
+            }
+            other => panic!("unsupported portable touch arg `{other}`"),
+        }
+        index += 1;
+    }
+
+    let timestamp = parse_relative_touch_time(date.expect("portable touch helper requires `-d`"));
+    let metadata = fs::metadata(path).unwrap();
+    let atime = if update_atime || (!update_atime && !update_mtime) {
+        timestamp
+    } else {
+        Timestamp::new(metadata.atime(), metadata.atime_nsec() as i32)
+    };
+    let mtime = if update_mtime || (!update_atime && !update_mtime) {
+        timestamp
+    } else {
+        Timestamp::new(metadata.mtime(), metadata.mtime_nsec() as i32)
+    };
+
+    set_file_times(path, atime, mtime);
+}
+
+fn parse_relative_touch_time(raw: &str) -> Timestamp {
+    let now = SystemTime::now();
+    if let Some(days) = raw.strip_suffix(" days ago") {
+        return Timestamp::from_system_time(
+            now.checked_sub(Duration::from_secs(days.parse::<u64>().unwrap() * 86_400))
+                .unwrap(),
+        )
+        .unwrap();
+    }
+    if let Some(day) = raw.strip_suffix(" day ago") {
+        return Timestamp::from_system_time(
+            now.checked_sub(Duration::from_secs(day.parse::<u64>().unwrap() * 86_400))
+                .unwrap(),
+        )
+        .unwrap();
+    }
+    if let Some(minutes) = raw.strip_suffix(" minutes ago") {
+        return Timestamp::from_system_time(
+            now.checked_sub(Duration::from_secs(minutes.parse::<u64>().unwrap() * 60))
+                .unwrap(),
+        )
+        .unwrap();
+    }
+    if let Some(minute) = raw.strip_suffix(" minute ago") {
+        return Timestamp::from_system_time(
+            now.checked_sub(Duration::from_secs(minute.parse::<u64>().unwrap() * 60))
+                .unwrap(),
+        )
+        .unwrap();
+    }
+
+    panic!("unsupported portable touch time spec `{raw}`");
+}
+
+fn set_file_times(path: &Path, atime: Timestamp, mtime: Timestamp) {
+    let display = path.display().to_string();
+    let path = CString::new(path.as_os_str().as_bytes()).unwrap();
+    let times = [
+        libc::timespec {
+            tv_sec: atime.seconds as libc::time_t,
+            tv_nsec: atime.nanos.into(),
+        },
+        libc::timespec {
+            tv_sec: mtime.seconds as libc::time_t,
+            tv_nsec: mtime.nanos.into(),
+        },
+    ];
+
+    let rc = unsafe { libc::utimensat(libc::AT_FDCWD, path.as_ptr(), times.as_ptr(), 0) };
+    assert_eq!(rc, 0, "utimensat failed for {display}");
 }
 
 fn toggle_user_execute(path: &Path) {
@@ -318,7 +404,11 @@ fn toggle_user_execute(path: &Path) {
 }
 
 fn gnu_supports_birth_time_predicates(root: &Path) -> bool {
-    Command::new("find")
+    let Some(mut command) = gnu_find_command() else {
+        return false;
+    };
+
+    command
         .arg(root)
         .args(["-newerBt", "@1700000000.25"])
         .output()
@@ -332,26 +422,26 @@ fn current_id_output(flag: &str) -> String {
     String::from_utf8(output.stdout).unwrap().trim().to_owned()
 }
 
-fn current_fstype(path: &Path) -> OsString {
-    let output = Command::new("find")
+fn current_fstype(path: &Path) -> Option<OsString> {
+    let mut command = gnu_find_command()?;
+    let output = command
         .arg(path)
         .args(["-maxdepth", "0", "-printf", "%F"])
         .output()
-        .unwrap();
+        .ok()?;
     assert!(output.status.success());
 
-    OsString::from(String::from_utf8(output.stdout).unwrap().trim().to_owned())
+    Some(OsString::from(
+        String::from_utf8(output.stdout).unwrap().trim().to_owned(),
+    ))
 }
 
 fn assert_newermt_literal_rejection_matches_gnu(root: &Path, raw: &str) {
     let args = vec![path_arg(root), "-newermt".into(), raw.into()];
 
-    let expected = Command::new("find")
-        .env("LC_ALL", "C")
-        .env("TZ", PRINTF_TIME_TZ)
-        .args(&args)
-        .output()
-        .unwrap();
+    let Some(expected) = gnu_find_output(&args, true) else {
+        return;
+    };
 
     let actual = Command::cargo_bin("rfd")
         .unwrap()
@@ -560,11 +650,9 @@ fn gnu_ok_plus_is_rejected() {
         "+".into(),
     ];
 
-    let expected = Command::new("find")
-        .env("LC_ALL", "C")
-        .args(&args)
-        .output()
-        .unwrap();
+    let Some(expected) = gnu_find_output(&args, true) else {
+        return;
+    };
     let actual = Command::cargo_bin("rfd")
         .unwrap()
         .env("RUSHFIND_WORKERS", "1")
@@ -593,7 +681,10 @@ fn unsafe_execdir_path_rejection_matches_gnu_semantics() {
         ];
         args.extend(command.into_iter().map(Into::into));
 
-        let expected = Command::new("find")
+        let Some(mut expected) = gnu_find_command() else {
+            return;
+        };
+        let expected = expected
             .env("PATH", ".:/usr/bin:/bin")
             .args(&args)
             .output()
@@ -752,7 +843,9 @@ fn ordered_mode_matches_gnu_find_exactly() {
         "*.rs".into(),
     ];
 
-    let expected = Command::new("find").args(&args).output().unwrap();
+    let Some(expected) = gnu_find_output(&args, false) else {
+        return;
+    };
     let actual = Command::cargo_bin("rfd")
         .unwrap()
         .env("RUSHFIND_WORKERS", "1")
@@ -816,7 +909,9 @@ fn ordered_delete_matches_gnu_output_exit_and_resulting_state() {
         "-delete".into(),
     ];
 
-    let expected_output = Command::new("find").args(&args_expected).output().unwrap();
+    let Some(expected_output) = gnu_find_output(&args_expected, false) else {
+        return;
+    };
     let actual_output = Command::cargo_bin("rfd")
         .unwrap()
         .env("RUSHFIND_WORKERS", "1")
@@ -839,7 +934,9 @@ fn ordered_delete_matches_gnu_output_exit_and_resulting_state() {
 #[test]
 fn ordered_fstype_matches_gnu_find_exactly() {
     let root = build_tree();
-    let host_type = current_fstype(root.path());
+    let Some(host_type) = current_fstype(root.path()) else {
+        return;
+    };
     let args_sets = vec![
         vec![
             path_arg(root.path()),
@@ -876,7 +973,9 @@ fn parallel_mode_matches_gnu_find_as_a_set() {
         "f".into(),
     ];
 
-    let expected = Command::new("find").args(&args).output().unwrap();
+    let Some(expected) = gnu_find_output(&args, false) else {
+        return;
+    };
     let actual = Command::cargo_bin("rfd")
         .unwrap()
         .env("RUSHFIND_WORKERS", "4")
@@ -1033,7 +1132,9 @@ fn ordered_printf_unknown_escape_warnings_match_gnu_with_normalized_program_name
         "X\\qY\\xZ".into(),
     ];
 
-    let expected = Command::new("find").args(&args).output().unwrap();
+    let Some(expected) = gnu_find_output(&args, false) else {
+        return;
+    };
     let actual = Command::cargo_bin("rfd")
         .unwrap()
         .env("RUSHFIND_WORKERS", "1")
@@ -1060,7 +1161,9 @@ fn ordered_printf_unknown_escape_warnings_match_gnu_for_zero_match_runs() {
         "X\\q".into(),
     ];
 
-    let expected = Command::new("find").args(&args).output().unwrap();
+    let Some(expected) = gnu_find_output(&args, false) else {
+        return;
+    };
     let actual = Command::cargo_bin("rfd")
         .unwrap()
         .env("RUSHFIND_WORKERS", "1")
@@ -1074,6 +1177,20 @@ fn ordered_printf_unknown_escape_warnings_match_gnu_for_zero_match_runs() {
         normalize_warning_program(&actual.stderr),
         normalize_warning_program(&expected.stderr)
     );
+}
+
+#[test]
+fn ordered_printf_string_zero_pad_matches_host_gnu_find_exactly() {
+    let root = build_printf_tree();
+    let args = vec![
+        path_arg(root.path()),
+        "-type".into(),
+        "f".into(),
+        "-printf".into(),
+        "[%010f][%010y][%010Ta]\n".into(),
+    ];
+
+    assert_matches_gnu_exact_with_env(&args);
 }
 
 #[test]
@@ -1121,13 +1238,8 @@ fn parallel_printf_expanded_subset_matches_gnu_find_as_sets() {
 #[test]
 fn ordered_printf_time_directives_match_gnu_find_exactly() {
     let root = build_printf_tree();
-    let status = Command::new("touch")
-        .env("TZ", PRINTF_TIME_TZ)
-        .args(["-a", "-m", "-d", "2024-03-04 13:06:07.123456789"])
-        .arg(root.path().join("dir/file.txt"))
-        .status()
-        .unwrap();
-    assert!(status.success());
+    let fixed = Timestamp::new(1_709_528_767, 123_456_789);
+    set_file_times(&root.path().join("dir/file.txt"), fixed, fixed);
 
     let args_sets = vec![
         vec![
@@ -1269,7 +1381,9 @@ fn parallel_prune_matches_gnu_as_a_set() {
 #[test]
 fn parallel_fstype_matches_gnu_as_a_set() {
     let root = build_tree();
-    let host_type = current_fstype(root.path());
+    let Some(host_type) = current_fstype(root.path()) else {
+        return;
+    };
     let args = vec![
         path_arg(root.path()),
         "-fstype".into(),
@@ -1370,7 +1484,9 @@ fn ordered_follow_modes_match_gnu_find_exactly() {
             "d".into(),
         ],
     ] {
-        let expected = Command::new("find").args(&args).output().unwrap();
+        let Some(expected) = gnu_find_output(&args, false) else {
+            return;
+        };
         let actual = Command::cargo_bin("rfd")
             .unwrap()
             .env("RUSHFIND_WORKERS", "1")
@@ -1400,7 +1516,9 @@ fn ordered_alias_preservation_matches_gnu_find_exactly() {
         "file.txt".into(),
     ];
 
-    let expected = Command::new("find").args(&args).output().unwrap();
+    let Some(expected) = gnu_find_output(&args, false) else {
+        return;
+    };
     let actual = Command::cargo_bin("rfd")
         .unwrap()
         .env("RUSHFIND_WORKERS", "1")
@@ -1430,7 +1548,9 @@ fn parallel_follow_modes_match_gnu_find_as_sets() {
         ")".into(),
     ];
 
-    let expected = Command::new("find").args(&args).output().unwrap();
+    let Some(expected) = gnu_find_output(&args, false) else {
+        return;
+    };
     let actual = Command::cargo_bin("rfd")
         .unwrap()
         .env("RUSHFIND_WORKERS", "4")
@@ -1458,7 +1578,9 @@ fn parallel_alias_preservation_matches_gnu_find_as_sets() {
         "file.txt".into(),
     ];
 
-    let expected = Command::new("find").args(&args).output().unwrap();
+    let Some(expected) = gnu_find_output(&args, false) else {
+        return;
+    };
     let actual = Command::cargo_bin("rfd")
         .unwrap()
         .env("RUSHFIND_WORKERS", "4")
@@ -1506,7 +1628,9 @@ fn ordered_family_a_matches_gnu_find_exactly() {
     ];
 
     for args in args_sets {
-        let expected = Command::new("find").args(&args).output().unwrap();
+        let Some(expected) = gnu_find_output(&args, false) else {
+            return;
+        };
         let actual = Command::cargo_bin("rfd")
             .unwrap()
             .env("RUSHFIND_WORKERS", "1")
@@ -1549,7 +1673,9 @@ fn parallel_family_a_matches_gnu_find_as_sets() {
     ];
 
     for args in args_sets {
-        let expected = Command::new("find").args(&args).output().unwrap();
+        let Some(expected) = gnu_find_output(&args, false) else {
+            return;
+        };
         let actual = Command::cargo_bin("rfd")
             .unwrap()
             .env("RUSHFIND_WORKERS", "4")
@@ -1632,7 +1758,9 @@ fn ordered_metadata_ownership_matches_gnu_find_exactly() {
     ];
 
     for args in args_sets {
-        let expected = Command::new("find").args(&args).output().unwrap();
+        let Some(expected) = gnu_find_output(&args, false) else {
+            return;
+        };
         let actual = Command::cargo_bin("rfd")
             .unwrap()
             .env("RUSHFIND_WORKERS", "1")
@@ -1664,7 +1792,9 @@ fn parallel_metadata_ownership_matches_gnu_find_as_sets() {
     ];
 
     for args in args_sets {
-        let expected = Command::new("find").args(&args).output().unwrap();
+        let Some(expected) = gnu_find_output(&args, false) else {
+            return;
+        };
         let actual = Command::cargo_bin("rfd")
             .unwrap()
             .env("RUSHFIND_WORKERS", "4")
@@ -1694,7 +1824,9 @@ fn ordered_perm_matches_gnu_find_exactly() {
     ];
 
     for args in args_sets {
-        let expected = Command::new("find").args(&args).output().unwrap();
+        let Some(expected) = gnu_find_output(&args, false) else {
+            return;
+        };
         let actual = Command::cargo_bin("rfd")
             .unwrap()
             .env("RUSHFIND_WORKERS", "1")
@@ -1723,7 +1855,9 @@ fn parallel_perm_matches_gnu_find_as_sets() {
     ];
 
     for args in args_sets {
-        let expected = Command::new("find").args(&args).output().unwrap();
+        let Some(expected) = gnu_find_output(&args, false) else {
+            return;
+        };
         let actual = Command::cargo_bin("rfd")
             .unwrap()
             .env("RUSHFIND_WORKERS", "4")
@@ -1789,7 +1923,9 @@ fn ordered_symlink_content_matches_gnu_find_exactly() {
     ];
 
     for args in args_sets {
-        let expected = Command::new("find").args(&args).output().unwrap();
+        let Some(expected) = gnu_find_output(&args, false) else {
+            return;
+        };
         let actual = Command::cargo_bin("rfd")
             .unwrap()
             .env("RUSHFIND_WORKERS", "1")
@@ -1855,7 +1991,9 @@ fn parallel_symlink_content_matches_gnu_find_as_sets() {
     ];
 
     for args in args_sets {
-        let expected = Command::new("find").args(&args).output().unwrap();
+        let Some(expected) = gnu_find_output(&args, false) else {
+            return;
+        };
         let actual = Command::cargo_bin("rfd")
             .unwrap()
             .env("RUSHFIND_WORKERS", "4")
@@ -2725,7 +2863,9 @@ fn gnu_review_followup_backward_ranges_are_rejected_like_gnu_find() {
             r".*/[z-a]".into(),
         ],
     ] {
-        let expected = Command::new("find").args(&args).output().unwrap();
+        let Some(expected) = gnu_find_output(&args, false) else {
+            return;
+        };
         let actual = Command::cargo_bin("rfd")
             .unwrap()
             .env("RUSHFIND_WORKERS", "1")

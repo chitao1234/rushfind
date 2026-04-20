@@ -1,15 +1,15 @@
-use crate::birth::read_birth_time;
 use crate::diagnostics::Diagnostic;
 use crate::follow::FollowMode;
 use crate::identity::FileIdentity;
+use crate::platform::filesystem::{
+    FsPlatformReader, PlatformMetadataView, PlatformReader, missing_field,
+};
 use crate::time::Timestamp;
-use std::ffi::{CString, OsString};
+use std::ffi::OsString;
 use std::fmt;
-use std::fs::{FileType, Metadata};
+use std::fs::FileType;
 use std::io;
-use std::mem::MaybeUninit;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{FileTypeExt, MetadataExt};
+use std::os::unix::fs::FileTypeExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
@@ -41,54 +41,12 @@ pub enum AccessMode {
 }
 
 impl AccessMode {
-    fn as_flag(self) -> libc::c_int {
+    pub(crate) fn as_flag(self) -> libc::c_int {
         match self {
             Self::Read => libc::R_OK,
             Self::Write => libc::W_OK,
             Self::Execute => libc::X_OK,
         }
-    }
-}
-
-pub(crate) trait EntryReader: Send + Sync {
-    fn symlink_metadata(&self, path: &Path) -> io::Result<Metadata>;
-    fn metadata(&self, path: &Path) -> io::Result<Metadata>;
-    fn read_link(&self, path: &Path) -> io::Result<PathBuf>;
-    fn directory_is_empty(&self, path: &Path) -> io::Result<bool>;
-    fn mount_id(&self, path: &Path, follow: bool) -> io::Result<u64>;
-    fn access(&self, path: &Path, mode: AccessMode) -> io::Result<bool>;
-}
-
-#[derive(Debug)]
-struct FsEntryReader;
-
-impl EntryReader for FsEntryReader {
-    fn symlink_metadata(&self, path: &Path) -> io::Result<Metadata> {
-        std::fs::symlink_metadata(path)
-    }
-
-    fn metadata(&self, path: &Path) -> io::Result<Metadata> {
-        std::fs::metadata(path)
-    }
-
-    fn read_link(&self, path: &Path) -> io::Result<PathBuf> {
-        std::fs::read_link(path)
-    }
-
-    fn directory_is_empty(&self, path: &Path) -> io::Result<bool> {
-        let mut entries = std::fs::read_dir(path)?;
-        match entries.next() {
-            None => Ok(true),
-            Some(result) => result.map(|_| false),
-        }
-    }
-
-    fn mount_id(&self, path: &Path, follow: bool) -> io::Result<u64> {
-        read_mount_id(path, follow)
-    }
-
-    fn access(&self, path: &Path, mode: AccessMode) -> io::Result<bool> {
-        read_access(path, mode)
     }
 }
 
@@ -102,21 +60,15 @@ pub struct EntryContext {
 }
 
 struct EntryData {
-    reader: Arc<dyn EntryReader>,
+    reader: Arc<dyn PlatformReader>,
     physical_file_type_hint: Option<FileType>,
-    physical_metadata: OnceLock<Result<Metadata, Diagnostic>>,
-    logical_metadata: OnceLock<Option<Metadata>>,
-    physical_identity: OnceLock<Result<FileIdentity, Diagnostic>>,
-    logical_identity: OnceLock<Option<FileIdentity>>,
+    physical_view: OnceLock<Result<PlatformMetadataView, Diagnostic>>,
+    logical_view: OnceLock<Option<PlatformMetadataView>>,
     physical_link_target: OnceLock<Result<Option<OsString>, Diagnostic>>,
     active_directory_empty: OnceLock<Result<bool, Diagnostic>>,
     readable: OnceLock<bool>,
     writable: OnceLock<bool>,
     executable: OnceLock<bool>,
-    physical_mount_id: OnceLock<Result<u64, Diagnostic>>,
-    logical_mount_id: OnceLock<Result<u64, Diagnostic>>,
-    physical_birth_time: OnceLock<Result<Option<Timestamp>, Diagnostic>>,
-    logical_birth_time: OnceLock<Result<Option<Timestamp>, Diagnostic>>,
 }
 
 impl fmt::Debug for EntryContext {
@@ -139,7 +91,7 @@ impl EntryContext {
             is_command_line_root,
             root_path,
             None,
-            Arc::new(FsEntryReader),
+            Arc::new(FsPlatformReader),
         )
     }
 
@@ -157,7 +109,7 @@ impl EntryContext {
             is_command_line_root,
             root_path,
             physical_file_type_hint,
-            Arc::new(FsEntryReader),
+            Arc::new(FsPlatformReader),
         )
     }
 
@@ -174,7 +126,7 @@ impl EntryContext {
             is_command_line_root,
             root_path,
             physical_file_type_hint,
-            Arc::new(FsEntryReader),
+            Arc::new(FsPlatformReader),
         )
     }
 
@@ -183,7 +135,7 @@ impl EntryContext {
         path: PathBuf,
         depth: usize,
         is_command_line_root: bool,
-        reader: Arc<dyn EntryReader>,
+        reader: Arc<dyn PlatformReader>,
     ) -> Self {
         let root_path = Arc::new(path.clone());
         Self::with_reader_hint_and_root(path, depth, is_command_line_root, root_path, None, reader)
@@ -196,7 +148,7 @@ impl EntryContext {
         depth: usize,
         is_command_line_root: bool,
         root_path: Arc<PathBuf>,
-        reader: Arc<dyn EntryReader>,
+        reader: Arc<dyn PlatformReader>,
     ) -> Self {
         Self::with_reader_hint_and_root(path, depth, is_command_line_root, root_path, None, reader)
     }
@@ -207,7 +159,7 @@ impl EntryContext {
         is_command_line_root: bool,
         root_path: Arc<PathBuf>,
         physical_file_type_hint: Option<FileType>,
-        reader: Arc<dyn EntryReader>,
+        reader: Arc<dyn PlatformReader>,
     ) -> Self {
         Self {
             path,
@@ -217,19 +169,13 @@ impl EntryContext {
             data: Arc::new(EntryData {
                 reader,
                 physical_file_type_hint,
-                physical_metadata: OnceLock::new(),
-                logical_metadata: OnceLock::new(),
-                physical_identity: OnceLock::new(),
-                logical_identity: OnceLock::new(),
+                physical_view: OnceLock::new(),
+                logical_view: OnceLock::new(),
                 physical_link_target: OnceLock::new(),
                 active_directory_empty: OnceLock::new(),
                 readable: OnceLock::new(),
                 writable: OnceLock::new(),
                 executable: OnceLock::new(),
-                physical_mount_id: OnceLock::new(),
-                logical_mount_id: OnceLock::new(),
-                physical_birth_time: OnceLock::new(),
-                logical_birth_time: OnceLock::new(),
             }),
         }
     }
@@ -260,29 +206,24 @@ impl EntryContext {
             return Ok(file_type_to_kind(file_type));
         }
 
-        Ok(file_type_to_kind(self.physical_metadata()?.file_type()))
+        Ok(self.physical_view()?.kind)
     }
 
     pub fn physical_identity(&self) -> Result<FileIdentity, Diagnostic> {
-        match self
-            .data
-            .physical_identity
-            .get_or_init(|| self.physical_metadata().map(FileIdentity::from_metadata))
-        {
-            Ok(identity) => Ok(*identity),
-            Err(error) => Err(error.clone()),
-        }
+        self.physical_view()?
+            .identity
+            .ok_or_else(|| missing_field("file identity", &self.path))
     }
 
-    pub fn active_metadata(&self, follow_mode: FollowMode) -> Result<&Metadata, Diagnostic> {
+    fn active_view(&self, follow_mode: FollowMode) -> Result<&PlatformMetadataView, Diagnostic> {
         if self.uses_logical_view(follow_mode)
             && self.physical_kind()? == EntryKind::Symlink
-            && let Some(metadata) = self.logical_metadata()
+            && let Some(view) = self.logical_view()
         {
-            return Ok(metadata);
+            return Ok(view);
         }
 
-        self.physical_metadata()
+        self.physical_view()
     }
 
     pub fn logical_kind(&self) -> Result<EntryKind, Diagnostic> {
@@ -290,21 +231,19 @@ impl EntryContext {
             return self.physical_kind();
         }
 
-        if let Some(metadata) = self.logical_metadata() {
-            Ok(file_type_to_kind(metadata.file_type()))
+        if let Some(view) = self.logical_view() {
+            Ok(view.kind)
         } else {
             self.physical_kind()
         }
     }
 
     pub fn logical_identity(&self) -> Option<FileIdentity> {
-        *self.data.logical_identity.get_or_init(|| {
-            if self.physical_kind().ok()? != EntryKind::Symlink {
-                return self.physical_identity().ok();
-            }
+        if self.physical_kind().ok()? != EntryKind::Symlink {
+            return self.physical_identity().ok();
+        }
 
-            self.logical_metadata().map(FileIdentity::from_metadata)
-        })
+        self.logical_view().and_then(|view| view.identity)
     }
 
     pub fn active_identity(&self, follow_mode: FollowMode) -> Result<FileIdentity, Diagnostic> {
@@ -326,52 +265,54 @@ impl EntryContext {
         Ok(self.active_identity(follow_mode)?.dev)
     }
 
+    pub fn active_device_number(&self, follow_mode: FollowMode) -> Result<Option<u64>, Diagnostic> {
+        Ok(self.active_view(follow_mode)?.device_number)
+    }
+
     pub fn active_uid(&self, follow_mode: FollowMode) -> Result<u32, Diagnostic> {
-        Ok(self.active_metadata(follow_mode)?.uid())
+        self.active_view(follow_mode)?
+            .owner
+            .ok_or_else(|| missing_field("owner id", &self.path))
     }
 
     pub fn active_gid(&self, follow_mode: FollowMode) -> Result<u32, Diagnostic> {
-        Ok(self.active_metadata(follow_mode)?.gid())
+        self.active_view(follow_mode)?
+            .group
+            .ok_or_else(|| missing_field("group id", &self.path))
     }
 
     pub fn active_mode_bits(&self, follow_mode: FollowMode) -> Result<u32, Diagnostic> {
-        Ok(self.active_metadata(follow_mode)?.mode() & 0o7777)
+        self.active_view(follow_mode)?
+            .mode_bits
+            .ok_or_else(|| missing_field("mode bits", &self.path))
     }
 
     pub fn active_size(&self, follow_mode: FollowMode) -> Result<u64, Diagnostic> {
-        Ok(self.active_metadata(follow_mode)?.len())
+        Ok(self.active_view(follow_mode)?.size)
     }
 
     pub fn active_atime(&self, follow_mode: FollowMode) -> Result<Timestamp, Diagnostic> {
-        let metadata = self.active_metadata(follow_mode)?;
-        Ok(Timestamp::new(
-            metadata.atime(),
-            metadata.atime_nsec() as i32,
-        ))
+        Ok(self.active_view(follow_mode)?.atime)
     }
 
     pub fn active_ctime(&self, follow_mode: FollowMode) -> Result<Timestamp, Diagnostic> {
-        let metadata = self.active_metadata(follow_mode)?;
-        Ok(Timestamp::new(
-            metadata.ctime(),
-            metadata.ctime_nsec() as i32,
-        ))
+        Ok(self.active_view(follow_mode)?.ctime)
     }
 
     pub fn active_mtime(&self, follow_mode: FollowMode) -> Result<Timestamp, Diagnostic> {
-        let metadata = self.active_metadata(follow_mode)?;
-        Ok(Timestamp::new(
-            metadata.mtime(),
-            metadata.mtime_nsec() as i32,
-        ))
+        Ok(self.active_view(follow_mode)?.mtime)
     }
 
     pub fn active_link_count(&self, follow_mode: FollowMode) -> Result<u64, Diagnostic> {
-        Ok(self.active_metadata(follow_mode)?.nlink())
+        self.active_view(follow_mode)?
+            .link_count
+            .ok_or_else(|| missing_field("link count", &self.path))
     }
 
     pub fn active_blocks(&self, follow_mode: FollowMode) -> Result<u64, Diagnostic> {
-        Ok(self.active_metadata(follow_mode)?.blocks())
+        self.active_view(follow_mode)?
+            .blocks_512
+            .ok_or_else(|| missing_field("block count", &self.path))
     }
 
     pub fn access(&self, mode: AccessMode) -> Result<bool, Diagnostic> {
@@ -385,39 +326,18 @@ impl EntryContext {
     }
 
     pub fn active_mount_id(&self, follow_mode: FollowMode) -> Result<u64, Diagnostic> {
-        if self.uses_logical_view(follow_mode)
-            && self.physical_kind()? == EntryKind::Symlink
-            && self.logical_metadata().is_some()
-        {
-            return self.logical_mount_id();
-        }
-
-        self.physical_mount_id()
+        Ok(self
+            .active_view(follow_mode)?
+            .filesystem_key
+            .ok_or_else(|| missing_field("filesystem boundary key", &self.path))?
+            .0)
     }
 
     pub fn active_birth_time(
         &self,
         follow_mode: FollowMode,
     ) -> Result<Option<Timestamp>, Diagnostic> {
-        if self.uses_logical_view(follow_mode) && self.physical_kind()? == EntryKind::Symlink {
-            match self
-                .data
-                .logical_birth_time
-                .get_or_init(|| read_birth_time(&self.path, true))
-            {
-                Ok(timestamp) => Ok(*timestamp),
-                Err(error) => Err(error.clone()),
-            }
-        } else {
-            match self
-                .data
-                .physical_birth_time
-                .get_or_init(|| read_birth_time(&self.path, false))
-            {
-                Ok(timestamp) => Ok(*timestamp),
-                Err(error) => Err(error.clone()),
-            }
-        }
+        Ok(self.active_view(follow_mode)?.birth_time)
     }
 
     pub fn active_is_empty(&self, follow_mode: FollowMode) -> Result<bool, Diagnostic> {
@@ -427,7 +347,7 @@ impl EntryContext {
                 // GNU find evaluates predicates against one metadata snapshot per entry.
                 // Loading the active metadata before probing the directory prevents the
                 // probe from changing atime and influencing later metadata predicates.
-                let _ = self.active_metadata(follow_mode)?;
+                let _ = self.active_view(follow_mode)?;
 
                 match self.data.active_directory_empty.get_or_init(|| {
                     self.data
@@ -446,9 +366,9 @@ impl EntryContext {
     pub fn active_kind(&self, follow_mode: FollowMode) -> Result<EntryKind, Diagnostic> {
         if self.uses_logical_view(follow_mode)
             && self.physical_kind()? == EntryKind::Symlink
-            && let Some(metadata) = self.logical_metadata()
+            && let Some(view) = self.logical_view()
         {
-            return Ok(file_type_to_kind(metadata.file_type()));
+            return Ok(view.kind);
         }
 
         self.physical_kind()
@@ -463,10 +383,8 @@ impl EntryContext {
             return Ok(PrintfTargetKind::Kind(active_kind));
         }
 
-        match self.data.reader.metadata(&self.path) {
-            Ok(metadata) => Ok(PrintfTargetKind::Kind(file_type_to_kind(
-                metadata.file_type(),
-            ))),
+        match self.data.reader.metadata_view(&self.path, true) {
+            Ok(view) => Ok(PrintfTargetKind::Kind(view.kind)),
             Err(error) => Ok(match error.raw_os_error() {
                 Some(libc::ELOOP) => PrintfTargetKind::Loop,
                 Some(libc::ENOENT) => PrintfTargetKind::Missing,
@@ -521,7 +439,7 @@ impl EntryContext {
         match follow_mode {
             FollowMode::Physical => self.physical_link_target(),
             FollowMode::CommandLineOnly if self.is_command_line_root => {
-                if self.logical_metadata().is_some() {
+                if self.logical_view().is_some() {
                     Ok(None)
                 } else {
                     self.physical_link_target()
@@ -529,7 +447,7 @@ impl EntryContext {
             }
             FollowMode::CommandLineOnly => self.physical_link_target(),
             FollowMode::Logical => {
-                if self.logical_metadata().is_some() {
+                if self.logical_view().is_some() {
                     Ok(None)
                 } else {
                     self.physical_link_target()
@@ -546,51 +464,27 @@ impl EntryContext {
         }
     }
 
-    fn physical_metadata(&self) -> Result<&Metadata, Diagnostic> {
-        match self.data.physical_metadata.get_or_init(|| {
+    fn physical_view(&self) -> Result<&PlatformMetadataView, Diagnostic> {
+        match self.data.physical_view.get_or_init(|| {
             self.data
                 .reader
-                .symlink_metadata(&self.path)
+                .metadata_view(&self.path, false)
                 .map_err(|error| path_error(&self.path, error))
         }) {
-            Ok(metadata) => Ok(metadata),
+            Ok(view) => Ok(view),
             Err(error) => Err(error.clone()),
         }
     }
 
-    fn logical_metadata(&self) -> Option<&Metadata> {
+    fn logical_view(&self) -> Option<&PlatformMetadataView> {
         if self.physical_kind().ok()? != EntryKind::Symlink {
             return None;
         }
 
         self.data
-            .logical_metadata
-            .get_or_init(|| self.data.reader.metadata(&self.path).ok())
+            .logical_view
+            .get_or_init(|| self.data.reader.metadata_view(&self.path, true).ok())
             .as_ref()
-    }
-
-    fn physical_mount_id(&self) -> Result<u64, Diagnostic> {
-        match self.data.physical_mount_id.get_or_init(|| {
-            self.data
-                .reader
-                .mount_id(&self.path, false)
-                .map_err(|error| path_error(&self.path, error))
-        }) {
-            Ok(mount_id) => Ok(*mount_id),
-            Err(error) => Err(error.clone()),
-        }
-    }
-
-    fn logical_mount_id(&self) -> Result<u64, Diagnostic> {
-        match self.data.logical_mount_id.get_or_init(|| {
-            self.data
-                .reader
-                .mount_id(&self.path, true)
-                .map_err(|error| path_error(&self.path, error))
-        }) {
-            Ok(mount_id) => Ok(*mount_id),
-            Err(error) => Err(error.clone()),
-        }
     }
 }
 
@@ -618,75 +512,27 @@ fn path_error(path: &Path, error: io::Error) -> Diagnostic {
     Diagnostic::new(format!("{}: {error}", path.display()), 1)
 }
 
-fn read_mount_id(path: &Path, follow: bool) -> io::Result<u64> {
-    let c_path = CString::new(path.as_os_str().as_bytes())
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid path"))?;
-    let mut statx = MaybeUninit::<libc::statx>::zeroed();
-    let flags = if follow {
-        libc::AT_STATX_SYNC_AS_STAT
-    } else {
-        libc::AT_STATX_SYNC_AS_STAT | libc::AT_SYMLINK_NOFOLLOW
-    };
-
-    let rc = unsafe {
-        libc::statx(
-            libc::AT_FDCWD,
-            c_path.as_ptr(),
-            flags,
-            libc::STATX_MNT_ID,
-            statx.as_mut_ptr(),
-        )
-    };
-    if rc != 0 {
-        return Err(io::Error::last_os_error());
-    }
-
-    let statx = unsafe { statx.assume_init() };
-    if statx.stx_mask & libc::STATX_MNT_ID == 0 {
-        return Err(io::Error::from_raw_os_error(libc::EOPNOTSUPP));
-    }
-
-    Ok(statx.stx_mnt_id)
-}
-
+#[cfg(test)]
 fn read_access(path: &Path, mode: AccessMode) -> io::Result<bool> {
-    let c_path = CString::new(path.as_os_str().as_bytes())
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid path"))?;
-
-    read_access_with(c_path.as_ptr(), mode, faccessat_access, access_access)
+    crate::platform::filesystem::read_access(path, mode)
 }
 
+#[cfg(test)]
 fn read_access_with(
     path: *const libc::c_char,
     mode: AccessMode,
     primary: impl FnOnce(*const libc::c_char, AccessMode) -> io::Result<bool>,
     fallback: impl FnOnce(*const libc::c_char, AccessMode) -> io::Result<bool>,
 ) -> io::Result<bool> {
-    match primary(path, mode) {
-        Ok(result) => Ok(result),
-        Err(error) if error.raw_os_error() == Some(libc::ENOSYS) => fallback(path, mode),
-        Err(error) => Err(error),
-    }
-}
-
-fn faccessat_access(path: *const libc::c_char, mode: AccessMode) -> io::Result<bool> {
-    let rc = unsafe { libc::faccessat(libc::AT_FDCWD, path, mode.as_flag(), 0) };
-    if rc == 0 {
-        Ok(true)
-    } else {
-        Err(io::Error::last_os_error())
-    }
-}
-
-fn access_access(path: *const libc::c_char, mode: AccessMode) -> io::Result<bool> {
-    let rc = unsafe { libc::access(path, mode.as_flag()) };
-    if rc == 0 { Ok(true) } else { Ok(false) }
+    crate::platform::filesystem::read_access_with(path, mode, primary, fallback)
 }
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    use super::{AccessMode, EntryContext, EntryReader};
-    use std::fs::Metadata;
+    use super::{AccessMode, EntryContext};
+    use crate::platform::filesystem::{
+        PlatformMetadataView, PlatformReader, metadata_view_from_metadata,
+    };
     use std::io;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
@@ -742,15 +588,16 @@ pub(crate) mod test_support {
         }
     }
 
-    impl EntryReader for CountingReader {
-        fn symlink_metadata(&self, path: &Path) -> io::Result<Metadata> {
-            self.symlink_metadata_calls.fetch_add(1, Ordering::SeqCst);
-            std::fs::symlink_metadata(path)
-        }
-
-        fn metadata(&self, path: &Path) -> io::Result<Metadata> {
-            self.metadata_calls.fetch_add(1, Ordering::SeqCst);
-            std::fs::metadata(path)
+    impl PlatformReader for CountingReader {
+        fn metadata_view(&self, path: &Path, follow: bool) -> io::Result<PlatformMetadataView> {
+            let metadata = if follow {
+                self.metadata_calls.fetch_add(1, Ordering::SeqCst);
+                std::fs::metadata(path)
+            } else {
+                self.symlink_metadata_calls.fetch_add(1, Ordering::SeqCst);
+                std::fs::symlink_metadata(path)
+            }?;
+            Ok(metadata_view_from_metadata(path, &metadata, follow))
         }
 
         fn read_link(&self, path: &Path) -> io::Result<PathBuf> {
@@ -767,10 +614,6 @@ pub(crate) mod test_support {
             }
         }
 
-        fn mount_id(&self, path: &Path, follow: bool) -> io::Result<u64> {
-            super::read_mount_id(path, follow)
-        }
-
         fn access(&self, path: &Path, mode: AccessMode) -> io::Result<bool> {
             match mode {
                 AccessMode::Read => self.read_access_calls.fetch_add(1, Ordering::SeqCst),
@@ -780,23 +623,150 @@ pub(crate) mod test_support {
             super::read_access(path, mode)
         }
     }
+
+    #[derive(Clone)]
+    pub(crate) struct FakePlatformReader {
+        physical_view: PlatformMetadataView,
+        logical_view: Option<PlatformMetadataView>,
+    }
+
+    impl FakePlatformReader {
+        pub(crate) fn with_view(view: PlatformMetadataView) -> Self {
+            Self {
+                physical_view: view.clone(),
+                logical_view: Some(view),
+            }
+        }
+    }
+
+    impl PlatformReader for FakePlatformReader {
+        fn metadata_view(&self, _path: &Path, follow: bool) -> io::Result<PlatformMetadataView> {
+            if follow {
+                self.logical_view
+                    .clone()
+                    .ok_or_else(|| io::Error::from_raw_os_error(libc::ENOENT))
+            } else {
+                Ok(self.physical_view.clone())
+            }
+        }
+
+        fn read_link(&self, _path: &Path) -> io::Result<PathBuf> {
+            Err(io::Error::from_raw_os_error(libc::ENOENT))
+        }
+
+        fn directory_is_empty(&self, _path: &Path) -> io::Result<bool> {
+            Ok(false)
+        }
+
+        fn access(&self, _path: &Path, _mode: AccessMode) -> io::Result<bool> {
+            Ok(false)
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::EntryContext;
     use super::test_support::CountingReader;
-    use super::{AccessMode, EntryKind, EntryReader};
+    use super::{AccessMode, EntryKind};
     use crate::follow::FollowMode;
+    use crate::platform::filesystem::{FilesystemKey, PlatformMetadataView};
+    use crate::platform::filesystem::{PlatformReader, metadata_view_from_metadata};
+    use crate::time::Timestamp;
     use std::ffi::OsString;
     use std::fs;
-    use std::fs::Metadata;
     use std::io;
     use std::os::unix::ffi::OsStrExt;
     use std::os::unix::fs as unix_fs;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
     use tempfile::tempdir;
+
+    #[test]
+    fn entry_accessors_read_from_the_platform_metadata_view() {
+        let entry = EntryContext::new_with_reader(
+            PathBuf::from("alpha"),
+            0,
+            true,
+            Arc::new(super::test_support::FakePlatformReader::with_view(
+                PlatformMetadataView {
+                    kind: EntryKind::File,
+                    identity: Some(crate::identity::FileIdentity { dev: 11, ino: 22 }),
+                    size: 99,
+                    owner: Some(501),
+                    group: Some(20),
+                    mode_bits: Some(0o640),
+                    link_count: Some(2),
+                    blocks_512: Some(8),
+                    atime: Timestamp::new(10, 1),
+                    ctime: Timestamp::new(11, 2),
+                    mtime: Timestamp::new(12, 3),
+                    birth_time: Some(Timestamp::new(13, 4)),
+                    filesystem_key: Some(FilesystemKey(7)),
+                    device_number: None,
+                },
+            )),
+        );
+
+        assert_eq!(entry.active_uid(FollowMode::Physical).unwrap(), 501);
+        assert_eq!(entry.active_gid(FollowMode::Physical).unwrap(), 20);
+        assert_eq!(entry.active_blocks(FollowMode::Physical).unwrap(), 8);
+        assert_eq!(entry.active_mount_id(FollowMode::Physical).unwrap(), 7);
+        assert_eq!(
+            entry.active_birth_time(FollowMode::Physical).unwrap(),
+            Some(Timestamp::new(13, 4))
+        );
+    }
+
+    #[test]
+    fn missing_optional_fields_raise_feature_specific_errors() {
+        let entry = EntryContext::new_with_reader(
+            PathBuf::from("alpha"),
+            0,
+            true,
+            Arc::new(super::test_support::FakePlatformReader::with_view(
+                PlatformMetadataView {
+                    kind: EntryKind::File,
+                    identity: Some(crate::identity::FileIdentity { dev: 11, ino: 22 }),
+                    size: 99,
+                    owner: None,
+                    group: None,
+                    mode_bits: Some(0o640),
+                    link_count: Some(2),
+                    blocks_512: None,
+                    atime: Timestamp::new(10, 1),
+                    ctime: Timestamp::new(11, 2),
+                    mtime: Timestamp::new(12, 3),
+                    birth_time: None,
+                    filesystem_key: None,
+                    device_number: None,
+                },
+            )),
+        );
+
+        assert!(
+            entry
+                .active_uid(FollowMode::Physical)
+                .unwrap_err()
+                .message
+                .contains("owner")
+        );
+        assert!(
+            entry
+                .active_blocks(FollowMode::Physical)
+                .unwrap_err()
+                .message
+                .contains("block")
+        );
+        assert!(
+            entry
+                .active_mount_id(FollowMode::Physical)
+                .unwrap_err()
+                .message
+                .contains("filesystem")
+        );
+        assert_eq!(entry.active_birth_time(FollowMode::Physical).unwrap(), None);
+    }
 
     #[test]
     fn basename_style_access_does_not_fetch_metadata() {
@@ -983,7 +953,7 @@ mod tests {
     }
 
     #[test]
-    fn active_mount_id_does_not_swallow_logical_mount_lookup_failures() {
+    fn active_mount_id_reports_missing_filesystem_key_when_logical_view_lacks_it() {
         let root = tempdir().unwrap();
         fs::create_dir(root.path().join("real")).unwrap();
         unix_fs::symlink(root.path().join("real"), root.path().join("dir-link")).unwrap();
@@ -996,7 +966,7 @@ mod tests {
         let entry = EntryContext::new_with_reader(root.path().join("dir-link"), 0, true, reader);
 
         let error = entry.active_mount_id(FollowMode::Logical).unwrap_err();
-        assert!(error.message.contains("Operation not supported"));
+        assert!(error.message.contains("filesystem boundary key"));
     }
 
     #[derive(Clone)]
@@ -1006,13 +976,21 @@ mod tests {
         fail_logical_mount_id: bool,
     }
 
-    impl EntryReader for MountIdOverrideReader {
-        fn symlink_metadata(&self, path: &Path) -> io::Result<Metadata> {
-            std::fs::symlink_metadata(path)
-        }
-
-        fn metadata(&self, path: &Path) -> io::Result<Metadata> {
-            std::fs::metadata(path)
+    impl PlatformReader for MountIdOverrideReader {
+        fn metadata_view(&self, path: &Path, follow: bool) -> io::Result<PlatformMetadataView> {
+            let metadata = if follow {
+                std::fs::metadata(path)
+            } else {
+                std::fs::symlink_metadata(path)
+            }?;
+            let mut view = metadata_view_from_metadata(path, &metadata, follow);
+            view.filesystem_key = match (follow, self.fail_logical_mount_id, self.logical_mount_id)
+            {
+                (true, true, _) => None,
+                (true, false, Some(mount_id)) => Some(FilesystemKey(mount_id)),
+                _ => Some(FilesystemKey(self.physical_mount_id)),
+            };
+            Ok(view)
         }
 
         fn read_link(&self, path: &Path) -> io::Result<PathBuf> {
@@ -1024,17 +1002,6 @@ mod tests {
             match entries.next() {
                 None => Ok(true),
                 Some(result) => result.map(|_| false),
-            }
-        }
-
-        fn mount_id(&self, _path: &Path, follow: bool) -> io::Result<u64> {
-            if follow && self.fail_logical_mount_id {
-                return Err(io::Error::from_raw_os_error(libc::EOPNOTSUPP));
-            }
-
-            match (follow, self.logical_mount_id) {
-                (true, Some(mount_id)) => Ok(mount_id),
-                _ => Ok(self.physical_mount_id),
             }
         }
 
@@ -1050,13 +1017,14 @@ mod tests {
         executable: Result<bool, i32>,
     }
 
-    impl EntryReader for AccessOverrideReader {
-        fn symlink_metadata(&self, path: &Path) -> io::Result<Metadata> {
-            std::fs::symlink_metadata(path)
-        }
-
-        fn metadata(&self, path: &Path) -> io::Result<Metadata> {
-            std::fs::metadata(path)
+    impl PlatformReader for AccessOverrideReader {
+        fn metadata_view(&self, path: &Path, follow: bool) -> io::Result<PlatformMetadataView> {
+            let metadata = if follow {
+                std::fs::metadata(path)
+            } else {
+                std::fs::symlink_metadata(path)
+            }?;
+            Ok(metadata_view_from_metadata(path, &metadata, follow))
         }
 
         fn read_link(&self, path: &Path) -> io::Result<PathBuf> {
@@ -1069,10 +1037,6 @@ mod tests {
                 None => Ok(true),
                 Some(result) => result.map(|_| false),
             }
-        }
-
-        fn mount_id(&self, path: &Path, follow: bool) -> io::Result<u64> {
-            super::read_mount_id(path, follow)
         }
 
         fn access(&self, _path: &Path, mode: AccessMode) -> io::Result<bool> {

@@ -62,8 +62,12 @@ fn ordered_printf_renders_metadata_and_link_directives() {
     );
 
     let stdout = String::from_utf8(output.stdout).unwrap();
+    let link_mode = fs::symlink_metadata(root.path().join("link.txt"))
+        .unwrap()
+        .mode()
+        & 0o7777;
     assert!(stdout.contains("[file.txt][f][5][640][]"));
-    assert!(stdout.contains("[link.txt][l][8][777][file.txt]"));
+    assert!(stdout.contains(&format!("[link.txt][l][8][{:o}][file.txt]", link_mode)));
 }
 
 #[test]
@@ -250,12 +254,57 @@ fn ordered_printf_renders_sparseness_for_dense_and_sparse_files() {
     );
 
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("zero:0:0:1"));
-    assert!(stdout.contains("one:1:8:4096"));
-    assert!(stdout.contains("tiny:3:8:1365.33"));
-    assert!(stdout.contains("fivek:5000:16:1.6384"));
-    assert!(stdout.contains("holey:8192:8:0.5"));
-    assert!(stdout.contains("trunc8k:8192:0:0"));
+    for name in ["zero", "one", "tiny", "fivek", "holey", "trunc8k"] {
+        let metadata = fs::metadata(root.path().join(name)).unwrap();
+        assert!(stdout.contains(&format!(
+            "{name}:{}:{}:{}",
+            metadata.len(),
+            metadata.blocks(),
+            format_sparseness_ascii(metadata.len(), metadata.blocks()),
+        )));
+    }
+}
+
+fn format_sparseness_ascii(size: u64, blocks: u64) -> String {
+    if size == 0 {
+        return "1".to_string();
+    }
+
+    format_six_sigfigs_ascii((blocks as f64 * 512.0) / size as f64)
+}
+
+fn format_six_sigfigs_ascii(value: f64) -> String {
+    if value == 0.0 {
+        return "0".to_string();
+    }
+
+    let exponent = value.abs().log10().floor() as i32;
+    if !(-4..6).contains(&exponent) {
+        return trim_ascii_float(format!("{value:.5e}"));
+    }
+
+    let precision = (5 - exponent).max(0) as usize;
+    trim_ascii_float(format!("{value:.precision$}", precision = precision))
+}
+
+fn trim_ascii_float(text: String) -> String {
+    match text.split_once('e') {
+        Some((mantissa, exponent)) => {
+            format!("{}e{}", trim_ascii_decimal(mantissa), exponent)
+        }
+        None => trim_ascii_decimal(&text),
+    }
+}
+
+fn trim_ascii_decimal(text: &str) -> String {
+    let mut out = text.to_string();
+    while out.contains('.') && out.ends_with('0') {
+        out.pop();
+    }
+    if out.ends_with('.') {
+        out.pop();
+    }
+    out
 }
 
 #[test]

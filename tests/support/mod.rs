@@ -4,6 +4,7 @@ pub mod gnu;
 pub mod planner;
 
 use assert_cmd::cargo::cargo_bin;
+use rushfind::birth::read_birth_time;
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::io::Write;
@@ -16,8 +17,8 @@ pub use gnu::{
     PRINTF_TIME_TZ, assert_file_output_matches_gnu_with_env, assert_matches_gnu_as_sets,
     assert_matches_gnu_as_sets_with_env, assert_matches_gnu_exact,
     assert_matches_gnu_exact_with_env, assert_matches_gnu_exact_with_input,
-    assert_matches_gnu_regex_outcome, assert_matches_gnu_regex_outcome_as_sets,
-    normalize_warning_program,
+    assert_matches_gnu_regex_outcome, assert_matches_gnu_regex_outcome_as_sets, ensure_gnu_find,
+    gnu_find_command, gnu_find_output, normalize_warning_program,
 };
 pub use planner::{action_labels, contains_action, contains_predicate, predicate_labels};
 
@@ -169,4 +170,25 @@ pub fn first_available_locale(candidates: &[&str]) -> Option<String> {
             .find(|line| *line == *candidate)
             .map(str::to_string)
     })
+}
+
+pub fn existing_path_without_birth_time() -> Option<std::path::PathBuf> {
+    for candidate in [
+        "/proc/self/stat",
+        "/proc/self/status",
+        "/dev/null",
+        "/dev/zero",
+        "/dev/fd/0",
+    ] {
+        let path = Path::new(candidate);
+        if !path.exists() {
+            continue;
+        }
+
+        if matches!(read_birth_time(path, true), Ok(None)) {
+            return Some(path.to_path_buf());
+        }
+    }
+
+    None
 }

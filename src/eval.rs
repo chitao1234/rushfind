@@ -3,9 +3,9 @@ use crate::ast::FileTypeFilter;
 use crate::diagnostics::Diagnostic;
 use crate::entry::{AccessMode, EntryContext, EntryKind};
 use crate::follow::FollowMode;
-use crate::mounts::MountSnapshot;
 use crate::pattern::matches_pattern;
 use crate::planner::{RuntimeAction, RuntimeExpr, RuntimePredicate};
+use crate::platform::filesystem::{FilesystemKey, FilesystemSnapshot};
 use crate::runtime_pipeline::{EvalStep, begin_entry_eval, resume_entry_eval};
 use crate::time::{NewerMatcher, Timestamp, TimestampKind};
 use std::ffi::OsStr;
@@ -94,7 +94,7 @@ pub(crate) struct EvalOutcome {
 
 #[derive(Debug, Clone, Default)]
 pub struct EvalContext {
-    mount_snapshot: Option<Arc<MountSnapshot>>,
+    mount_snapshot: Option<Arc<FilesystemSnapshot>>,
     evaluation_now: Option<Timestamp>,
 }
 
@@ -108,21 +108,24 @@ impl EvalContext {
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn with_mount_snapshot(snapshot: MountSnapshot) -> Self {
+    pub(crate) fn with_mount_snapshot(snapshot: FilesystemSnapshot) -> Self {
         Self {
             mount_snapshot: Some(Arc::new(snapshot)),
             evaluation_now: None,
         }
     }
 
-    pub(crate) fn with_mount_snapshot_and_now(snapshot: MountSnapshot, now: Timestamp) -> Self {
+    pub(crate) fn with_mount_snapshot_and_now(
+        snapshot: FilesystemSnapshot,
+        now: Timestamp,
+    ) -> Self {
         Self {
             mount_snapshot: Some(Arc::new(snapshot)),
             evaluation_now: Some(now),
         }
     }
 
-    pub(crate) fn mount_snapshot(&self) -> Result<&MountSnapshot, Diagnostic> {
+    pub(crate) fn mount_snapshot(&self) -> Result<&FilesystemSnapshot, Diagnostic> {
         self.mount_snapshot.as_deref().ok_or_else(|| {
             Diagnostic::new(
                 "internal error: -fstype and -printf %F require a mount snapshot runtime context",
@@ -212,9 +215,9 @@ pub(crate) fn evaluate_predicate(
                 return Ok(false);
             }
 
-            let mount_id = entry.active_mount_id(follow_mode)?;
+            let mount_key = FilesystemKey(entry.active_mount_id(follow_mode)?);
             Ok(snapshot
-                .type_for_mount_id(mount_id)
+                .type_for_mount_key(mount_key)
                 .is_some_and(|actual| actual == type_name.as_os_str()))
         }
         RuntimePredicate::Readable => entry.access(AccessMode::Read),
@@ -338,13 +341,16 @@ mod tests {
     };
     use crate::diagnostics::Diagnostic;
     use crate::entry::test_support::CountingReader;
-    use crate::entry::{AccessMode, EntryContext, EntryReader};
+    use crate::entry::{AccessMode, EntryContext};
     use crate::follow::FollowMode;
     use crate::mounts::MountSnapshot;
     use crate::output::RecordingSink;
     use crate::parser::parse_command;
     use crate::planner::{
         ExecutionPlan, OutputAction, RuntimeAction, RuntimeExpr, RuntimePredicate, plan_command,
+    };
+    use crate::platform::filesystem::{
+        PlatformMetadataView, PlatformReader, metadata_view_from_metadata,
     };
     use crate::printf::compile_printf_program;
     use crate::time::Timestamp;
@@ -713,13 +719,18 @@ mod tests {
         executable: bool,
     }
 
-    impl EntryReader for AccessResultReader {
-        fn symlink_metadata(&self, path: &std::path::Path) -> std::io::Result<std::fs::Metadata> {
-            std::fs::symlink_metadata(path)
-        }
-
-        fn metadata(&self, path: &std::path::Path) -> std::io::Result<std::fs::Metadata> {
-            std::fs::metadata(path)
+    impl PlatformReader for AccessResultReader {
+        fn metadata_view(
+            &self,
+            path: &std::path::Path,
+            follow: bool,
+        ) -> std::io::Result<PlatformMetadataView> {
+            let metadata = if follow {
+                std::fs::metadata(path)
+            } else {
+                std::fs::symlink_metadata(path)
+            }?;
+            Ok(metadata_view_from_metadata(path, &metadata, follow))
         }
 
         fn read_link(&self, path: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
@@ -732,11 +743,6 @@ mod tests {
                 None => Ok(true),
                 Some(result) => result.map(|_| false),
             }
-        }
-
-        fn mount_id(&self, path: &std::path::Path, follow: bool) -> std::io::Result<u64> {
-            let _ = (path, follow);
-            Ok(0)
         }
 
         fn access(&self, _path: &std::path::Path, mode: AccessMode) -> std::io::Result<bool> {

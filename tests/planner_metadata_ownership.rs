@@ -1,5 +1,6 @@
 mod support;
 
+use rushfind::account::{group_name, user_name};
 use rushfind::numeric::NumericComparison;
 use rushfind::parser::parse_command;
 use rushfind::planner::{RuntimeExpr, RuntimePredicate, plan_command};
@@ -9,7 +10,6 @@ use std::fs;
 #[cfg(unix)]
 use std::os::unix::ffi::OsStringExt;
 use std::os::unix::fs::MetadataExt;
-use std::process::Command;
 use support::argv;
 use tempfile::tempdir;
 
@@ -36,13 +36,26 @@ fn lowers_named_and_numeric_user_group_into_exact_ids() {
     let metadata = fs::metadata(root.path().join("file.txt")).unwrap();
     let uid = metadata.uid();
     let gid = metadata.gid();
-    let user = current_id_output("-un");
-    let group = current_id_output("-gn");
 
-    for args in [
-        argv(&[".", "-user", &user, "-group", &group]),
-        argv(&[".", "-user", &uid.to_string(), "-group", &gid.to_string()]),
-    ] {
+    let mut arg_sets = vec![vec![
+        ".".into(),
+        "-user".into(),
+        uid.to_string().into(),
+        "-group".into(),
+        gid.to_string().into(),
+    ]];
+
+    if let (Some(user), Some(group)) = (user_name(uid).unwrap(), group_name(gid).unwrap()) {
+        arg_sets.push(vec![
+            ".".into(),
+            "-user".into(),
+            user,
+            "-group".into(),
+            group,
+        ]);
+    }
+
+    for args in arg_sets {
         let plan = plan_command(parse_command(&args).unwrap(), 1).unwrap();
         let predicates = predicate_items(&plan.expr);
 
@@ -137,9 +150,4 @@ fn predicate_items(expr: &RuntimeExpr) -> Vec<&RuntimePredicate> {
         RuntimeExpr::Not(inner) => predicate_items(inner),
         RuntimeExpr::Action(_) | RuntimeExpr::Barrier => Vec::new(),
     }
-}
-
-fn current_id_output(flag: &str) -> String {
-    let output = Command::new("id").arg(flag).output().unwrap();
-    String::from_utf8(output.stdout).unwrap().trim().to_string()
 }

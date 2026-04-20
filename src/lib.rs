@@ -24,6 +24,7 @@ pub mod parser;
 pub mod pattern;
 pub mod perm;
 pub mod planner;
+pub(crate) mod platform;
 pub mod printf;
 pub(crate) mod printf_time;
 pub mod regex_match;

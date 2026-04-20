@@ -11,6 +11,7 @@ use crate::identity::FileIdentity;
 use crate::numeric::{NumericComparison, parse_numeric_argument};
 use crate::optimizer::optimize_read_only_and_chains;
 use crate::perm::{PermMatcher, parse_perm_argument};
+use crate::platform::{PlatformCapabilities, PlatformFeature, SupportLevel, active_capabilities};
 use crate::printf::{PrintfProgram, compile_printf_program};
 use crate::regex_match::{RegexDialect, RegexMatcher};
 use crate::runtime_policy::{RuntimePolicy, build_traversal_control_plan};
@@ -193,6 +194,15 @@ pub fn plan_command_with_now(
     workers: usize,
     now: Timestamp,
 ) -> Result<ExecutionPlan, Diagnostic> {
+    plan_command_with_now_and_capabilities(ast, workers, now, active_capabilities())
+}
+
+pub(crate) fn plan_command_with_now_and_capabilities(
+    ast: CommandAst,
+    workers: usize,
+    now: Timestamp,
+    capabilities: &PlatformCapabilities,
+) -> Result<ExecutionPlan, Diagnostic> {
     let follow_mode = resolve_follow_mode(&ast.global_options);
     let CommandAst {
         start_paths, expr, ..
@@ -209,20 +219,15 @@ pub fn plan_command_with_now(
         execdir_requires_safe_path: false,
         messages_locale_required: false,
     };
-    let mut state = PlanningState {
-        temporal: TemporalPlanningState {
-            now,
-            daystart_active: false,
-        },
-        regex_dialect: RegexDialect::Emacs,
-        saw_action: false,
-        saw_delete: false,
-        next_exec_batch_id: 0,
-        startup_warnings: Vec::new(),
-        file_outputs: Vec::new(),
-        file_output_ids: BTreeMap::new(),
-    };
-    let lowered = lower_expr(expr, &mut traversal, &mut runtime, &mut state, follow_mode)?;
+    let mut state = PlanningState::new(now);
+    let lowered = lower_expr(
+        expr,
+        &mut traversal,
+        &mut runtime,
+        &mut state,
+        follow_mode,
+        capabilities,
+    )?;
     let lowered = optimize_read_only_and_chains(lowered);
 
     if state.saw_delete {
@@ -330,24 +335,49 @@ fn resolve_follow_mode(global_options: &[GlobalOption]) -> FollowMode {
         })
 }
 
+fn require_platform_feature(
+    capabilities: &PlatformCapabilities,
+    feature: PlatformFeature,
+    state: &mut PlanningState,
+) -> Result<(), Diagnostic> {
+    match capabilities.support(feature) {
+        SupportLevel::Exact => Ok(()),
+        SupportLevel::Approximate(message) => {
+            state
+                .startup_warnings
+                .push(format!("rfd: warning: {message}"));
+            Ok(())
+        }
+        SupportLevel::Unsupported(message) => Err(Diagnostic::unsupported(message)),
+    }
+}
+
 fn lower_expr(
     expr: Expr,
     traversal: &mut TraversalOptions,
     runtime: &mut RuntimeRequirements,
     state: &mut PlanningState,
     follow_mode: FollowMode,
+    capabilities: &PlatformCapabilities,
 ) -> Result<RuntimeExpr, Diagnostic> {
     match expr {
         Expr::And(items) => {
             let mut lowered = Vec::with_capacity(items.len());
             for item in items {
-                lowered.push(lower_expr(item, traversal, runtime, state, follow_mode)?);
+                lowered.push(lower_expr(
+                    item,
+                    traversal,
+                    runtime,
+                    state,
+                    follow_mode,
+                    capabilities,
+                )?);
             }
             Ok(RuntimeExpr::and(lowered))
         }
         Expr::Or(left, right) => Ok(RuntimeExpr::or(
-            lower_expr(*left, traversal, runtime, state, follow_mode)?,
-            lower_expr(*right, traversal, runtime, state, follow_mode)?,
+            lower_expr(*left, traversal, runtime, state, follow_mode, capabilities)?,
+            lower_expr(*right, traversal, runtime, state, follow_mode, capabilities)?,
         )),
         Expr::Not(inner) => Ok(RuntimeExpr::negate(lower_expr(
             *inner,
@@ -355,11 +385,17 @@ fn lower_expr(
             runtime,
             state,
             follow_mode,
+            capabilities,
         )?)),
-        Expr::Predicate(predicate) => {
-            lower_predicate(predicate, traversal, runtime, state, follow_mode)
-        }
-        Expr::Action(action) => lower_action(action, runtime, state),
+        Expr::Predicate(predicate) => lower_predicate(
+            predicate,
+            traversal,
+            runtime,
+            state,
+            follow_mode,
+            capabilities,
+        ),
+        Expr::Action(action) => lower_action(action, runtime, state, capabilities),
     }
 }
 
@@ -369,6 +405,7 @@ fn lower_predicate(
     runtime: &mut RuntimeRequirements,
     state: &mut PlanningState,
     follow_mode: FollowMode,
+    capabilities: &PlatformCapabilities,
 ) -> Result<RuntimeExpr, Diagnostic> {
     match predicate {
         Predicate::MaxDepth(value) => {
@@ -385,26 +422,54 @@ fn lower_predicate(
         }
         Predicate::Prune => Ok(RuntimeExpr::Predicate(RuntimePredicate::Prune)),
         Predicate::XDev => {
+            require_platform_feature(capabilities, PlatformFeature::SameFileSystem, state)?;
             traversal.same_file_system = true;
             Ok(RuntimeExpr::Barrier)
         }
-        Predicate::Readable => Ok(RuntimeExpr::Predicate(RuntimePredicate::Readable)),
-        Predicate::Writable => Ok(RuntimeExpr::Predicate(RuntimePredicate::Writable)),
-        Predicate::Executable => Ok(RuntimeExpr::Predicate(RuntimePredicate::Executable)),
+        Predicate::Readable => {
+            require_platform_feature(capabilities, PlatformFeature::AccessPredicates, state)?;
+            Ok(RuntimeExpr::Predicate(RuntimePredicate::Readable))
+        }
+        Predicate::Writable => {
+            require_platform_feature(capabilities, PlatformFeature::AccessPredicates, state)?;
+            Ok(RuntimeExpr::Predicate(RuntimePredicate::Writable))
+        }
+        Predicate::Executable => {
+            require_platform_feature(capabilities, PlatformFeature::AccessPredicates, state)?;
+            Ok(RuntimeExpr::Predicate(RuntimePredicate::Executable))
+        }
         Predicate::Name {
             pattern,
             case_insensitive,
-        } => Ok(RuntimeExpr::Predicate(RuntimePredicate::Name {
-            pattern,
-            case_insensitive,
-        })),
+        } => {
+            if case_insensitive {
+                require_platform_feature(
+                    capabilities,
+                    PlatformFeature::CaseInsensitiveGlob,
+                    state,
+                )?;
+            }
+            Ok(RuntimeExpr::Predicate(RuntimePredicate::Name {
+                pattern,
+                case_insensitive,
+            }))
+        }
         Predicate::Path {
             pattern,
             case_insensitive,
-        } => Ok(RuntimeExpr::Predicate(RuntimePredicate::Path {
-            pattern,
-            case_insensitive,
-        })),
+        } => {
+            if case_insensitive {
+                require_platform_feature(
+                    capabilities,
+                    PlatformFeature::CaseInsensitiveGlob,
+                    state,
+                )?;
+            }
+            Ok(RuntimeExpr::Predicate(RuntimePredicate::Path {
+                pattern,
+                case_insensitive,
+            }))
+        }
         Predicate::Regex {
             pattern,
             case_insensitive,
@@ -425,6 +490,7 @@ fn lower_predicate(
             Ok(RuntimeExpr::Barrier)
         }
         Predicate::FsType(type_name) => {
+            require_platform_feature(capabilities, PlatformFeature::FsType, state)?;
             runtime.mount_snapshot = true;
             Ok(RuntimeExpr::Predicate(RuntimePredicate::FsType(type_name)))
         }
@@ -440,24 +506,51 @@ fn lower_predicate(
         Predicate::LName {
             pattern,
             case_insensitive,
-        } => Ok(RuntimeExpr::Predicate(RuntimePredicate::LName {
-            pattern,
-            case_insensitive,
-        })),
-        Predicate::Uid(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Uid(
-            parse_numeric_argument("-uid", raw.as_os_str())?,
-        ))),
-        Predicate::Gid(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Gid(
-            parse_numeric_argument("-gid", raw.as_os_str())?,
-        ))),
-        Predicate::User(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::User(
-            resolve_user_id(raw.as_os_str())?,
-        ))),
-        Predicate::Group(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Group(
-            resolve_group_id(raw.as_os_str())?,
-        ))),
-        Predicate::NoUser => Ok(RuntimeExpr::Predicate(RuntimePredicate::NoUser)),
-        Predicate::NoGroup => Ok(RuntimeExpr::Predicate(RuntimePredicate::NoGroup)),
+        } => {
+            if case_insensitive {
+                require_platform_feature(
+                    capabilities,
+                    PlatformFeature::CaseInsensitiveGlob,
+                    state,
+                )?;
+            }
+            Ok(RuntimeExpr::Predicate(RuntimePredicate::LName {
+                pattern,
+                case_insensitive,
+            }))
+        }
+        Predicate::Uid(raw) => {
+            require_platform_feature(capabilities, PlatformFeature::Ownership, state)?;
+            Ok(RuntimeExpr::Predicate(RuntimePredicate::Uid(
+                parse_numeric_argument("-uid", raw.as_os_str())?,
+            )))
+        }
+        Predicate::Gid(raw) => {
+            require_platform_feature(capabilities, PlatformFeature::Ownership, state)?;
+            Ok(RuntimeExpr::Predicate(RuntimePredicate::Gid(
+                parse_numeric_argument("-gid", raw.as_os_str())?,
+            )))
+        }
+        Predicate::User(raw) => {
+            require_platform_feature(capabilities, PlatformFeature::Ownership, state)?;
+            Ok(RuntimeExpr::Predicate(RuntimePredicate::User(
+                resolve_user_id(raw.as_os_str())?,
+            )))
+        }
+        Predicate::Group(raw) => {
+            require_platform_feature(capabilities, PlatformFeature::Ownership, state)?;
+            Ok(RuntimeExpr::Predicate(RuntimePredicate::Group(
+                resolve_group_id(raw.as_os_str())?,
+            )))
+        }
+        Predicate::NoUser => {
+            require_platform_feature(capabilities, PlatformFeature::Ownership, state)?;
+            Ok(RuntimeExpr::Predicate(RuntimePredicate::NoUser))
+        }
+        Predicate::NoGroup => {
+            require_platform_feature(capabilities, PlatformFeature::Ownership, state)?;
+            Ok(RuntimeExpr::Predicate(RuntimePredicate::NoGroup))
+        }
         Predicate::Perm(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Perm(
             parse_perm_argument(raw.as_os_str())?,
         ))),
@@ -543,15 +636,20 @@ fn lower_predicate(
             current,
             reference,
             reference_arg,
-        } => Ok(RuntimeExpr::Predicate(RuntimePredicate::Newer(
-            resolve_reference_matcher(
-                "-newerXY",
-                current,
-                reference,
-                reference_arg.as_os_str(),
-                follow_mode,
-            )?,
-        ))),
+        } => {
+            if current == 'B' || reference == 'B' {
+                require_platform_feature(capabilities, PlatformFeature::BirthTime, state)?;
+            }
+            Ok(RuntimeExpr::Predicate(RuntimePredicate::Newer(
+                resolve_reference_matcher(
+                    "-newerXY",
+                    current,
+                    reference,
+                    reference_arg.as_os_str(),
+                    follow_mode,
+                )?,
+            )))
+        }
         Predicate::DayStart => {
             state.temporal.daystart_active = true;
             Ok(RuntimeExpr::Barrier)
@@ -591,6 +689,24 @@ impl TemporalPlanningState {
     }
 }
 
+impl PlanningState {
+    fn new(now: Timestamp) -> Self {
+        Self {
+            temporal: TemporalPlanningState {
+                now,
+                daystart_active: false,
+            },
+            regex_dialect: RegexDialect::Emacs,
+            saw_action: false,
+            saw_delete: false,
+            next_exec_batch_id: 0,
+            startup_warnings: Vec::new(),
+            file_outputs: Vec::new(),
+            file_output_ids: BTreeMap::new(),
+        }
+    }
+}
+
 fn resolve_samefile_reference(
     path: &Path,
     follow_mode: FollowMode,
@@ -624,6 +740,7 @@ fn lower_action(
     action: Action,
     runtime: &mut RuntimeRequirements,
     state: &mut PlanningState,
+    capabilities: &PlatformCapabilities,
 ) -> Result<RuntimeExpr, Diagnostic> {
     state.saw_action = true;
 
@@ -637,6 +754,7 @@ fn lower_action(
         Action::Printf { format } => {
             let compiled = compile_printf_program("-printf", format.as_os_str())?;
             if compiled.program.requires_mount_snapshot() {
+                require_platform_feature(capabilities, PlatformFeature::FsType, state)?;
                 runtime.mount_snapshot = true;
             }
             state.startup_warnings.extend(compiled.warnings);
@@ -653,6 +771,7 @@ fn lower_action(
         Action::FPrintf { path, format } => {
             let compiled = compile_printf_program("-fprintf", format.as_os_str())?;
             if compiled.program.requires_mount_snapshot() {
+                require_platform_feature(capabilities, PlatformFeature::FsType, state)?;
                 runtime.mount_snapshot = true;
             }
             state.startup_warnings.extend(compiled.warnings);
@@ -691,6 +810,7 @@ fn lower_action(
             )))
         }
         Action::Ok { argv, batch: false } => {
+            require_platform_feature(capabilities, PlatformFeature::MessagesLocale, state)?;
             runtime.messages_locale_required = true;
             Ok(RuntimeExpr::Action(RuntimeAction::ExecPrompt(
                 compile_immediate_exec(ExecSemantics::Normal, &argv),
@@ -700,6 +820,7 @@ fn lower_action(
             Err(Diagnostic::parse("`-ok` only supports the `;` terminator"))
         }
         Action::OkDir { argv, batch: false } => {
+            require_platform_feature(capabilities, PlatformFeature::MessagesLocale, state)?;
             runtime.messages_locale_required = true;
             runtime.execdir_requires_safe_path = true;
             Ok(RuntimeExpr::Action(RuntimeAction::ExecPrompt(
@@ -720,9 +841,74 @@ fn lower_action(
 mod tests {
     use super::*;
     use crate::parser::parse_command;
+    use crate::platform::{PlatformCapabilities, PlatformFeature, SupportLevel};
 
     fn argv(items: &[&str]) -> Vec<std::ffi::OsString> {
         items.iter().map(|item| (*item).into()).collect()
+    }
+
+    fn linux_like_caps() -> PlatformCapabilities {
+        PlatformCapabilities::for_tests()
+            .with(PlatformFeature::FsType, SupportLevel::Exact)
+            .with(PlatformFeature::SameFileSystem, SupportLevel::Exact)
+            .with(PlatformFeature::BirthTime, SupportLevel::Exact)
+            .with(PlatformFeature::Ownership, SupportLevel::Exact)
+            .with(PlatformFeature::AccessPredicates, SupportLevel::Exact)
+            .with(PlatformFeature::MessagesLocale, SupportLevel::Exact)
+            .with(PlatformFeature::CaseInsensitiveGlob, SupportLevel::Exact)
+    }
+
+    #[test]
+    fn unsupported_platform_features_fail_during_planning() {
+        let ast = parse_command(&argv(&[".", "-fstype", "tmpfs"])).unwrap();
+        let caps = linux_like_caps().with(
+            PlatformFeature::FsType,
+            SupportLevel::Unsupported("`-fstype` is not supported on this platform"),
+        );
+
+        let error = plan_command_with_now_and_capabilities(ast, 1, Timestamp::new(0, 0), &caps)
+            .unwrap_err();
+
+        assert!(error.message.contains("-fstype"));
+        assert!(error.message.contains("not supported"));
+    }
+
+    #[test]
+    fn approximate_platform_features_emit_startup_warning() {
+        let ast = parse_command(&argv(&[".", "-ok", "printf", "%s\\n", "{}", ";"])).unwrap();
+        let caps = linux_like_caps().with(
+            PlatformFeature::MessagesLocale,
+            SupportLevel::Approximate(
+                "interactive locale behavior is approximate on this platform",
+            ),
+        );
+
+        let plan =
+            plan_command_with_now_and_capabilities(ast, 1, Timestamp::new(0, 0), &caps).unwrap();
+
+        assert!(plan.runtime.messages_locale_required);
+        assert!(plan.startup_warnings.iter().any(|warning: &String| {
+            warning.contains("interactive locale behavior is approximate")
+        }));
+    }
+
+    #[test]
+    fn exact_platform_features_keep_existing_runtime_bits() {
+        let ast = parse_command(&argv(&[
+            ".", "-fstype", "tmpfs", "-xdev", "-printf", "%F\\n",
+        ]))
+        .unwrap();
+        let plan = plan_command_with_now_and_capabilities(
+            ast,
+            1,
+            Timestamp::new(0, 0),
+            &linux_like_caps(),
+        )
+        .unwrap();
+
+        assert!(plan.runtime.mount_snapshot);
+        assert!(plan.traversal.same_file_system);
+        assert!(matches!(plan.expr, RuntimeExpr::And(_)));
     }
 
     #[test]

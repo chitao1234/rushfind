@@ -3,7 +3,7 @@ mod support;
 use assert_cmd::cargo::CommandCargoExt;
 use std::fs;
 use std::process::Command;
-use support::path_arg;
+use support::{gnu_find_output, path_arg};
 use tempfile::tempdir;
 
 #[test]
@@ -26,7 +26,9 @@ fn ordered_single_worker_matches_gnu_find_for_supported_subset() {
         "*.rs".into(),
     ];
 
-    let expected = Command::new("find").args(&args).output().unwrap();
+    let Some(expected) = gnu_find_output(&args, false) else {
+        return;
+    };
     let actual = Command::cargo_bin("rfd")
         .unwrap()
         .env("RUSHFIND_WORKERS", "1")
@@ -48,7 +50,9 @@ fn ordered_depth_print_matches_gnu_for_supported_subset() {
 
     let args = vec![path_arg(root.path()), "-depth".into(), "-print".into()];
 
-    let expected = Command::new("find").args(&args).output().unwrap();
+    let Some(expected) = gnu_find_output(&args, false) else {
+        return;
+    };
     let actual = Command::cargo_bin("rfd")
         .unwrap()
         .env("RUSHFIND_WORKERS", "1")

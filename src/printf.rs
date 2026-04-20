@@ -3,6 +3,7 @@ use crate::diagnostics::Diagnostic;
 use crate::entry::{EntryContext, EntryKind, PrintfTargetKind};
 use crate::eval::EvalContext;
 use crate::follow::FollowMode;
+use crate::platform;
 use crate::printf_time::{
     ResolvedTimeParts, render_full_time_bytes, render_selector_bytes, resolve_local_time_parts,
 };
@@ -642,7 +643,15 @@ fn format_string_like(value: &[u8], format: PrintfFieldFormat) -> Vec<u8> {
         Some(limit) => &value[..value.len().min(limit)],
         None => value,
     };
-    pad_field(value, format.width, format.left_align, b' ')
+    let pad = if format.zero_pad
+        && format.precision.is_none()
+        && platform::printf_zero_pads_string_fields()
+    {
+        b'0'
+    } else {
+        b' '
+    };
+    pad_field(value, format.width, format.left_align, pad)
 }
 
 fn format_depth(depth: usize, format: PrintfFieldFormat) -> Vec<u8> {
@@ -1113,6 +1122,20 @@ mod tests {
             ),
             b"ex"
         );
+        let string_zero_pad = format_string_like(
+            b"Mon",
+            PrintfFieldFormat {
+                width: Some(10),
+                zero_pad: true,
+                ..PrintfFieldFormat::default()
+            },
+        );
+        let expected = if crate::platform::printf_zero_pads_string_fields() {
+            b"0000000Mon".to_vec()
+        } else {
+            b"       Mon".to_vec()
+        };
+        assert_eq!(string_zero_pad, expected);
         assert_eq!(
             format_depth(
                 0,

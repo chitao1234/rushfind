@@ -3,7 +3,7 @@ mod support;
 use assert_cmd::cargo::CommandCargoExt;
 use std::fs;
 use std::process::Command;
-use support::{lines, path_arg};
+use support::{gnu_find_output, lines, path_arg};
 use tempfile::tempdir;
 
 #[test]
@@ -29,7 +29,9 @@ fn parallel_mode_matches_gnu_find_as_an_unordered_set() {
         ")".into(),
     ];
 
-    let expected = Command::new("find").args(&args).output().unwrap();
+    let Some(expected) = gnu_find_output(&args, false) else {
+        return;
+    };
     let actual = Command::cargo_bin("rfd")
         .unwrap()
         .env("RUSHFIND_WORKERS", "4")

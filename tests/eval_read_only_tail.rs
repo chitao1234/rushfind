@@ -1,3 +1,5 @@
+mod support;
+
 use rushfind::birth::read_birth_time;
 use rushfind::entry::EntryContext;
 use rushfind::eval::evaluate;
@@ -82,11 +84,15 @@ fn empty_respects_follow_mode_for_root_symlinked_directories() {
 
 #[test]
 fn current_birth_time_predicates_are_false_when_birth_time_is_unknown() {
+    let Some(path) = support::existing_path_without_birth_time() else {
+        return;
+    };
+
     let expr = RuntimeExpr::Predicate(RuntimePredicate::Newer(NewerMatcher {
         current: TimestampKind::Birth,
         reference: Timestamp::new(0, 0),
     }));
-    let entry = EntryContext::new("/proc/self/stat".into(), 0, true);
+    let entry = EntryContext::new(path, 0, true);
     let mut sink = RecordingSink::default();
 
     assert!(!evaluate(&expr, &entry, FollowMode::Physical, &mut sink).unwrap());

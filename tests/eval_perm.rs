@@ -93,13 +93,13 @@ fn perm_symbolic_zero_baseline_matches_gnu_find_behavior() {
 #[test]
 fn perm_exact_symbolic_sticky_matches() {
     let root = tempdir().unwrap();
-    fs::write(root.path().join("file.txt"), "hello\n").unwrap();
+    fs::create_dir(root.path().join("sticky-dir")).unwrap();
     fs::set_permissions(
-        root.path().join("file.txt"),
+        root.path().join("sticky-dir"),
         fs::Permissions::from_mode(0o1000),
     )
     .unwrap();
-    let entry = entry_for(&root.path().join("file.txt"));
+    let entry = entry_for(&root.path().join("sticky-dir"));
     let expr = RuntimeExpr::Predicate(RuntimePredicate::Perm(
         parse_perm_argument(OsStr::new("+t")).unwrap(),
     ));

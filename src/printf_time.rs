@@ -73,7 +73,7 @@ impl ResolvedTimeParts {
                 tm_yday: yearday - 1,
                 tm_isdst: is_dst,
                 tm_gmtoff: utc_offset_seconds as libc::c_long,
-                tm_zone: std::ptr::null(),
+                tm_zone: std::ptr::null_mut::<libc::c_char>() as _,
             },
             timezone_name,
             utc_offset_seconds,
