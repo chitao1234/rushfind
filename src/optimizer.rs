@@ -114,8 +114,8 @@ pub(crate) fn predicate_profile(predicate: &RuntimePredicate) -> PredicateProfil
             profile(PATH_ACCESS, CostTier::PathAccess)
         }
         RuntimePredicate::True | RuntimePredicate::False => profile(NONE, CostTier::Constant),
-        RuntimePredicate::Name { .. } => profile(BASENAME, CostTier::StringOnly),
-        RuntimePredicate::Path { .. } => profile(FULL_PATH, CostTier::StringOnly),
+        RuntimePredicate::Name(_) => profile(BASENAME, CostTier::StringOnly),
+        RuntimePredicate::Path(_) => profile(FULL_PATH, CostTier::StringOnly),
         RuntimePredicate::Regex(_) => profile(FULL_PATH, CostTier::RegexString),
         RuntimePredicate::Type(_) | RuntimePredicate::XType(_) => {
             profile(FILE_TYPE, CostTier::FileType)
@@ -138,7 +138,7 @@ pub(crate) fn predicate_profile(predicate: &RuntimePredicate) -> PredicateProfil
             profile(BIRTH_TIME, CostTier::BirthTime)
         }
         RuntimePredicate::Newer(_) => profile(ACTIVE_METADATA, CostTier::ActiveMetadata),
-        RuntimePredicate::LName { .. } => profile(LINK_TARGET, CostTier::Expensive),
+        RuntimePredicate::LName(_) => profile(LINK_TARGET, CostTier::Expensive),
         RuntimePredicate::NoUser | RuntimePredicate::NoGroup => {
             profile(ACTIVE_METADATA_AND_NSS, CostTier::Expensive)
         }

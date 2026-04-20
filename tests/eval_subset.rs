@@ -2,6 +2,7 @@ use rushfind::entry::EntryContext;
 use rushfind::eval::evaluate;
 use rushfind::follow::FollowMode;
 use rushfind::output::RecordingSink;
+use rushfind::pattern::{CompiledGlob, GlobCaseMode, GlobSlashMode};
 use rushfind::planner::{OutputAction, RuntimeAction, RuntimeExpr, RuntimePredicate};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -15,10 +16,15 @@ fn matching_name_predicate_prints_the_entry_path() {
     fs::write(&path, "pub fn lib() {}\n").unwrap();
     let entry = entry_for(&path, 1);
     let expr = RuntimeExpr::and(vec![
-        RuntimeExpr::Predicate(RuntimePredicate::Name {
-            pattern: "*.rs".into(),
-            case_insensitive: false,
-        }),
+        RuntimeExpr::Predicate(RuntimePredicate::Name(
+            CompiledGlob::compile(
+                "-name",
+                std::ffi::OsStr::new("*.rs"),
+                GlobCaseMode::Sensitive,
+                GlobSlashMode::Literal,
+            )
+            .unwrap(),
+        )),
         RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)),
     ]);
     let mut sink = RecordingSink::default();
@@ -35,13 +41,40 @@ fn iname_predicate_is_case_insensitive() {
     let path = root.path().join("README.MD");
     fs::write(&path, "# demo\n").unwrap();
     let entry = entry_for(&path, 0);
-    let expr = RuntimeExpr::Predicate(RuntimePredicate::Name {
-        pattern: "*.md".into(),
-        case_insensitive: true,
-    });
+    let expr = RuntimeExpr::Predicate(RuntimePredicate::Name(
+        CompiledGlob::compile(
+            "-iname",
+            std::ffi::OsStr::new("*.md"),
+            GlobCaseMode::Insensitive,
+            GlobSlashMode::Literal,
+        )
+        .unwrap(),
+    ));
     let mut sink = RecordingSink::default();
 
     assert!(evaluate(&expr, &entry, FollowMode::Physical, &mut sink).unwrap());
+}
+
+#[test]
+fn path_predicate_respects_slash_boundaries() {
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("src")).unwrap();
+    fs::create_dir(root.path().join("src/nested")).unwrap();
+    let path = root.path().join("src/nested/lib.rs");
+    fs::write(&path, "pub fn lib() {}\n").unwrap();
+    let entry = entry_for(&path, 2);
+    let expr = RuntimeExpr::Predicate(RuntimePredicate::Path(
+        CompiledGlob::compile(
+            "-path",
+            std::ffi::OsStr::new("./src/*"),
+            GlobCaseMode::Sensitive,
+            GlobSlashMode::Pathname,
+        )
+        .unwrap(),
+    ));
+    let mut sink = RecordingSink::default();
+
+    assert!(!evaluate(&expr, &entry, FollowMode::Physical, &mut sink).unwrap());
 }
 
 #[test]

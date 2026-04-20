@@ -415,8 +415,8 @@ fn relative_time_matchers(expr: &RuntimeExpr) -> Vec<RelativeTimeMatcher> {
 fn linear_labels(expr: &RuntimeExpr) -> Vec<&'static str> {
     match expr {
         RuntimeExpr::And(items) => items.iter().flat_map(linear_labels).collect(),
-        RuntimeExpr::Predicate(RuntimePredicate::Name { .. }) => vec!["name"],
-        RuntimeExpr::Predicate(RuntimePredicate::Path { .. }) => vec!["path"],
+        RuntimeExpr::Predicate(RuntimePredicate::Name(_)) => vec!["name"],
+        RuntimeExpr::Predicate(RuntimePredicate::Path(_)) => vec!["path"],
         RuntimeExpr::Predicate(RuntimePredicate::Uid(_)) => vec!["uid"],
         RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(matcher)) => {
             match (matcher.kind, matcher.unit) {

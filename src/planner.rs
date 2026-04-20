@@ -10,6 +10,7 @@ use crate::follow::FollowMode;
 use crate::identity::FileIdentity;
 use crate::numeric::{NumericComparison, parse_numeric_argument};
 use crate::optimizer::optimize_read_only_and_chains;
+use crate::pattern::{CompiledGlob, GlobCaseMode, GlobSlashMode};
 use crate::perm::{PermMatcher, parse_perm_argument};
 use crate::platform::{PlatformCapabilities, PlatformFeature, SupportLevel, active_capabilities};
 use crate::printf::{PrintfProgram, compile_printf_program};
@@ -118,22 +119,13 @@ pub enum RuntimePredicate {
     Readable,
     Writable,
     Executable,
-    Name {
-        pattern: OsString,
-        case_insensitive: bool,
-    },
-    Path {
-        pattern: OsString,
-        case_insensitive: bool,
-    },
+    Name(CompiledGlob),
+    Path(CompiledGlob),
     Regex(RegexMatcher),
     Inum(NumericComparison),
     Links(NumericComparison),
     SameFile(FileIdentity),
-    LName {
-        pattern: OsString,
-        case_insensitive: bool,
-    },
+    LName(CompiledGlob),
     Uid(NumericComparison),
     Gid(NumericComparison),
     User(u32),
@@ -179,6 +171,24 @@ pub enum RuntimeAction {
     ExecBatched(BatchedExecAction),
     ExecPrompt(ImmediateExecAction),
     Delete,
+}
+
+fn compile_glob(
+    flag: &'static str,
+    pattern: &std::ffi::OsStr,
+    case_insensitive: bool,
+    slash_mode: GlobSlashMode,
+) -> Result<CompiledGlob, Diagnostic> {
+    CompiledGlob::compile(
+        flag,
+        pattern,
+        if case_insensitive {
+            GlobCaseMode::Insensitive
+        } else {
+            GlobCaseMode::Sensitive
+        },
+        slash_mode,
+    )
 }
 
 pub fn plan_command(ast: CommandAst, workers: usize) -> Result<ExecutionPlan, Diagnostic> {
@@ -449,10 +459,12 @@ fn lower_predicate(
                     state,
                 )?;
             }
-            Ok(RuntimeExpr::Predicate(RuntimePredicate::Name {
-                pattern,
+            Ok(RuntimeExpr::Predicate(RuntimePredicate::Name(compile_glob(
+                if case_insensitive { "-iname" } else { "-name" },
+                pattern.as_os_str(),
                 case_insensitive,
-            }))
+                GlobSlashMode::Literal,
+            )?)))
         }
         Predicate::Path {
             pattern,
@@ -465,10 +477,12 @@ fn lower_predicate(
                     state,
                 )?;
             }
-            Ok(RuntimeExpr::Predicate(RuntimePredicate::Path {
-                pattern,
+            Ok(RuntimeExpr::Predicate(RuntimePredicate::Path(compile_glob(
+                if case_insensitive { "-ipath" } else { "-path" },
+                pattern.as_os_str(),
                 case_insensitive,
-            }))
+                GlobSlashMode::Pathname,
+            )?)))
         }
         Predicate::Regex {
             pattern,
@@ -514,10 +528,12 @@ fn lower_predicate(
                     state,
                 )?;
             }
-            Ok(RuntimeExpr::Predicate(RuntimePredicate::LName {
-                pattern,
+            Ok(RuntimeExpr::Predicate(RuntimePredicate::LName(compile_glob(
+                if case_insensitive { "-ilname" } else { "-lname" },
+                pattern.as_os_str(),
                 case_insensitive,
-            }))
+                GlobSlashMode::Literal,
+            )?)))
         }
         Predicate::Uid(raw) => {
             require_platform_feature(capabilities, PlatformFeature::Ownership, state)?;
