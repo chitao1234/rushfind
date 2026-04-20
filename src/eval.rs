@@ -110,6 +110,11 @@ impl Default for EvalContext {
 }
 
 impl EvalContext {
+    pub(crate) fn with_glob_context(mut self, glob_context: GlobMatchContext) -> Self {
+        self.glob_context = glob_context;
+        self
+    }
+
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn with_now(now: Timestamp) -> Self {
         Self {

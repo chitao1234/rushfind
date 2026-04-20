@@ -2,7 +2,9 @@ use crate::diagnostics::Diagnostic;
 use crate::eval::EvalContext;
 use crate::messages_locale::{MessagesLocale, resolve_messages_locale};
 use crate::mounts::MountSnapshot;
+use crate::pattern::GlobMatchContext;
 use crate::planner::{ExecutionMode, ExecutionPlan, RuntimeExpr, TraversalOrder};
+use crate::platform::locale::resolve_glob_runtime_locale;
 use crate::traversal_control::{TraversalControl, evaluate_for_traversal_with_context};
 use std::ffi::OsStr;
 use std::io::Write;
@@ -82,7 +84,12 @@ pub(crate) fn traversal_control_for_entry(
 }
 
 pub(crate) fn build_eval_context(plan: &ExecutionPlan) -> Result<EvalContext, Diagnostic> {
-    build_eval_context_with_loader(plan, MountSnapshot::load_proc_self_mountinfo)
+    let glob_runtime = resolve_glob_runtime_locale()?;
+    build_eval_context_with_loader_and_glob_context(
+        plan,
+        MountSnapshot::load_proc_self_mountinfo,
+        GlobMatchContext::new(glob_runtime.mode, glob_runtime.unix_fallback_available),
+    )
 }
 
 pub(crate) fn build_messages_locale(
@@ -105,6 +112,7 @@ where
     resolve_messages().map(Some)
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn build_eval_context_with_loader<F>(
     plan: &ExecutionPlan,
     load_mount_snapshot: F,
@@ -112,14 +120,32 @@ pub(crate) fn build_eval_context_with_loader<F>(
 where
     F: FnOnce() -> Result<MountSnapshot, Diagnostic>,
 {
+    build_eval_context_with_loader_and_glob_context(
+        plan,
+        load_mount_snapshot,
+        GlobMatchContext::c_locale(),
+    )
+}
+
+fn build_eval_context_with_loader_and_glob_context<F>(
+    plan: &ExecutionPlan,
+    load_mount_snapshot: F,
+    glob_context: GlobMatchContext,
+) -> Result<EvalContext, Diagnostic>
+where
+    F: FnOnce() -> Result<MountSnapshot, Diagnostic>,
+{
     if !plan.runtime.mount_snapshot {
-        return Ok(EvalContext::with_now(plan.runtime.evaluation_now));
+        return Ok(EvalContext::with_now(plan.runtime.evaluation_now).with_glob_context(
+            glob_context,
+        ));
     }
 
     Ok(EvalContext::with_mount_snapshot_and_now(
         load_mount_snapshot()?,
         plan.runtime.evaluation_now,
-    ))
+    )
+    .with_glob_context(glob_context))
 }
 
 #[cfg(test)]

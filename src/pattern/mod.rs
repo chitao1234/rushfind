@@ -1,6 +1,8 @@
 mod ir;
 mod owned;
 mod parse;
+#[cfg(unix)]
+mod unix;
 
 use crate::diagnostics::Diagnostic;
 use std::ffi::OsStr;
@@ -54,13 +56,19 @@ pub enum GlobLocaleMode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GlobMatchContext {
     locale_mode: GlobLocaleMode,
+    unix_fallback_available: bool,
 }
 
 impl GlobMatchContext {
-    pub fn c_locale() -> Self {
+    pub fn new(locale_mode: GlobLocaleMode, unix_fallback_available: bool) -> Self {
         Self {
-            locale_mode: GlobLocaleMode::CLike,
+            locale_mode,
+            unix_fallback_available,
         }
+    }
+
+    pub fn c_locale() -> Self {
+        Self::new(GlobLocaleMode::CLike, cfg!(unix))
     }
 }
 
@@ -84,6 +92,22 @@ struct CompiledGlobInner {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompiledGlob {
     inner: Arc<CompiledGlobInner>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectedGlobBackend {
+    Owned,
+    UnixFallback,
+}
+
+impl SelectedGlobBackend {
+    pub fn is_owned(self) -> bool {
+        matches!(self, Self::Owned)
+    }
+
+    pub fn is_unix_fallback(self) -> bool {
+        matches!(self, Self::UnixFallback)
+    }
 }
 
 impl CompiledGlob {
@@ -113,13 +137,49 @@ impl CompiledGlob {
         candidate: &OsStr,
         context: &GlobMatchContext,
     ) -> Result<bool, Diagnostic> {
-        owned::matches(
-            &self.inner.program,
-            self.inner.case_mode,
-            self.inner.slash_mode,
-            candidate.as_encoded_bytes(),
-            context,
-        )
+        match self.backend_for(context) {
+            SelectedGlobBackend::Owned => owned::matches(
+                &self.inner.program,
+                self.inner.case_mode,
+                self.inner.slash_mode,
+                candidate.as_encoded_bytes(),
+                context,
+            ),
+            SelectedGlobBackend::UnixFallback => {
+                if !context.unix_fallback_available {
+                    return Err(Diagnostic::new(
+                        "non-C locale glob matching requires a Unix fnmatch fallback on this platform",
+                        1,
+                    ));
+                }
+                #[cfg(unix)]
+                {
+                    unix::fnmatch_fallback(
+                        &self.inner.original_pattern,
+                        candidate,
+                        self.inner.case_mode,
+                        self.inner.slash_mode,
+                    )
+                }
+                #[cfg(not(unix))]
+                {
+                    unreachable!("unix fallback should only be selected on unix targets")
+                }
+            }
+        }
+    }
+
+    pub fn backend_for(&self, context: &GlobMatchContext) -> SelectedGlobBackend {
+        match self.inner.backend {
+            GlobBackend::OwnedOnly => SelectedGlobBackend::Owned,
+            GlobBackend::OwnedOrUnixFallback => {
+                if context.locale_mode == GlobLocaleMode::CLike {
+                    SelectedGlobBackend::Owned
+                } else {
+                    SelectedGlobBackend::UnixFallback
+                }
+            }
+        }
     }
 }
 
@@ -229,5 +289,51 @@ mod tests {
         assert!(glob
             .is_match(candidate.as_os_str(), &c_locale_context())
             .unwrap());
+    }
+}
+
+#[cfg(test)]
+mod backend_selection_tests {
+    use super::{
+        CompiledGlob, GlobCaseMode, GlobLocaleMode, GlobMatchContext, GlobSlashMode,
+    };
+    use std::ffi::OsStr;
+
+    #[test]
+    fn glob_runtime_c_locale_always_uses_owned_backend() {
+        let glob = CompiledGlob::compile(
+            "-iname",
+            OsStr::new("*.md"),
+            GlobCaseMode::Insensitive,
+            GlobSlashMode::Literal,
+        )
+        .unwrap();
+        assert!(glob.backend_for(&GlobMatchContext::c_locale()).is_owned());
+    }
+
+    #[test]
+    fn glob_runtime_case_insensitive_patterns_request_fallback() {
+        let glob = CompiledGlob::compile(
+            "-iname",
+            OsStr::new("*.md"),
+            GlobCaseMode::Insensitive,
+            GlobSlashMode::Literal,
+        )
+        .unwrap();
+        let runtime = GlobMatchContext::new(GlobLocaleMode::RuntimeLocale, true);
+        assert!(glob.backend_for(&runtime).is_unix_fallback());
+    }
+
+    #[test]
+    fn glob_runtime_bracket_patterns_request_fallback() {
+        let glob = CompiledGlob::compile(
+            "-name",
+            OsStr::new("[A-Z]*"),
+            GlobCaseMode::Sensitive,
+            GlobSlashMode::Literal,
+        )
+        .unwrap();
+        let runtime = GlobMatchContext::new(GlobLocaleMode::RuntimeLocale, true);
+        assert!(glob.backend_for(&runtime).is_unix_fallback());
     }
 }
