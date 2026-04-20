@@ -1532,6 +1532,35 @@ fn ordered_alias_preservation_matches_gnu_find_exactly() {
 }
 
 #[test]
+fn ordered_bracket_name_predicates_match_gnu_find_exactly() {
+    let root = tempdir().unwrap();
+    for name in ["Alpha", "Beta", "delta"] {
+        fs::write(root.path().join(name), "x\n").unwrap();
+    }
+
+    assert_matches_gnu_exact(&[
+        path_arg(root.path()),
+        "-name".into(),
+        "[A-Z]*".into(),
+        "-print".into(),
+    ]);
+}
+
+#[test]
+fn ordered_ipath_simple_patterns_match_gnu_find_exactly() {
+    let root = tempdir().unwrap();
+    fs::create_dir(root.path().join("SRC")).unwrap();
+    fs::write(root.path().join("SRC/MAIN.RS"), "fn main() {}\n").unwrap();
+
+    assert_matches_gnu_exact(&[
+        path_arg(root.path()),
+        "-ipath".into(),
+        "*/main.rs".into(),
+        "-print".into(),
+    ]);
+}
+
+#[test]
 fn parallel_follow_modes_match_gnu_find_as_sets() {
     let root = build_tree();
     unix_fs::symlink(root.path().join("src"), root.path().join("src-link")).unwrap();

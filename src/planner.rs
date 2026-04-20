@@ -481,7 +481,7 @@ fn lower_predicate(
                 if case_insensitive { "-ipath" } else { "-path" },
                 pattern.as_os_str(),
                 case_insensitive,
-                GlobSlashMode::Pathname,
+                GlobSlashMode::Literal,
             )?)))
         }
         Predicate::Regex {

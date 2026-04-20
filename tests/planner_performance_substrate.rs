@@ -145,6 +145,17 @@ fn or_stays_a_boundary_and_not_optimizes_its_child_subtree() {
     assert_eq!(not_inner_labels(&plan.expr), vec!["name", "uid"]);
 }
 
+#[test]
+fn compiled_path_glob_stays_a_string_only_predicate() {
+    let plan = rushfind::planner::plan_command(
+        rushfind::parser::parse_command(&argv(&[".", "-path", "./src/*", "-uid", "0"])).unwrap(),
+        1,
+    )
+    .unwrap();
+
+    assert_eq!(predicate_labels(&plan.expr), vec!["path", "uid"]);
+}
+
 fn predicate_labels(expr: &RuntimeExpr) -> Vec<&'static str> {
     collect_predicate_labels(expr, |predicate| Some(predicate_label(predicate)))
 }

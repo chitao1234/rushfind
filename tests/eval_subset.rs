@@ -56,25 +56,27 @@ fn iname_predicate_is_case_insensitive() {
 }
 
 #[test]
-fn path_predicate_respects_slash_boundaries() {
+fn path_predicate_matches_across_slashes_like_gnu_find() {
     let root = tempdir().unwrap();
     fs::create_dir(root.path().join("src")).unwrap();
     fs::create_dir(root.path().join("src/nested")).unwrap();
     let path = root.path().join("src/nested/lib.rs");
     fs::write(&path, "pub fn lib() {}\n").unwrap();
+    let mut pattern = root.path().join("src").into_os_string();
+    pattern.push("/*");
     let entry = entry_for(&path, 2);
     let expr = RuntimeExpr::Predicate(RuntimePredicate::Path(
         CompiledGlob::compile(
             "-path",
-            std::ffi::OsStr::new("./src/*"),
+            pattern.as_os_str(),
             GlobCaseMode::Sensitive,
-            GlobSlashMode::Pathname,
+            GlobSlashMode::Literal,
         )
         .unwrap(),
     ));
     let mut sink = RecordingSink::default();
 
-    assert!(!evaluate(&expr, &entry, FollowMode::Physical, &mut sink).unwrap());
+    assert!(evaluate(&expr, &entry, FollowMode::Physical, &mut sink).unwrap());
 }
 
 #[test]

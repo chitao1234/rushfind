@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use support::argv;
 
 #[test]
-fn parses_lname_and_ilname_predicates() {
-    let ast = parse_command(&argv(&[".", "-lname", "*real*", "-ilname", "*REAL*"])).unwrap();
+fn parses_lname_and_ilname_predicates_as_raw_patterns() {
+    let ast = parse_command(&argv(&[".", "-lname", "[a-z]*", "-ilname", "*REAL*"])).unwrap();
 
     assert_eq!(
         ast,
@@ -16,7 +16,7 @@ fn parses_lname_and_ilname_predicates() {
             global_options: vec![],
             expr: Expr::And(vec![
                 Expr::Predicate(Predicate::LName {
-                    pattern: "*real*".into(),
+                    pattern: "[a-z]*".into(),
                     case_insensitive: false,
                 }),
                 Expr::Predicate(Predicate::LName {

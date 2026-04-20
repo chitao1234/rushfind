@@ -52,6 +52,25 @@ fn parses_parenthesized_or_expression() {
 }
 
 #[test]
+fn parses_glob_predicates_as_raw_patterns_before_planning() {
+    let ast = parse_command(&argv(&[".", "-name", "[A-Z]*", "-ipath", "*/main.rs"])).unwrap();
+
+    assert_eq!(
+        ast.expr,
+        Expr::And(vec![
+            Expr::Predicate(Predicate::Name {
+                pattern: "[A-Z]*".into(),
+                case_insensitive: false,
+            }),
+            Expr::Predicate(Predicate::Path {
+                pattern: "*/main.rs".into(),
+                case_insensitive: true,
+            }),
+        ])
+    );
+}
+
+#[test]
 fn parses_unsupported_exec_without_rejecting_it() {
     let ast = parse_command(&argv(&[".", "-exec", "echo", "{}", ";"])).unwrap();
 

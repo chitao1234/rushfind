@@ -181,6 +181,11 @@ impl CompiledGlob {
             }
         }
     }
+
+    #[cfg(test)]
+    pub(crate) fn contains_bracket_expr(&self) -> bool {
+        self.inner.contains_bracket_expr
+    }
 }
 
 #[cfg(test)]
@@ -226,18 +231,18 @@ mod tests {
     }
 
     #[test]
-    fn path_star_does_not_cross_slashes() {
+    fn path_star_can_cross_slashes_like_gnu_find() {
         let glob = CompiledGlob::compile(
             "-path",
             OsStr::new("./src/*"),
             GlobCaseMode::Sensitive,
-            GlobSlashMode::Pathname,
+            GlobSlashMode::Literal,
         )
         .unwrap();
         assert!(glob
             .is_match(OsStr::new("./src/lib.rs"), &c_locale_context())
             .unwrap());
-        assert!(!glob
+        assert!(glob
             .is_match(OsStr::new("./src/nested/lib.rs"), &c_locale_context())
             .unwrap());
     }
@@ -335,5 +340,18 @@ mod backend_selection_tests {
         .unwrap();
         let runtime = GlobMatchContext::new(GlobLocaleMode::RuntimeLocale, true);
         assert!(glob.backend_for(&runtime).is_unix_fallback());
+    }
+
+    #[test]
+    fn glob_runtime_compilation_tracks_bracket_expressions() {
+        let glob = CompiledGlob::compile(
+            "-name",
+            OsStr::new("[A-Z]*"),
+            GlobCaseMode::Sensitive,
+            GlobSlashMode::Literal,
+        )
+        .unwrap();
+
+        assert!(glob.contains_bracket_expr());
     }
 }
