@@ -6,8 +6,10 @@ pub mod planner;
 use assert_cmd::cargo::cargo_bin;
 use rushfind::birth::read_birth_time;
 use std::collections::BTreeSet;
+use std::ffi::CString;
 use std::ffi::OsString;
 use std::io::Write;
+use std::mem::MaybeUninit;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 use std::time::Duration;
@@ -170,6 +172,73 @@ pub fn first_available_locale(candidates: &[&str]) -> Option<String> {
             .find(|line| *line == *candidate)
             .map(str::to_string)
     })
+}
+
+pub fn resolved_messages_locale(locale: &str) -> Option<String> {
+    let output = Command::new("locale")
+        .env("LANG", "C")
+        .env("LC_MESSAGES", locale)
+        .output()
+        .ok()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout.lines().find_map(|line| {
+        line.strip_prefix("LC_MESSAGES=")
+            .map(|value| value.trim_matches('"').to_string())
+    })
+}
+
+pub fn locale_affirmative_accepts(locale: &str, reply: &str) -> bool {
+    let output = match Command::new("locale")
+        .env("LANG", "C")
+        .env("LC_MESSAGES", locale)
+        .args(["yesstr", "yesexpr"])
+        .output()
+    {
+        Ok(output) => output,
+        Err(_) => return false,
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut lines = stdout.lines();
+    let yesstr = lines.next().unwrap_or("").trim();
+    let yesexpr = lines.next().unwrap_or("").trim();
+
+    if !yesstr.is_empty()
+        && yesstr
+            .to_ascii_lowercase()
+            .contains(&reply.to_ascii_lowercase())
+    {
+        return true;
+    }
+    if yesexpr.is_empty() {
+        return false;
+    }
+
+    let Ok(pattern) = CString::new(yesexpr) else {
+        return false;
+    };
+    let Ok(reply) = CString::new(reply) else {
+        return false;
+    };
+
+    let mut regex = MaybeUninit::<libc::regex_t>::zeroed();
+    let compile_status = unsafe {
+        libc::regcomp(
+            regex.as_mut_ptr(),
+            pattern.as_ptr(),
+            libc::REG_EXTENDED | libc::REG_NOSUB,
+        )
+    };
+    if compile_status != 0 {
+        return false;
+    }
+
+    let mut regex = unsafe { regex.assume_init() };
+    let exec_status = unsafe { libc::regexec(&regex, reply.as_ptr(), 0, std::ptr::null_mut(), 0) };
+    unsafe {
+        libc::regfree(&mut regex);
+    }
+
+    exec_status == 0
 }
 
 pub fn existing_path_without_birth_time() -> Option<std::path::PathBuf> {

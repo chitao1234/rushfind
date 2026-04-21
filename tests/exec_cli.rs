@@ -6,7 +6,8 @@ use std::process::Command;
 use std::time::Duration;
 use support::{
     cargo_bin_output_with_env_and_input_timeout, cargo_bin_output_with_input_timeout,
-    cargo_bin_output_with_timeout, first_available_locale, path_arg,
+    cargo_bin_output_with_timeout, first_available_locale, locale_affirmative_accepts, path_arg,
+    resolved_messages_locale,
 };
 use tempfile::tempdir;
 
@@ -479,6 +480,15 @@ fn ok_accepts_oui_when_french_locale_is_available() {
     else {
         return;
     };
+    let Some(resolved) = resolved_messages_locale(locale.as_str()) else {
+        return;
+    };
+    if !resolved.to_ascii_lowercase().starts_with("fr") {
+        return;
+    }
+    if !locale_affirmative_accepts(locale.as_str(), "oui") {
+        return;
+    }
 
     let root = tempdir().unwrap();
     fs::write(root.path().join("bonjour.txt"), "salut\n").unwrap();

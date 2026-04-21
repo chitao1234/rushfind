@@ -459,12 +459,14 @@ fn lower_predicate(
                     state,
                 )?;
             }
-            Ok(RuntimeExpr::Predicate(RuntimePredicate::Name(compile_glob(
-                if case_insensitive { "-iname" } else { "-name" },
-                pattern.as_os_str(),
-                case_insensitive,
-                GlobSlashMode::Literal,
-            )?)))
+            Ok(RuntimeExpr::Predicate(RuntimePredicate::Name(
+                compile_glob(
+                    if case_insensitive { "-iname" } else { "-name" },
+                    pattern.as_os_str(),
+                    case_insensitive,
+                    GlobSlashMode::Literal,
+                )?,
+            )))
         }
         Predicate::Path {
             pattern,
@@ -477,12 +479,14 @@ fn lower_predicate(
                     state,
                 )?;
             }
-            Ok(RuntimeExpr::Predicate(RuntimePredicate::Path(compile_glob(
-                if case_insensitive { "-ipath" } else { "-path" },
-                pattern.as_os_str(),
-                case_insensitive,
-                GlobSlashMode::Literal,
-            )?)))
+            Ok(RuntimeExpr::Predicate(RuntimePredicate::Path(
+                compile_glob(
+                    if case_insensitive { "-ipath" } else { "-path" },
+                    pattern.as_os_str(),
+                    case_insensitive,
+                    GlobSlashMode::Literal,
+                )?,
+            )))
         }
         Predicate::Regex {
             pattern,
@@ -528,12 +532,18 @@ fn lower_predicate(
                     state,
                 )?;
             }
-            Ok(RuntimeExpr::Predicate(RuntimePredicate::LName(compile_glob(
-                if case_insensitive { "-ilname" } else { "-lname" },
-                pattern.as_os_str(),
-                case_insensitive,
-                GlobSlashMode::Literal,
-            )?)))
+            Ok(RuntimeExpr::Predicate(RuntimePredicate::LName(
+                compile_glob(
+                    if case_insensitive {
+                        "-ilname"
+                    } else {
+                        "-lname"
+                    },
+                    pattern.as_os_str(),
+                    case_insensitive,
+                    GlobSlashMode::Literal,
+                )?,
+            )))
         }
         Predicate::Uid(raw) => {
             require_platform_feature(capabilities, PlatformFeature::Ownership, state)?;

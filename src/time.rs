@@ -221,6 +221,9 @@ impl UsedMatcher {
         if atime < ctime {
             return false;
         }
+        if crate::platform::used_requires_strict_atime_after_ctime() && atime == ctime {
+            return false;
+        }
 
         matches_time_window(
             &self.comparison,

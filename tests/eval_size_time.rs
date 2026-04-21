@@ -208,12 +208,45 @@ fn used_matcher_matches_gnu_used_windows() {
         comparison: TimeComparison::LessThan("1".parse().unwrap()),
     };
 
+    assert!(!exact_zero.matches(Timestamp::new(0, 0), Timestamp::new(0, 0)));
     assert!(!exact_zero.matches(Timestamp::new(1, 0), Timestamp::new(0, 0)));
     assert!(exact_one.matches(Timestamp::new(1, 0), Timestamp::new(0, 0)));
     assert!(!exact_one.matches(Timestamp::new(86_400, 0), Timestamp::new(0, 0)));
     assert!(greater_than_one.matches(Timestamp::new(86_401, 0), Timestamp::new(0, 0)));
     assert!(less_than_one.matches(Timestamp::new(1, 0), Timestamp::new(0, 0)));
     assert!(!less_than_one.matches(Timestamp::new(0, 0), Timestamp::new(1, 0)));
+}
+
+#[cfg(not(target_os = "openbsd"))]
+#[test]
+fn used_matcher_allows_equal_timestamps_on_non_openbsd_hosts() {
+    let exact_zero = UsedMatcher {
+        comparison: TimeComparison::Exactly("0".parse().unwrap()),
+    };
+    let exact_one = UsedMatcher {
+        comparison: TimeComparison::Exactly("1".parse().unwrap()),
+    };
+    let less_than_one = UsedMatcher {
+        comparison: TimeComparison::LessThan("1".parse().unwrap()),
+    };
+
+    assert!(!exact_zero.matches(Timestamp::new(0, 0), Timestamp::new(0, 0)));
+    assert!(exact_one.matches(Timestamp::new(0, 0), Timestamp::new(0, 0)));
+    assert!(less_than_one.matches(Timestamp::new(0, 0), Timestamp::new(0, 0)));
+}
+
+#[cfg(target_os = "openbsd")]
+#[test]
+fn used_matcher_rejects_equal_timestamps_on_openbsd_hosts() {
+    let exact_one = UsedMatcher {
+        comparison: TimeComparison::Exactly("1".parse().unwrap()),
+    };
+    let less_than_one = UsedMatcher {
+        comparison: TimeComparison::LessThan("1".parse().unwrap()),
+    };
+
+    assert!(!exact_one.matches(Timestamp::new(0, 0), Timestamp::new(0, 0)));
+    assert!(!less_than_one.matches(Timestamp::new(0, 0), Timestamp::new(0, 0)));
 }
 
 #[test]

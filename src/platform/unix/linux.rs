@@ -23,6 +23,10 @@ pub(crate) const fn printf_zero_pads_string_fields() -> bool {
     false
 }
 
+pub(crate) const fn used_requires_strict_atime_after_ctime() -> bool {
+    false
+}
+
 pub(crate) fn filesystem_snapshot() -> Result<FilesystemSnapshot, Diagnostic> {
     let mountinfo = fs::read_to_string("/proc/self/mountinfo")
         .map_err(|error| Diagnostic::new(format!("/proc/self/mountinfo: {error}"), 1))?;

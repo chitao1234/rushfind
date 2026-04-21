@@ -32,6 +32,11 @@ pub(crate) fn printf_zero_pads_string_fields() -> bool {
     linux::printf_zero_pads_string_fields()
 }
 
+#[cfg(target_os = "linux")]
+pub(crate) fn used_requires_strict_atime_after_ctime() -> bool {
+    linux::used_requires_strict_atime_after_ctime()
+}
+
 #[cfg(any(
     target_os = "macos",
     target_os = "freebsd",
@@ -52,6 +57,17 @@ pub(crate) fn active_capabilities() -> &'static PlatformCapabilities {
 ))]
 pub(crate) fn printf_zero_pads_string_fields() -> bool {
     bsd::printf_zero_pads_string_fields()
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "dragonfly"
+))]
+pub(crate) fn used_requires_strict_atime_after_ctime() -> bool {
+    bsd::used_requires_strict_atime_after_ctime()
 }
 
 #[cfg(not(any(
@@ -75,6 +91,18 @@ pub(crate) fn active_capabilities() -> &'static PlatformCapabilities {
     target_os = "dragonfly"
 )))]
 pub(crate) fn printf_zero_pads_string_fields() -> bool {
+    panic!("unix-family phase 1 only supports Linux, macOS, and BSD backends")
+}
+
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "dragonfly"
+)))]
+pub(crate) fn used_requires_strict_atime_after_ctime() -> bool {
     panic!("unix-family phase 1 only supports Linux, macOS, and BSD backends")
 }
 

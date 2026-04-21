@@ -74,6 +74,7 @@ impl FilesystemSnapshot {
         crate::platform::unix::filesystem_snapshot()
     }
 
+    #[cfg(any(test, target_os = "linux"))]
     pub(crate) fn from_mountinfo(mountinfo: &str) -> Result<Self, Diagnostic> {
         let mut snapshot = Self::default();
 

@@ -227,7 +227,10 @@ mod tests {
             GlobSlashMode::Literal,
         )
         .unwrap();
-        assert!(glob.is_match(OsStr::new("xa/by"), &c_locale_context()).unwrap());
+        assert!(
+            glob.is_match(OsStr::new("xa/by"), &c_locale_context())
+                .unwrap()
+        );
     }
 
     #[test]
@@ -239,12 +242,14 @@ mod tests {
             GlobSlashMode::Literal,
         )
         .unwrap();
-        assert!(glob
-            .is_match(OsStr::new("./src/lib.rs"), &c_locale_context())
-            .unwrap());
-        assert!(glob
-            .is_match(OsStr::new("./src/nested/lib.rs"), &c_locale_context())
-            .unwrap());
+        assert!(
+            glob.is_match(OsStr::new("./src/lib.rs"), &c_locale_context())
+                .unwrap()
+        );
+        assert!(
+            glob.is_match(OsStr::new("./src/nested/lib.rs"), &c_locale_context())
+                .unwrap()
+        );
     }
 
     #[test]
@@ -256,12 +261,15 @@ mod tests {
             GlobSlashMode::Literal,
         )
         .unwrap();
-        assert!(glob
-            .is_match(OsStr::new("résumé.MD"), &c_locale_context())
-            .unwrap());
-        assert!(!glob
-            .is_match(OsStr::new("RÉSUMÉ.MD"), &c_locale_context())
-            .unwrap());
+        assert!(
+            glob.is_match(OsStr::new("résumé.MD"), &c_locale_context())
+                .unwrap()
+        );
+        assert!(
+            !glob
+                .is_match(OsStr::new("RÉSUMÉ.MD"), &c_locale_context())
+                .unwrap()
+        );
     }
 
     #[test]
@@ -273,12 +281,15 @@ mod tests {
             GlobSlashMode::Literal,
         )
         .unwrap();
-        assert!(glob
-            .is_match(OsStr::new("Bravo"), &c_locale_context())
-            .unwrap());
-        assert!(!glob
-            .is_match(OsStr::new("delta"), &c_locale_context())
-            .unwrap());
+        assert!(
+            glob.is_match(OsStr::new("Bravo"), &c_locale_context())
+                .unwrap()
+        );
+        assert!(
+            !glob
+                .is_match(OsStr::new("delta"), &c_locale_context())
+                .unwrap()
+        );
     }
 
     #[test]
@@ -291,17 +302,16 @@ mod tests {
             GlobSlashMode::Literal,
         )
         .unwrap();
-        assert!(glob
-            .is_match(candidate.as_os_str(), &c_locale_context())
-            .unwrap());
+        assert!(
+            glob.is_match(candidate.as_os_str(), &c_locale_context())
+                .unwrap()
+        );
     }
 }
 
 #[cfg(test)]
 mod backend_selection_tests {
-    use super::{
-        CompiledGlob, GlobCaseMode, GlobLocaleMode, GlobMatchContext, GlobSlashMode,
-    };
+    use super::{CompiledGlob, GlobCaseMode, GlobLocaleMode, GlobMatchContext, GlobSlashMode};
     use std::ffi::OsStr;
 
     #[test]

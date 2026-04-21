@@ -250,7 +250,9 @@ pub(crate) fn evaluate_predicate(
             let basename = entry.path.file_name().unwrap_or_else(|| OsStr::new(""));
             glob.is_match(basename, context.glob_context())
         }
-        RuntimePredicate::Path(glob) => glob.is_match(entry.path.as_os_str(), context.glob_context()),
+        RuntimePredicate::Path(glob) => {
+            glob.is_match(entry.path.as_os_str(), context.glob_context())
+        }
         RuntimePredicate::Regex(matcher) => matcher.is_match(entry.path.as_os_str()),
         RuntimePredicate::Inum(expected) => Ok(expected.matches(entry.active_inode(follow_mode)?)),
         RuntimePredicate::Links(expected) => {

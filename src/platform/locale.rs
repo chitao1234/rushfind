@@ -283,6 +283,9 @@ mod tests {
     fn glob_locale_runtime_marks_c_and_posix_as_c_like() {
         assert_eq!(glob_locale_mode_for("C"), GlobLocaleMode::CLike);
         assert_eq!(glob_locale_mode_for("POSIX"), GlobLocaleMode::CLike);
-        assert_eq!(glob_locale_mode_for("en_US.UTF-8"), GlobLocaleMode::RuntimeLocale);
+        assert_eq!(
+            glob_locale_mode_for("en_US.UTF-8"),
+            GlobLocaleMode::RuntimeLocale
+        );
     }
 }

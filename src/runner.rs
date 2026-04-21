@@ -136,9 +136,9 @@ where
     F: FnOnce() -> Result<MountSnapshot, Diagnostic>,
 {
     if !plan.runtime.mount_snapshot {
-        return Ok(EvalContext::with_now(plan.runtime.evaluation_now).with_glob_context(
-            glob_context,
-        ));
+        return Ok(
+            EvalContext::with_now(plan.runtime.evaluation_now).with_glob_context(glob_context)
+        );
     }
 
     Ok(EvalContext::with_mount_snapshot_and_now(
