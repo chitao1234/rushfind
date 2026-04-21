@@ -10,6 +10,11 @@ jobs="$(sysctl -n hw.ncpu 2>/dev/null || getconf _NPROCESSORS_ONLN || echo 4)"
 # shellcheck source=/dev/null
 source "${source_env}"
 
+if ! command -v bison >/dev/null 2>&1; then
+    printf '%s\n' "error: bison is required to build GNU findutils from git sources" >&2
+    exit 1
+fi
+
 rm -rf "${src_dir}"
 mkdir -p "${prefix}"
 
