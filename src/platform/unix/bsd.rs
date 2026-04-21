@@ -33,6 +33,11 @@ pub(crate) const fn used_requires_strict_atime_after_ctime() -> bool {
     cfg!(target_os = "openbsd")
 }
 
+#[cfg(target_os = "dragonfly")]
+const MNT_NOWAIT_FLAG: libc::c_int = 0x0002;
+#[cfg(not(target_os = "dragonfly"))]
+const MNT_NOWAIT_FLAG: libc::c_int = libc::MNT_NOWAIT;
+
 #[cfg(target_os = "netbsd")]
 const NETBSD_VFS_NAMELEN: usize = 32;
 #[cfg(target_os = "netbsd")]
@@ -169,7 +174,7 @@ fn mount_target_path(mount: &MountEntry) -> PathBuf {
 fn load_mount_entries() -> Result<&'static [MountEntry], Diagnostic> {
     let mounts = unsafe {
         let mut mounts: *mut MountEntry = std::ptr::null_mut();
-        let count = netbsd_getmntinfo(&mut mounts, libc::MNT_NOWAIT);
+        let count = netbsd_getmntinfo(&mut mounts, MNT_NOWAIT_FLAG);
         if count <= 0 {
             return Err(Diagnostic::new(
                 "failed to read mount table via getmntinfo",
@@ -185,7 +190,7 @@ fn load_mount_entries() -> Result<&'static [MountEntry], Diagnostic> {
 fn load_mount_entries() -> Result<&'static [MountEntry], Diagnostic> {
     let mounts = unsafe {
         let mut mounts: *mut MountEntry = std::ptr::null_mut();
-        let count = libc::getmntinfo(&mut mounts, libc::MNT_NOWAIT);
+        let count = libc::getmntinfo(&mut mounts, MNT_NOWAIT_FLAG);
         if count <= 0 {
             return Err(Diagnostic::new(
                 "failed to read mount table via getmntinfo",
