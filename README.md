@@ -99,6 +99,8 @@ Find for the occupātus.
   needed primitive through another code path.
 - Interactive locale handling for `-ok` and `-okdir` remains approximate on non-Linux Unix and
   emits a startup warning when planned.
+- During the initial macOS port, case-insensitive glob matching may still differ outside the C
+  locale and emits a startup warning when planned.
 - Windows support is intentionally deferred to a later plan built on the same platform substrate.
 
 ## Manual Unix verification

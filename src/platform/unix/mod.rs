@@ -177,7 +177,7 @@ pub(crate) fn match_pattern(
         target_os = "dragonfly"
     ))]
     if case_insensitive {
-        flags |= libc::FNM_CASEFOLD;
+        flags |= fnmatch_casefold_flag();
     }
 
     let result = unsafe { libc::fnmatch(pattern.as_ptr(), candidate.as_ptr(), flags) };
@@ -188,4 +188,14 @@ pub(crate) fn match_pattern(
 fn cstring_from_os(value: &OsStr, label: &str) -> Result<CString, Diagnostic> {
     CString::new(value.as_bytes())
         .map_err(|_| Diagnostic::new(format!("{label} contains an interior NUL byte"), 1))
+}
+
+#[cfg(target_os = "macos")]
+const fn fnmatch_casefold_flag() -> libc::c_int {
+    0
+}
+
+#[cfg(not(target_os = "macos"))]
+const fn fnmatch_casefold_flag() -> libc::c_int {
+    libc::FNM_CASEFOLD
 }

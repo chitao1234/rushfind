@@ -15,6 +15,20 @@ use std::os::unix::ffi::OsStringExt;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
+#[cfg(target_os = "macos")]
+pub(crate) static CAPABILITIES: PlatformCapabilities = PlatformCapabilities::new(
+    SupportLevel::Exact,
+    SupportLevel::Exact,
+    SupportLevel::Exact,
+    SupportLevel::Exact,
+    SupportLevel::Exact,
+    SupportLevel::Approximate("interactive locale behavior is approximate on this platform"),
+    SupportLevel::Approximate(
+        "case-insensitive glob matching may differ outside the C locale on this platform",
+    ),
+);
+
+#[cfg(not(target_os = "macos"))]
 pub(crate) static CAPABILITIES: PlatformCapabilities = PlatformCapabilities::new(
     SupportLevel::Exact,
     SupportLevel::Exact,

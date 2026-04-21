@@ -2,6 +2,16 @@ use crate::diagnostics::Diagnostic;
 use crate::pattern::{GlobCaseMode, GlobSlashMode};
 use std::ffi::{CString, OsStr};
 
+#[cfg(target_os = "macos")]
+const fn fnmatch_casefold_flag() -> libc::c_int {
+    0
+}
+
+#[cfg(not(target_os = "macos"))]
+const fn fnmatch_casefold_flag() -> libc::c_int {
+    libc::FNM_CASEFOLD
+}
+
 pub(super) fn fnmatch_fallback(
     pattern: &[u8],
     candidate: &OsStr,
@@ -18,7 +28,7 @@ pub(super) fn fnmatch_fallback(
         flags |= libc::FNM_PATHNAME;
     }
     if case_mode == GlobCaseMode::Insensitive {
-        flags |= libc::FNM_CASEFOLD;
+        flags |= fnmatch_casefold_flag();
     }
 
     Ok(unsafe { libc::fnmatch(pattern.as_ptr(), candidate.as_ptr(), flags) == 0 })
