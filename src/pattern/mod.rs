@@ -1,14 +1,10 @@
 mod ir;
 mod owned;
 mod parse;
-#[cfg(unix)]
-mod unix;
 
 use crate::diagnostics::Diagnostic;
 use std::ffi::OsStr;
 use std::sync::Arc;
-
-type PatternMatcher = fn(&OsStr, &OsStr, bool, bool) -> Result<bool, Diagnostic>;
 
 pub fn matches_pattern(
     pattern: &OsStr,
@@ -16,23 +12,27 @@ pub fn matches_pattern(
     case_insensitive: bool,
     pathname: bool,
 ) -> Result<bool, Diagnostic> {
-    matches_pattern_with(
+    CompiledGlob::compile(
+        if pathname {
+            if case_insensitive { "-ipath" } else { "-path" }
+        } else if case_insensitive {
+            "-iname"
+        } else {
+            "-name"
+        },
         pattern,
-        candidate,
-        case_insensitive,
-        pathname,
-        crate::platform::unix::match_pattern,
+        if case_insensitive {
+            GlobCaseMode::Insensitive
+        } else {
+            GlobCaseMode::Sensitive
+        },
+        if pathname {
+            GlobSlashMode::Pathname
+        } else {
+            GlobSlashMode::Literal
+        },
     )
-}
-
-fn matches_pattern_with(
-    pattern: &OsStr,
-    candidate: &OsStr,
-    case_insensitive: bool,
-    pathname: bool,
-    matcher: PatternMatcher,
-) -> Result<bool, Diagnostic> {
-    matcher(pattern, candidate, case_insensitive, pathname)
+    .and_then(|glob| glob.is_match(candidate, &GlobMatchContext::c_locale()))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,44 +47,19 @@ pub enum GlobSlashMode {
     Pathname,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GlobLocaleMode {
-    CLike,
-    RuntimeLocale,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GlobMatchContext {
-    locale_mode: GlobLocaleMode,
-    unix_fallback_available: bool,
-}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GlobMatchContext;
 
 impl GlobMatchContext {
-    pub fn new(locale_mode: GlobLocaleMode, unix_fallback_available: bool) -> Self {
-        Self {
-            locale_mode,
-            unix_fallback_available,
-        }
-    }
-
     pub fn c_locale() -> Self {
-        Self::new(GlobLocaleMode::CLike, cfg!(unix))
+        Self
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum GlobBackend {
-    OwnedOnly,
-    OwnedOrUnixFallback,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CompiledGlobInner {
-    flag: &'static str,
-    original_pattern: Vec<u8>,
     case_mode: GlobCaseMode,
     slash_mode: GlobSlashMode,
-    backend: GlobBackend,
     program: ir::GlobProgram,
     contains_bracket_expr: bool,
 }
@@ -97,16 +72,11 @@ pub struct CompiledGlob {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectedGlobBackend {
     Owned,
-    UnixFallback,
 }
 
 impl SelectedGlobBackend {
     pub fn is_owned(self) -> bool {
         matches!(self, Self::Owned)
-    }
-
-    pub fn is_unix_fallback(self) -> bool {
-        matches!(self, Self::UnixFallback)
     }
 }
 
@@ -121,11 +91,8 @@ impl CompiledGlob {
         let parsed = parse::compile_pattern(flag, &original_pattern, case_mode, slash_mode)?;
         Ok(Self {
             inner: Arc::new(CompiledGlobInner {
-                flag,
-                original_pattern,
                 case_mode,
                 slash_mode,
-                backend: parsed.backend,
                 program: parsed.program,
                 contains_bracket_expr: parsed.contains_bracket_expr,
             }),
@@ -137,63 +104,17 @@ impl CompiledGlob {
         candidate: &OsStr,
         context: &GlobMatchContext,
     ) -> Result<bool, Diagnostic> {
-        match self.backend_for(context) {
-            SelectedGlobBackend::Owned => owned::matches(
-                &self.inner.program,
-                self.inner.case_mode,
-                self.inner.slash_mode,
-                candidate.as_encoded_bytes(),
-                context,
-            ),
-            SelectedGlobBackend::UnixFallback => {
-                if !context.unix_fallback_available {
-                    return Err(Diagnostic::new(
-                        "non-C locale glob matching requires a Unix fnmatch fallback on this platform",
-                        1,
-                    ));
-                }
-                #[cfg(unix)]
-                {
-                    unix::fnmatch_fallback(
-                        &self.inner.original_pattern,
-                        candidate,
-                        self.inner.case_mode,
-                        self.inner.slash_mode,
-                    )
-                }
-                #[cfg(not(unix))]
-                {
-                    unreachable!("unix fallback should only be selected on unix targets")
-                }
-            }
-        }
+        owned::matches(
+            &self.inner.program,
+            self.inner.case_mode,
+            self.inner.slash_mode,
+            candidate.as_encoded_bytes(),
+            context,
+        )
     }
 
-    pub fn backend_for(&self, context: &GlobMatchContext) -> SelectedGlobBackend {
-        match self.inner.backend {
-            GlobBackend::OwnedOnly => SelectedGlobBackend::Owned,
-            GlobBackend::OwnedOrUnixFallback => {
-                if context.locale_mode == GlobLocaleMode::CLike
-                    || self.force_owned_runtime_backend()
-                {
-                    SelectedGlobBackend::Owned
-                } else {
-                    SelectedGlobBackend::UnixFallback
-                }
-            }
-        }
-    }
-
-    fn force_owned_runtime_backend(&self) -> bool {
-        #[cfg(target_os = "macos")]
-        {
-            self.inner.contains_bracket_expr
-        }
-
-        #[cfg(not(target_os = "macos"))]
-        {
-            false
-        }
+    pub fn backend_for(&self, _context: &GlobMatchContext) -> SelectedGlobBackend {
+        SelectedGlobBackend::Owned
     }
 
     #[cfg(test)]
@@ -204,8 +125,7 @@ impl CompiledGlob {
 
 #[cfg(test)]
 mod tests {
-    use super::matches_pattern_with;
-    use super::{CompiledGlob, GlobCaseMode, GlobMatchContext, GlobSlashMode};
+    use super::{CompiledGlob, GlobCaseMode, GlobMatchContext, GlobSlashMode, matches_pattern};
     use std::ffi::{OsStr, OsString};
     #[cfg(unix)]
     use std::os::unix::ffi::OsStringExt;
@@ -215,17 +135,12 @@ mod tests {
     }
 
     #[test]
-    fn case_insensitive_matching_can_use_a_non_linux_backend() {
-        let matched = matches_pattern_with(
+    fn matches_pattern_uses_owned_case_insensitive_semantics() {
+        let matched = matches_pattern(
             OsStr::new("*.rs"),
             OsStr::new("MAIN.RS"),
             true,
             true,
-            |_pattern, _candidate, case_insensitive, pathname| {
-                assert!(case_insensitive);
-                assert!(pathname);
-                Ok(true)
-            },
         )
         .unwrap();
 
@@ -325,11 +240,11 @@ mod tests {
 
 #[cfg(test)]
 mod backend_selection_tests {
-    use super::{CompiledGlob, GlobCaseMode, GlobLocaleMode, GlobMatchContext, GlobSlashMode};
+    use super::{CompiledGlob, GlobCaseMode, GlobMatchContext, GlobSlashMode};
     use std::ffi::OsStr;
 
     #[test]
-    fn glob_runtime_c_locale_always_uses_owned_backend() {
+    fn glob_patterns_always_use_owned_backend_in_c_locale() {
         let glob = CompiledGlob::compile(
             "-iname",
             OsStr::new("*.md"),
@@ -341,7 +256,7 @@ mod backend_selection_tests {
     }
 
     #[test]
-    fn glob_runtime_case_insensitive_patterns_request_fallback() {
+    fn glob_case_insensitive_patterns_stay_owned() {
         let glob = CompiledGlob::compile(
             "-iname",
             OsStr::new("*.md"),
@@ -349,13 +264,11 @@ mod backend_selection_tests {
             GlobSlashMode::Literal,
         )
         .unwrap();
-        let runtime = GlobMatchContext::new(GlobLocaleMode::RuntimeLocale, true);
-        assert!(glob.backend_for(&runtime).is_unix_fallback());
+        assert!(glob.backend_for(&GlobMatchContext::c_locale()).is_owned());
     }
 
-    #[cfg(not(target_os = "macos"))]
     #[test]
-    fn glob_runtime_bracket_patterns_request_fallback() {
+    fn glob_bracket_patterns_stay_owned() {
         let glob = CompiledGlob::compile(
             "-name",
             OsStr::new("[A-Z]*"),
@@ -363,22 +276,7 @@ mod backend_selection_tests {
             GlobSlashMode::Literal,
         )
         .unwrap();
-        let runtime = GlobMatchContext::new(GlobLocaleMode::RuntimeLocale, true);
-        assert!(glob.backend_for(&runtime).is_unix_fallback());
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn macos_runtime_bracket_patterns_stay_owned() {
-        let glob = CompiledGlob::compile(
-            "-name",
-            OsStr::new("[A-Z]*"),
-            GlobCaseMode::Sensitive,
-            GlobSlashMode::Literal,
-        )
-        .unwrap();
-        let runtime = GlobMatchContext::new(GlobLocaleMode::RuntimeLocale, true);
-        assert!(glob.backend_for(&runtime).is_owned());
+        assert!(glob.backend_for(&GlobMatchContext::c_locale()).is_owned());
     }
 
     #[test]

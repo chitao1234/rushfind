@@ -1,6 +1,5 @@
 use crate::diagnostics::Diagnostic;
 use crate::messages_locale::{MessagesLocale, prompt_locale_for};
-use crate::pattern::GlobLocaleMode;
 use std::ffi::{CStr, CString};
 
 #[cfg(not(any(
@@ -24,36 +23,6 @@ pub(crate) fn resolve_messages_locale_with(
     backend: &dyn LocaleBackend,
 ) -> Result<MessagesLocale, Diagnostic> {
     backend.resolve_messages_locale()
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct GlobRuntimeLocale {
-    pub(crate) resolved_name: String,
-    pub(crate) mode: GlobLocaleMode,
-    pub(crate) unix_fallback_available: bool,
-}
-
-pub(crate) fn resolve_glob_runtime_locale() -> Result<GlobRuntimeLocale, Diagnostic> {
-    let ctype = resolve_locale_category(libc::LC_CTYPE, "LC_CTYPE")?;
-    let collate = resolve_locale_category(libc::LC_COLLATE, "LC_COLLATE")?;
-    let mode = if glob_locale_mode_for(&ctype) == GlobLocaleMode::CLike
-        && glob_locale_mode_for(&collate) == GlobLocaleMode::CLike
-    {
-        GlobLocaleMode::CLike
-    } else {
-        GlobLocaleMode::RuntimeLocale
-    };
-    let resolved_name = if ctype == collate {
-        ctype
-    } else {
-        format!("LC_CTYPE={ctype};LC_COLLATE={collate}")
-    };
-
-    Ok(GlobRuntimeLocale {
-        resolved_name,
-        mode,
-        unix_fallback_available: cfg!(unix),
-    })
 }
 
 static POSIX_LOCALE_BACKEND: PosixLocaleBackend = PosixLocaleBackend;
@@ -129,19 +98,6 @@ fn resolve_locale_category(category: libc::c_int, label: &str) -> Result<String,
         }
 
         Ok(CStr::from_ptr(active).to_string_lossy().into_owned())
-    }
-}
-
-pub(crate) fn glob_locale_mode_for(name: &str) -> GlobLocaleMode {
-    let without_codeset = name.split_once('.').map_or(name, |(head, _)| head);
-    let without_modifier = without_codeset
-        .split_once('@')
-        .map_or(without_codeset, |(head, _)| head);
-
-    if matches!(without_modifier, "C" | "POSIX") {
-        GlobLocaleMode::CLike
-    } else {
-        GlobLocaleMode::RuntimeLocale
     }
 }
 
@@ -255,10 +211,7 @@ fn default_ascii_yes_is_affirmative(bytes: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        default_ascii_yes_is_affirmative, glob_locale_mode_for, yesstr_fallback_is_affirmative,
-    };
-    use crate::pattern::GlobLocaleMode;
+    use super::{default_ascii_yes_is_affirmative, yesstr_fallback_is_affirmative};
 
     #[test]
     fn default_ascii_parser_accepts_y_and_yes() {
@@ -279,13 +232,4 @@ mod tests {
         assert!(!yesstr_fallback_is_affirmative(b"n", b"yes"));
     }
 
-    #[test]
-    fn glob_locale_runtime_marks_c_and_posix_as_c_like() {
-        assert_eq!(glob_locale_mode_for("C"), GlobLocaleMode::CLike);
-        assert_eq!(glob_locale_mode_for("POSIX"), GlobLocaleMode::CLike);
-        assert_eq!(
-            glob_locale_mode_for("en_US.UTF-8"),
-            GlobLocaleMode::RuntimeLocale
-        );
-    }
 }

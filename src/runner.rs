@@ -4,7 +4,6 @@ use crate::messages_locale::{MessagesLocale, resolve_messages_locale};
 use crate::mounts::MountSnapshot;
 use crate::pattern::GlobMatchContext;
 use crate::planner::{ExecutionMode, ExecutionPlan, RuntimeExpr, TraversalOrder};
-use crate::platform::locale::resolve_glob_runtime_locale;
 use crate::traversal_control::{TraversalControl, evaluate_for_traversal_with_context};
 use std::ffi::OsStr;
 use std::io::Write;
@@ -84,12 +83,7 @@ pub(crate) fn traversal_control_for_entry(
 }
 
 pub(crate) fn build_eval_context(plan: &ExecutionPlan) -> Result<EvalContext, Diagnostic> {
-    let glob_runtime = resolve_glob_runtime_locale()?;
-    build_eval_context_with_loader_and_glob_context(
-        plan,
-        MountSnapshot::load_proc_self_mountinfo,
-        GlobMatchContext::new(glob_runtime.mode, glob_runtime.unix_fallback_available),
-    )
+    build_eval_context_with_loader(plan, MountSnapshot::load_proc_self_mountinfo)
 }
 
 pub(crate) fn build_messages_locale(
@@ -120,24 +114,10 @@ pub(crate) fn build_eval_context_with_loader<F>(
 where
     F: FnOnce() -> Result<MountSnapshot, Diagnostic>,
 {
-    build_eval_context_with_loader_and_glob_context(
-        plan,
-        load_mount_snapshot,
-        GlobMatchContext::c_locale(),
-    )
-}
-
-fn build_eval_context_with_loader_and_glob_context<F>(
-    plan: &ExecutionPlan,
-    load_mount_snapshot: F,
-    glob_context: GlobMatchContext,
-) -> Result<EvalContext, Diagnostic>
-where
-    F: FnOnce() -> Result<MountSnapshot, Diagnostic>,
-{
     if !plan.runtime.mount_snapshot {
         return Ok(
-            EvalContext::with_now(plan.runtime.evaluation_now).with_glob_context(glob_context)
+            EvalContext::with_now(plan.runtime.evaluation_now)
+                .with_glob_context(GlobMatchContext::c_locale())
         );
     }
 
@@ -145,7 +125,7 @@ where
         load_mount_snapshot()?,
         plan.runtime.evaluation_now,
     )
-    .with_glob_context(glob_context))
+    .with_glob_context(GlobMatchContext::c_locale()))
 }
 
 #[cfg(test)]

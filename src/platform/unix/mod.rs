@@ -2,12 +2,8 @@ use super::PlatformCapabilities;
 use crate::diagnostics::Diagnostic;
 use crate::platform::filesystem::{FilesystemKey, FilesystemSnapshot};
 use crate::time::Timestamp;
-use std::ffi::{CString, OsStr};
 use std::io;
 use std::path::Path;
-
-#[cfg(unix)]
-use std::os::unix::ffi::OsStrExt;
 
 #[cfg(any(target_os = "linux", doc))]
 pub(crate) mod linux;
@@ -152,44 +148,4 @@ pub(crate) fn read_birth_time(path: &Path, follow: bool) -> Result<Option<Timest
 ))]
 pub(crate) fn read_birth_time(path: &Path, follow: bool) -> Result<Option<Timestamp>, Diagnostic> {
     bsd::read_birth_time(path, follow)
-}
-
-pub(crate) fn match_pattern(
-    pattern: &OsStr,
-    candidate: &OsStr,
-    case_insensitive: bool,
-    pathname: bool,
-) -> Result<bool, Diagnostic> {
-    let pattern = cstring_from_os(pattern, "pattern")?;
-    let candidate = cstring_from_os(candidate, "candidate")?;
-
-    let mut flags = 0;
-    if pathname {
-        flags |= libc::FNM_PATHNAME;
-    }
-
-    #[cfg(any(
-        target_os = "linux",
-        target_os = "macos",
-        target_os = "freebsd",
-        target_os = "netbsd",
-        target_os = "openbsd",
-        target_os = "dragonfly"
-    ))]
-    if case_insensitive {
-        flags |= fnmatch_casefold_flag();
-    }
-
-    let result = unsafe { libc::fnmatch(pattern.as_ptr(), candidate.as_ptr(), flags) };
-    Ok(result == 0)
-}
-
-#[cfg(unix)]
-fn cstring_from_os(value: &OsStr, label: &str) -> Result<CString, Diagnostic> {
-    CString::new(value.as_bytes())
-        .map_err(|_| Diagnostic::new(format!("{label} contains an interior NUL byte"), 1))
-}
-
-const fn fnmatch_casefold_flag() -> libc::c_int {
-    libc::FNM_CASEFOLD
 }
