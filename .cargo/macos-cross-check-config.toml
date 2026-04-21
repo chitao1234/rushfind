@@ -1,0 +1,7 @@
+[env]
+CC_x86_64_apple_darwin = { value = "scripts/zig-cc-macos-wrapper.sh", relative = true }
+AR_x86_64_apple_darwin = "zig ar"
+CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER = { value = "scripts/zig-cc-macos-wrapper.sh", relative = true }
+CC_aarch64_apple_darwin = { value = "scripts/zig-cc-macos-wrapper.sh", relative = true }
+AR_aarch64_apple_darwin = "zig ar"
+CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER = { value = "scripts/zig-cc-macos-wrapper.sh", relative = true }
