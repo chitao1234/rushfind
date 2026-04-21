@@ -145,7 +145,6 @@ mod tests {
     use crate::parallel::task::{
         ParallelTask, PostOrderResumeTask, PreOrderRootTask, SiblingChunkTask,
     };
-    use crate::runtime_pipeline::SubtreeBarrierId;
     use std::path::PathBuf;
     use std::thread;
 
@@ -161,7 +160,6 @@ mod tests {
             ParallelTask::PostOrderResume(PostOrderResumeTask::for_path(
                 PathBuf::from("root"),
                 0,
-                SubtreeBarrierId(7),
                 None,
             )),
             &control,
@@ -247,7 +245,6 @@ mod tests {
             ParallelTask::PostOrderResume(PostOrderResumeTask::for_path(
                 PathBuf::from("dir"),
                 1,
-                SubtreeBarrierId(9),
                 None,
             )),
             &control,

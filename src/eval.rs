@@ -3,7 +3,6 @@ use crate::ast::FileTypeFilter;
 use crate::diagnostics::Diagnostic;
 use crate::entry::{AccessMode, EntryContext, EntryKind};
 use crate::follow::FollowMode;
-use crate::pattern::GlobMatchContext;
 use crate::planner::{RuntimeAction, RuntimeExpr, RuntimePredicate};
 use crate::platform::filesystem::{FilesystemKey, FilesystemSnapshot};
 use crate::runtime_pipeline::{EvalStep, begin_entry_eval, resume_entry_eval};
@@ -96,7 +95,6 @@ pub(crate) struct EvalOutcome {
 pub struct EvalContext {
     mount_snapshot: Option<Arc<FilesystemSnapshot>>,
     evaluation_now: Option<Timestamp>,
-    glob_context: GlobMatchContext,
 }
 
 impl Default for EvalContext {
@@ -104,23 +102,16 @@ impl Default for EvalContext {
         Self {
             mount_snapshot: None,
             evaluation_now: None,
-            glob_context: GlobMatchContext::c_locale(),
         }
     }
 }
 
 impl EvalContext {
-    pub(crate) fn with_glob_context(mut self, glob_context: GlobMatchContext) -> Self {
-        self.glob_context = glob_context;
-        self
-    }
-
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn with_now(now: Timestamp) -> Self {
         Self {
             mount_snapshot: None,
             evaluation_now: Some(now),
-            glob_context: GlobMatchContext::c_locale(),
         }
     }
 
@@ -129,7 +120,6 @@ impl EvalContext {
         Self {
             mount_snapshot: Some(Arc::new(snapshot)),
             evaluation_now: None,
-            glob_context: GlobMatchContext::c_locale(),
         }
     }
 
@@ -140,7 +130,6 @@ impl EvalContext {
         Self {
             mount_snapshot: Some(Arc::new(snapshot)),
             evaluation_now: Some(now),
-            glob_context: GlobMatchContext::c_locale(),
         }
     }
 
@@ -160,10 +149,6 @@ impl EvalContext {
                 1,
             )
         })
-    }
-
-    pub(crate) fn glob_context(&self) -> &GlobMatchContext {
-        &self.glob_context
     }
 }
 
@@ -248,10 +233,10 @@ pub(crate) fn evaluate_predicate(
         RuntimePredicate::Executable => entry.access(AccessMode::Execute),
         RuntimePredicate::Name(glob) => {
             let basename = entry.path.file_name().unwrap_or_else(|| OsStr::new(""));
-            glob.is_match(basename, context.glob_context())
+            glob.is_match(basename)
         }
         RuntimePredicate::Path(glob) => {
-            glob.is_match(entry.path.as_os_str(), context.glob_context())
+            glob.is_match(entry.path.as_os_str())
         }
         RuntimePredicate::Regex(matcher) => matcher.is_match(entry.path.as_os_str()),
         RuntimePredicate::Inum(expected) => Ok(expected.matches(entry.active_inode(follow_mode)?)),
@@ -262,7 +247,7 @@ pub(crate) fn evaluate_predicate(
             Ok(*expected == entry.active_identity(follow_mode)?)
         }
         RuntimePredicate::LName(glob) => match entry.active_link_target(follow_mode)? {
-            Some(target) => glob.is_match(target.as_os_str(), context.glob_context()),
+            Some(target) => glob.is_match(target.as_os_str()),
             None => Ok(false),
         },
         RuntimePredicate::Uid(expected) => {

@@ -32,7 +32,7 @@ pub fn matches_pattern(
             GlobSlashMode::Literal
         },
     )
-    .and_then(|glob| glob.is_match(candidate, &GlobMatchContext::c_locale()))
+    .and_then(|glob| glob.is_match(candidate))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,37 +47,16 @@ pub enum GlobSlashMode {
     Pathname,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct GlobMatchContext;
-
-impl GlobMatchContext {
-    pub fn c_locale() -> Self {
-        Self
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CompiledGlobInner {
     case_mode: GlobCaseMode,
     slash_mode: GlobSlashMode,
     program: ir::GlobProgram,
-    contains_bracket_expr: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompiledGlob {
     inner: Arc<CompiledGlobInner>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SelectedGlobBackend {
-    Owned,
-}
-
-impl SelectedGlobBackend {
-    pub fn is_owned(self) -> bool {
-        matches!(self, Self::Owned)
-    }
 }
 
 impl CompiledGlob {
@@ -94,45 +73,26 @@ impl CompiledGlob {
                 case_mode,
                 slash_mode,
                 program: parsed.program,
-                contains_bracket_expr: parsed.contains_bracket_expr,
             }),
         })
     }
 
-    pub fn is_match(
-        &self,
-        candidate: &OsStr,
-        context: &GlobMatchContext,
-    ) -> Result<bool, Diagnostic> {
+    pub fn is_match(&self, candidate: &OsStr) -> Result<bool, Diagnostic> {
         owned::matches(
             &self.inner.program,
             self.inner.case_mode,
             self.inner.slash_mode,
             candidate.as_encoded_bytes(),
-            context,
         )
-    }
-
-    pub fn backend_for(&self, _context: &GlobMatchContext) -> SelectedGlobBackend {
-        SelectedGlobBackend::Owned
-    }
-
-    #[cfg(test)]
-    pub(crate) fn contains_bracket_expr(&self) -> bool {
-        self.inner.contains_bracket_expr
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{CompiledGlob, GlobCaseMode, GlobMatchContext, GlobSlashMode, matches_pattern};
+    use super::{CompiledGlob, GlobCaseMode, GlobSlashMode, matches_pattern};
     use std::ffi::{OsStr, OsString};
     #[cfg(unix)]
     use std::os::unix::ffi::OsStringExt;
-
-    fn c_locale_context() -> GlobMatchContext {
-        GlobMatchContext::c_locale()
-    }
 
     #[test]
     fn matches_pattern_uses_owned_case_insensitive_semantics() {
@@ -156,10 +116,7 @@ mod tests {
             GlobSlashMode::Literal,
         )
         .unwrap();
-        assert!(
-            glob.is_match(OsStr::new("xa/by"), &c_locale_context())
-                .unwrap()
-        );
+        assert!(glob.is_match(OsStr::new("xa/by")).unwrap());
     }
 
     #[test]
@@ -171,14 +128,8 @@ mod tests {
             GlobSlashMode::Literal,
         )
         .unwrap();
-        assert!(
-            glob.is_match(OsStr::new("./src/lib.rs"), &c_locale_context())
-                .unwrap()
-        );
-        assert!(
-            glob.is_match(OsStr::new("./src/nested/lib.rs"), &c_locale_context())
-                .unwrap()
-        );
+        assert!(glob.is_match(OsStr::new("./src/lib.rs")).unwrap());
+        assert!(glob.is_match(OsStr::new("./src/nested/lib.rs")).unwrap());
     }
 
     #[test]
@@ -190,15 +141,8 @@ mod tests {
             GlobSlashMode::Literal,
         )
         .unwrap();
-        assert!(
-            glob.is_match(OsStr::new("résumé.MD"), &c_locale_context())
-                .unwrap()
-        );
-        assert!(
-            !glob
-                .is_match(OsStr::new("RÉSUMÉ.MD"), &c_locale_context())
-                .unwrap()
-        );
+        assert!(glob.is_match(OsStr::new("résumé.MD")).unwrap());
+        assert!(!glob.is_match(OsStr::new("RÉSUMÉ.MD")).unwrap());
     }
 
     #[test]
@@ -210,15 +154,8 @@ mod tests {
             GlobSlashMode::Literal,
         )
         .unwrap();
-        assert!(
-            glob.is_match(OsStr::new("Bravo"), &c_locale_context())
-                .unwrap()
-        );
-        assert!(
-            !glob
-                .is_match(OsStr::new("delta"), &c_locale_context())
-                .unwrap()
-        );
+        assert!(glob.is_match(OsStr::new("Bravo")).unwrap());
+        assert!(!glob.is_match(OsStr::new("delta")).unwrap());
     }
 
     #[test]
@@ -231,20 +168,11 @@ mod tests {
             GlobSlashMode::Literal,
         )
         .unwrap();
-        assert!(
-            glob.is_match(candidate.as_os_str(), &c_locale_context())
-                .unwrap()
-        );
+        assert!(glob.is_match(candidate.as_os_str()).unwrap());
     }
-}
-
-#[cfg(test)]
-mod backend_selection_tests {
-    use super::{CompiledGlob, GlobCaseMode, GlobMatchContext, GlobSlashMode};
-    use std::ffi::OsStr;
 
     #[test]
-    fn glob_patterns_always_use_owned_backend_in_c_locale() {
+    fn case_insensitive_patterns_match_directly() {
         let glob = CompiledGlob::compile(
             "-iname",
             OsStr::new("*.md"),
@@ -252,23 +180,11 @@ mod backend_selection_tests {
             GlobSlashMode::Literal,
         )
         .unwrap();
-        assert!(glob.backend_for(&GlobMatchContext::c_locale()).is_owned());
+        assert!(glob.is_match(OsStr::new("README.MD")).unwrap());
     }
 
     #[test]
-    fn glob_case_insensitive_patterns_stay_owned() {
-        let glob = CompiledGlob::compile(
-            "-iname",
-            OsStr::new("*.md"),
-            GlobCaseMode::Insensitive,
-            GlobSlashMode::Literal,
-        )
-        .unwrap();
-        assert!(glob.backend_for(&GlobMatchContext::c_locale()).is_owned());
-    }
-
-    #[test]
-    fn glob_bracket_patterns_stay_owned() {
+    fn bracket_patterns_match_directly() {
         let glob = CompiledGlob::compile(
             "-name",
             OsStr::new("[A-Z]*"),
@@ -276,19 +192,6 @@ mod backend_selection_tests {
             GlobSlashMode::Literal,
         )
         .unwrap();
-        assert!(glob.backend_for(&GlobMatchContext::c_locale()).is_owned());
-    }
-
-    #[test]
-    fn glob_runtime_compilation_tracks_bracket_expressions() {
-        let glob = CompiledGlob::compile(
-            "-name",
-            OsStr::new("[A-Z]*"),
-            GlobCaseMode::Sensitive,
-            GlobSlashMode::Literal,
-        )
-        .unwrap();
-
-        assert!(glob.contains_bracket_expr());
+        assert!(glob.is_match(OsStr::new("Alpha")).unwrap());
     }
 }

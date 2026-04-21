@@ -10,7 +10,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 enum BarrierRecord {
     Directory {
         entry: EntryContext,
-        ancestor_barriers: Vec<SubtreeBarrierId>,
         remaining_spilled_chunks: usize,
         notify_parent: Option<SubtreeBarrierId>,
     },
@@ -36,7 +35,6 @@ impl BarrierTable {
     pub(crate) fn begin_directory(
         &self,
         entry: EntryContext,
-        ancestor_barriers: Vec<SubtreeBarrierId>,
         spilled_children: usize,
         notify_parent: Option<SubtreeBarrierId>,
     ) -> Result<SubtreeBarrierId, Diagnostic> {
@@ -48,7 +46,6 @@ impl BarrierTable {
                 barrier,
                 BarrierRecord::Directory {
                     entry,
-                    ancestor_barriers,
                     remaining_spilled_chunks: spilled_children,
                     notify_parent,
                 },
@@ -111,13 +108,10 @@ impl BarrierTable {
         Ok(Some(match record {
             BarrierRecord::Directory {
                 entry,
-                ancestor_barriers,
                 notify_parent,
                 ..
             } => BarrierRelease::Resume(PostOrderResumeTask {
                 entry,
-                ancestor_barriers,
-                barrier,
                 notify_parent,
             }),
             BarrierRecord::Batch { notify_parent, .. } => {
@@ -137,7 +131,7 @@ mod tests {
         let table = BarrierTable::default();
         let entry = EntryContext::new(PathBuf::from("dir"), 1, false);
         let barrier = table
-            .begin_directory(entry.clone(), Vec::new(), 2, None)
+            .begin_directory(entry.clone(), 2, None)
             .unwrap();
 
         assert!(table.finish_spilled_chunk(barrier).unwrap().is_none());
@@ -146,7 +140,6 @@ mod tests {
         match resume {
             BarrierRelease::Resume(resume) => {
                 assert_eq!(resume.entry.path, entry.path);
-                assert_eq!(resume.barrier, barrier);
             }
             BarrierRelease::NotifyParent(_) => {
                 panic!("directory barrier should release a resume task");
@@ -161,7 +154,6 @@ mod tests {
         let barrier = table
             .begin_directory(
                 EntryContext::new(PathBuf::from("dir"), 1, false),
-                vec![parent],
                 1,
                 Some(parent),
             )
@@ -171,7 +163,6 @@ mod tests {
         match resume {
             BarrierRelease::Resume(resume) => {
                 assert_eq!(resume.notify_parent, Some(parent));
-                assert_eq!(resume.ancestor_barriers, vec![parent]);
             }
             BarrierRelease::NotifyParent(_) => {
                 panic!("directory barrier should release a resume task");

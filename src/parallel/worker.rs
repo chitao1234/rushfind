@@ -706,7 +706,6 @@ fn run_postorder_pending_root(
 
     let barrier = barriers.begin_directory(
         entry,
-        pending.ancestor_barriers.clone(),
         child_units,
         notify_parent,
     )?;

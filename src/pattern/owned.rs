@@ -1,5 +1,5 @@
 use super::ir::{ClassItem, GlobAtom, GlobClass, GlobProgram};
-use super::{GlobCaseMode, GlobMatchContext, GlobSlashMode};
+use super::{GlobCaseMode, GlobSlashMode};
 use crate::diagnostics::Diagnostic;
 
 pub(super) fn matches(
@@ -7,7 +7,6 @@ pub(super) fn matches(
     case_mode: GlobCaseMode,
     slash_mode: GlobSlashMode,
     candidate: &[u8],
-    _context: &GlobMatchContext,
 ) -> Result<bool, Diagnostic> {
     Ok(matches_from(
         program, case_mode, slash_mode, candidate, 0, 0,

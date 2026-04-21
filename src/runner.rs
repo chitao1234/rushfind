@@ -2,7 +2,6 @@ use crate::diagnostics::Diagnostic;
 use crate::eval::EvalContext;
 use crate::messages_locale::{MessagesLocale, resolve_messages_locale};
 use crate::mounts::MountSnapshot;
-use crate::pattern::GlobMatchContext;
 use crate::planner::{ExecutionMode, ExecutionPlan, RuntimeExpr, TraversalOrder};
 use crate::traversal_control::{TraversalControl, evaluate_for_traversal_with_context};
 use std::ffi::OsStr;
@@ -115,17 +114,13 @@ where
     F: FnOnce() -> Result<MountSnapshot, Diagnostic>,
 {
     if !plan.runtime.mount_snapshot {
-        return Ok(
-            EvalContext::with_now(plan.runtime.evaluation_now)
-                .with_glob_context(GlobMatchContext::c_locale())
-        );
+        return Ok(EvalContext::with_now(plan.runtime.evaluation_now));
     }
 
     Ok(EvalContext::with_mount_snapshot_and_now(
         load_mount_snapshot()?,
         plan.runtime.evaluation_now,
-    )
-    .with_glob_context(GlobMatchContext::c_locale()))
+    ))
 }
 
 #[cfg(test)]

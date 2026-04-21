@@ -13,12 +13,9 @@ const MONTHS_ABBR: [&[u8]; 12] = [
 ];
 const RECENT_PAST_WINDOW_SECONDS: i64 = 6 * 30 * 24 * 60 * 60;
 const RECENT_FUTURE_WINDOW_SECONDS: i64 = 60 * 60;
-#[allow(dead_code)]
 const OWNER_GROUP_FIELD_WIDTH: usize = 8;
-#[allow(dead_code)]
 const SIZE_FIELD_WIDTH: usize = 8;
 
-#[allow(dead_code)]
 pub(crate) fn render_ls_record(
     entry: &EntryContext,
     follow_mode: FollowMode,
@@ -53,7 +50,6 @@ pub(crate) fn render_ls_record(
     Ok(out)
 }
 
-#[allow(dead_code)]
 fn render_entry_timestamp(
     entry: &EntryContext,
     follow_mode: FollowMode,
@@ -64,7 +60,6 @@ fn render_entry_timestamp(
     render_ls_time_column(&parts, now)
 }
 
-#[allow(dead_code)]
 fn render_size_field(
     entry: &EntryContext,
     follow_mode: FollowMode,
@@ -80,7 +75,6 @@ fn render_size_field(
     }
 }
 
-#[allow(dead_code)]
 fn render_symlink_suffix(
     entry: &EntryContext,
     follow_mode: FollowMode,
@@ -95,7 +89,6 @@ fn render_symlink_suffix(
     }
 }
 
-#[allow(dead_code)]
 fn append_padded_field(out: &mut Vec<u8>, value: &[u8], width: usize) {
     out.extend_from_slice(value);
     if value.len() < width {
@@ -103,7 +96,6 @@ fn append_padded_field(out: &mut Vec<u8>, value: &[u8], width: usize) {
     }
 }
 
-#[allow(dead_code)]
 fn pad_left(value: &[u8], width: usize) -> Vec<u8> {
     if value.len() >= width {
         return value.to_vec();
@@ -115,7 +107,6 @@ fn pad_left(value: &[u8], width: usize) -> Vec<u8> {
     out
 }
 
-#[allow(dead_code)]
 fn symbolic_mode_string(kind: EntryKind, mode: u32) -> String {
     let mut value = String::with_capacity(10);
     value.push(match kind {
@@ -140,7 +131,6 @@ fn symbolic_mode_string(kind: EntryKind, mode: u32) -> String {
     value
 }
 
-#[allow(dead_code)]
 fn execute_char(
     mode: u32,
     exec_bit: u32,

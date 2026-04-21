@@ -4,7 +4,6 @@ use crate::diagnostics::Diagnostic;
 
 pub(super) struct ParsedGlob {
     pub(super) program: GlobProgram,
-    pub(super) contains_bracket_expr: bool,
 }
 
 pub(super) fn compile_pattern(
@@ -15,7 +14,6 @@ pub(super) fn compile_pattern(
 ) -> Result<ParsedGlob, Diagnostic> {
     let mut program = Vec::new();
     let mut idx = 0usize;
-    let mut contains_bracket_expr = false;
 
     while let Some(&byte) = pattern.get(idx) {
         idx += 1;
@@ -36,7 +34,6 @@ pub(super) fn compile_pattern(
             b'[' => match try_parse_class(flag, pattern, idx)? {
                 Some((class, next)) => {
                     idx = next;
-                    contains_bracket_expr = true;
                     program.push(GlobAtom::Class(class));
                 }
                 None => program.push(GlobAtom::Literal(byte)),
@@ -45,10 +42,7 @@ pub(super) fn compile_pattern(
         }
     }
 
-    Ok(ParsedGlob {
-        program,
-        contains_bracket_expr,
-    })
+    Ok(ParsedGlob { program })
 }
 
 fn try_parse_class(

@@ -32,14 +32,11 @@ const MONTHS_FULL: [&[u8]; 12] = [
     b"December",
 ];
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedTimeParts {
     pub timestamp: Timestamp,
     pub local: libc::tm,
-    #[allow(dead_code)]
     pub timezone_name: Vec<u8>,
-    #[allow(dead_code)]
     pub utc_offset_seconds: i32,
 }
 
@@ -81,7 +78,6 @@ impl ResolvedTimeParts {
     }
 }
 
-#[allow(dead_code)]
 pub(crate) fn resolve_local_time_parts(
     timestamp: Timestamp,
 ) -> Result<ResolvedTimeParts, Diagnostic> {

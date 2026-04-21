@@ -1,8 +1,6 @@
 use crate::walker::PendingPath;
 
-#[allow(dead_code)]
 pub(crate) const DEFAULT_SPLIT_CHILD_THRESHOLD: usize = 32;
-#[allow(dead_code)]
 pub(crate) const DEFAULT_SPILL_CHUNK_SIZE: usize = 32;
 
 #[derive(Debug)]
