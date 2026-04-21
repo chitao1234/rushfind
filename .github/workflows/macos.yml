@@ -1,0 +1,44 @@
+name: macos
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust 1.85.0
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+
+      - name: Restore cached GNU findutils
+        id: gnu-find-cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/gnu-findutils
+          key: ${{ runner.os }}-gnu-findutils-${{ hashFiles('ci/gnu-findutils-source.env', 'scripts/ci/build_gnu_findutils.sh') }}
+
+      - name: Install bootstrap dependencies
+        if: steps.gnu-find-cache.outputs.cache-hit != 'true'
+        run: |
+          brew install autoconf automake gettext texinfo
+          echo "$(brew --prefix gettext)/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix texinfo)/bin" >> "$GITHUB_PATH"
+
+      - name: Build GNU findutils from source
+        if: steps.gnu-find-cache.outputs.cache-hit != 'true'
+        run: scripts/ci/build_gnu_findutils.sh "$PWD/.cache/gnu-findutils" ci/gnu-findutils-source.env
+
+      - name: Add GNU findutils to PATH
+        run: echo "$PWD/.cache/gnu-findutils/bin" >> "$GITHUB_PATH"
+
+      - name: Show GNU find version
+        run: gfind --version
+
+      - name: Run Rust test suite
+        run: cargo test

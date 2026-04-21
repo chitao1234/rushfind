@@ -93,6 +93,8 @@ Find for the occupātus.
 - Linux remains the reference platform and keeps the strongest GNU compatibility coverage.
 - macOS, FreeBSD, NetBSD, OpenBSD, and DragonFly BSD are supported through alternate Unix-family
   backends for filesystem, account, and locale behavior.
+- macOS CI uses a cached source build of pinned GNU findutils revisions so GNU differential
+  coverage does not depend on the runner image or Homebrew's package freshness.
 - `rushfind` prefers exact GNU-compatible behavior on non-Linux Unix when the host exposes the
   needed primitive through another code path.
 - Interactive locale handling for `-ok` and `-okdir` remains approximate on non-Linux Unix and
