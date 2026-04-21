@@ -33,9 +33,9 @@ pub(crate) const fn used_requires_strict_atime_after_ctime() -> bool {
     cfg!(target_os = "openbsd")
 }
 
-#[cfg(target_os = "dragonfly")]
+#[cfg(any(target_os = "dragonfly", doc))]
 const MNT_NOWAIT_FLAG: libc::c_int = 0x0002;
-#[cfg(not(target_os = "dragonfly"))]
+#[cfg(not(any(target_os = "dragonfly", doc)))]
 const MNT_NOWAIT_FLAG: libc::c_int = libc::MNT_NOWAIT;
 
 #[cfg(target_os = "netbsd")]
