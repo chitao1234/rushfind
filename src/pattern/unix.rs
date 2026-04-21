@@ -2,12 +2,6 @@ use crate::diagnostics::Diagnostic;
 use crate::pattern::{GlobCaseMode, GlobSlashMode};
 use std::ffi::{CString, OsStr};
 
-#[cfg(target_os = "macos")]
-const fn fnmatch_casefold_flag() -> libc::c_int {
-    0
-}
-
-#[cfg(not(target_os = "macos"))]
 const fn fnmatch_casefold_flag() -> libc::c_int {
     libc::FNM_CASEFOLD
 }

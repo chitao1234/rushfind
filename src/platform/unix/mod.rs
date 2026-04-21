@@ -190,12 +190,6 @@ fn cstring_from_os(value: &OsStr, label: &str) -> Result<CString, Diagnostic> {
         .map_err(|_| Diagnostic::new(format!("{label} contains an interior NUL byte"), 1))
 }
 
-#[cfg(target_os = "macos")]
-const fn fnmatch_casefold_flag() -> libc::c_int {
-    0
-}
-
-#[cfg(not(target_os = "macos"))]
 const fn fnmatch_casefold_flag() -> libc::c_int {
     libc::FNM_CASEFOLD
 }
