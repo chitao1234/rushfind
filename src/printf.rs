@@ -715,12 +715,12 @@ fn format_numeric_value(
     sign: Option<u8>,
     format: PrintfFieldFormat,
 ) -> Vec<u8> {
-    if let Some(precision) = format.precision
-        && digits.len() < precision
-    {
-        let mut prefixed = vec![b'0'; precision - digits.len()];
-        prefixed.extend_from_slice(&digits);
-        digits = prefixed;
+    if let Some(precision) = format.precision {
+        if digits.len() < precision {
+            let mut prefixed = vec![b'0'; precision - digits.len()];
+            prefixed.extend_from_slice(&digits);
+            digits = prefixed;
+        }
     }
 
     let mut value = Vec::with_capacity(digits.len() + usize::from(sign.is_some()));

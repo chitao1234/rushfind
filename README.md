@@ -103,6 +103,8 @@ Find for the occupātus.
 
 Build the binary and run the portability smoke harness locally, then repeat it on target hosts:
 
+The minimum supported Rust version is 1.85.0.
+
 ```bash
 cargo build
 bash scripts/check_unix_portability_surface.sh target/debug/rfd

@@ -2,6 +2,7 @@
 name = "rushfind"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
 description = "Fast Rust implementation of Unix find with GNU-compatible syntax and parallel traversal"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/chitao1234/rushfind"

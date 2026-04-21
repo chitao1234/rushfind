@@ -151,10 +151,10 @@ pub(crate) fn glob_locale_mode_for(name: &str) -> GlobLocaleMode {
     target_os = "aix"
 )))]
 fn langinfo_affirmative_is_affirmative(bytes: &[u8], reply: &CString) -> bool {
-    if let Some(yesexpr) = langinfo_string(libc::YESEXPR)
-        && let Some(matches) = regexec_matches(&yesexpr, reply)
-    {
-        return matches;
+    if let Some(yesexpr) = langinfo_string(libc::YESEXPR) {
+        if let Some(matches) = regexec_matches(&yesexpr, reply) {
+            return matches;
+        }
     }
 
     if let Some(yesstr) = langinfo_string(libc::YESSTR) {
