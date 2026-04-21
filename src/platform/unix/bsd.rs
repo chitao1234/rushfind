@@ -23,9 +23,7 @@ pub(crate) static CAPABILITIES: PlatformCapabilities = PlatformCapabilities::new
     SupportLevel::Exact,
     SupportLevel::Exact,
     SupportLevel::Approximate("interactive locale behavior is approximate on this platform"),
-    SupportLevel::Approximate(
-        "case-insensitive glob matching may differ outside the C locale on this platform",
-    ),
+    SupportLevel::Exact,
 );
 
 #[cfg(not(target_os = "macos"))]

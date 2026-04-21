@@ -173,12 +173,26 @@ impl CompiledGlob {
         match self.inner.backend {
             GlobBackend::OwnedOnly => SelectedGlobBackend::Owned,
             GlobBackend::OwnedOrUnixFallback => {
-                if context.locale_mode == GlobLocaleMode::CLike {
+                if context.locale_mode == GlobLocaleMode::CLike
+                    || self.force_owned_runtime_backend()
+                {
                     SelectedGlobBackend::Owned
                 } else {
                     SelectedGlobBackend::UnixFallback
                 }
             }
+        }
+    }
+
+    fn force_owned_runtime_backend(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            self.inner.contains_bracket_expr
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
         }
     }
 
@@ -339,6 +353,7 @@ mod backend_selection_tests {
         assert!(glob.backend_for(&runtime).is_unix_fallback());
     }
 
+    #[cfg(not(target_os = "macos"))]
     #[test]
     fn glob_runtime_bracket_patterns_request_fallback() {
         let glob = CompiledGlob::compile(
@@ -350,6 +365,20 @@ mod backend_selection_tests {
         .unwrap();
         let runtime = GlobMatchContext::new(GlobLocaleMode::RuntimeLocale, true);
         assert!(glob.backend_for(&runtime).is_unix_fallback());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_runtime_bracket_patterns_stay_owned() {
+        let glob = CompiledGlob::compile(
+            "-name",
+            OsStr::new("[A-Z]*"),
+            GlobCaseMode::Sensitive,
+            GlobSlashMode::Literal,
+        )
+        .unwrap();
+        let runtime = GlobMatchContext::new(GlobLocaleMode::RuntimeLocale, true);
+        assert!(glob.backend_for(&runtime).is_owned());
     }
 
     #[test]
