@@ -1,9 +1,9 @@
 mod support;
 
+use rushfind::time::Timestamp;
 use std::fs;
 use std::io::{Seek, SeekFrom, Write};
 use std::os::unix::fs::{self as unix_fs, MetadataExt, PermissionsExt};
-use std::process::Command;
 use std::time::Duration;
 use support::{cargo_bin_output_with_env_timeout, cargo_bin_output_with_timeout, path_arg};
 use tempfile::tempdir;
@@ -428,13 +428,11 @@ fn ordered_printf_renders_time_directives_in_a_fixed_local_timezone() {
     let root = tempdir().unwrap();
     let path = root.path().join("stamp.txt");
     fs::write(&path, "hello").unwrap();
-    let status = Command::new("touch")
-        .env("TZ", "Asia/Shanghai")
-        .args(["-a", "-m", "-d", "2024-03-04 13:06:07.123456789"])
-        .arg(&path)
-        .status()
-        .unwrap();
-    assert!(status.success());
+    set_file_times(
+        &path,
+        Timestamp::new(1_709_528_767, 123_456_789),
+        Timestamp::new(1_709_528_767, 123_456_789),
+    );
 
     let output = cargo_bin_output_with_env_timeout(
         &[
@@ -454,6 +452,26 @@ fn ordered_printf_renders_time_directives_in_a_fixed_local_timezone() {
         String::from_utf8(output.stdout).unwrap(),
         "[Mon Mar  4 13:06:07.1234567890 2024][2024-03-04][13:06:07.1234567890][1709528767.1234567890][2024-03-04+13:06:07.1234567890][Mon][       Mon]\n"
     );
+}
+
+fn set_file_times(path: &std::path::Path, atime: Timestamp, mtime: Timestamp) {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let path = CString::new(path.as_os_str().as_bytes()).unwrap();
+    let times = [
+        libc::timespec {
+            tv_sec: atime.seconds as libc::time_t,
+            tv_nsec: atime.nanos.into(),
+        },
+        libc::timespec {
+            tv_sec: mtime.seconds as libc::time_t,
+            tv_nsec: mtime.nanos.into(),
+        },
+    ];
+
+    let rc = unsafe { libc::utimensat(libc::AT_FDCWD, path.as_ptr(), times.as_ptr(), 0) };
+    assert_eq!(rc, 0);
 }
 
 #[test]
