@@ -7,6 +7,8 @@ use std::fs;
 use std::os::unix::ffi::OsStringExt;
 use std::process::Command;
 use support::path_arg;
+#[cfg(unix)]
+use support::supports_non_utf8_temp_paths;
 use tempfile::tempdir;
 
 #[test]
@@ -60,6 +62,10 @@ fn regex_foundation_matrix_pcre2_reports_invalid_patterns() {
 #[cfg(unix)]
 #[test]
 fn regex_foundation_matrix_pcre2_matches_non_utf8_candidates_via_hex_escape() {
+    if !supports_non_utf8_temp_paths() {
+        return;
+    }
+
     let root = tempdir().unwrap();
     let path = root
         .path()

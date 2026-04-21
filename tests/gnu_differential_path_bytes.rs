@@ -7,7 +7,7 @@ use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs as unix_fs;
 use std::path::PathBuf;
 use std::process::{Command, Output};
-use support::{gnu_find_output, path_arg};
+use support::{gnu_find_output, path_arg, supports_non_utf8_temp_paths};
 use tempfile::tempdir;
 
 fn os(bytes: &[u8]) -> OsString {
@@ -43,6 +43,10 @@ fn build_non_utf8_tree() -> (tempfile::TempDir, PathBuf, PathBuf) {
 
 #[test]
 fn print_and_printf_match_gnu_for_non_utf8_paths() {
+    if !supports_non_utf8_temp_paths() {
+        return;
+    }
+
     let (root, _, _) = build_non_utf8_tree();
 
     for args in [
@@ -80,6 +84,10 @@ fn print_and_printf_match_gnu_for_non_utf8_paths() {
 
 #[test]
 fn name_path_and_lname_match_gnu_for_non_utf8_operands() {
+    if !supports_non_utf8_temp_paths() {
+        return;
+    }
+
     let (root, file, _) = build_non_utf8_tree();
     let mut ipath_pattern = root.path().as_os_str().as_bytes().to_vec();
     ipath_pattern.extend_from_slice(b"/readme-\xff.txt");
@@ -146,6 +154,10 @@ fn name_path_and_lname_match_gnu_for_non_utf8_operands() {
 
 #[test]
 fn fprint_matches_gnu_for_non_utf8_paths() {
+    if !supports_non_utf8_temp_paths() {
+        return;
+    }
+
     let (root, _, _) = build_non_utf8_tree();
     let outputs = tempdir().unwrap();
     let gnu_out = outputs.path().join("gnu.txt");
@@ -175,6 +187,10 @@ fn fprint_matches_gnu_for_non_utf8_paths() {
 
 #[test]
 fn fprint0_matches_gnu_for_non_utf8_paths() {
+    if !supports_non_utf8_temp_paths() {
+        return;
+    }
+
     let (root, _, _) = build_non_utf8_tree();
     let outputs = tempdir().unwrap();
     let gnu_out = outputs.path().join("gnu.bin");
@@ -204,6 +220,10 @@ fn fprint0_matches_gnu_for_non_utf8_paths() {
 
 #[test]
 fn fprintf_matches_gnu_for_non_utf8_paths() {
+    if !supports_non_utf8_temp_paths() {
+        return;
+    }
+
     let (root, _, _) = build_non_utf8_tree();
     let outputs = tempdir().unwrap();
     let gnu_out = outputs.path().join("gnu-report.txt");

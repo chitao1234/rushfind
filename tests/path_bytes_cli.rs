@@ -6,7 +6,10 @@ use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs as unix_fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use support::{cargo_bin_output_with_timeout, newline_records, nul_records, path_arg};
+use support::{
+    cargo_bin_output_with_timeout, newline_records, nul_records, path_arg,
+    supports_non_utf8_temp_paths,
+};
 use tempfile::tempdir;
 
 fn os(bytes: &[u8]) -> OsString {
@@ -23,6 +26,10 @@ fn path_bytes(path: &Path) -> Vec<u8> {
 
 #[test]
 fn ordered_print_and_fprint_surfaces_preserve_non_utf8_paths() {
+    if !supports_non_utf8_temp_paths() {
+        return;
+    }
+
     let root = tempdir().unwrap();
     let file = root.path().join(path_from_bytes(b"ReadMe-\xff.TXT"));
     let out_txt = root.path().join("hits.txt");
@@ -103,6 +110,10 @@ fn ordered_print_and_fprint_surfaces_preserve_non_utf8_paths() {
 
 #[test]
 fn name_and_path_families_accept_non_utf8_operands() {
+    if !supports_non_utf8_temp_paths() {
+        return;
+    }
+
     let root = tempdir().unwrap();
     let file = root.path().join(path_from_bytes(b"ReadMe-\xff.TXT"));
     fs::write(&file, "demo\n").unwrap();
@@ -155,6 +166,10 @@ fn name_and_path_families_accept_non_utf8_operands() {
 
 #[test]
 fn lname_and_ilname_accept_non_utf8_targets() {
+    if !supports_non_utf8_temp_paths() {
+        return;
+    }
+
     let root = tempdir().unwrap();
     let target = path_from_bytes(b"TarGet-\xfe.bin");
     let link = root.path().join("link");
@@ -186,6 +201,10 @@ fn lname_and_ilname_accept_non_utf8_targets() {
 
 #[test]
 fn printf_and_fprintf_preserve_non_utf8_path_and_link_target_bytes() {
+    if !supports_non_utf8_temp_paths() {
+        return;
+    }
+
     let root = tempdir().unwrap();
     let link = root.path().join(path_from_bytes(b"sym-\xfd"));
     let out = root.path().join("report.txt");

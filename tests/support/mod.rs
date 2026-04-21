@@ -8,10 +8,14 @@ use rushfind::birth::read_birth_time;
 use std::collections::BTreeSet;
 use std::ffi::CString;
 use std::ffi::OsString;
+use std::fs;
 use std::io::Write;
 use std::mem::MaybeUninit;
+#[cfg(unix)]
+use std::os::unix::ffi::OsStringExt;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
+use std::sync::{Once, OnceLock};
 use std::time::Duration;
 use wait_timeout::ChildExt;
 
@@ -36,6 +40,44 @@ pub fn temp_output_path(name: &str) -> (tempfile::TempDir, std::path::PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join(name);
     (dir, path)
+}
+
+#[cfg(unix)]
+static NON_UTF8_TEMP_PATHS_SUPPORTED: OnceLock<bool> = OnceLock::new();
+#[cfg(unix)]
+static NON_UTF8_TEMP_PATHS_UNSUPPORTED_REPORTED: Once = Once::new();
+
+#[cfg(unix)]
+fn detect_non_utf8_temp_paths() -> bool {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(std::path::PathBuf::from(OsString::from_vec(
+        b"probe-\xff".to_vec(),
+    )));
+
+    match fs::write(&path, []) {
+        Ok(()) => true,
+        Err(error) if error.raw_os_error() == Some(libc::EILSEQ) => false,
+        Err(error) => panic!("unexpected non-UTF-8 temp path probe failure: {error}"),
+    }
+}
+
+#[cfg(unix)]
+fn report_unsupported_non_utf8_temp_paths() {
+    NON_UTF8_TEMP_PATHS_UNSUPPORTED_REPORTED.call_once(|| {
+        eprintln!(
+            "skipping non-UTF-8 filesystem test: temp filesystem rejects raw non-UTF-8 path bytes"
+        );
+    });
+}
+
+#[cfg(unix)]
+pub fn supports_non_utf8_temp_paths() -> bool {
+    if *NON_UTF8_TEMP_PATHS_SUPPORTED.get_or_init(detect_non_utf8_temp_paths) {
+        true
+    } else {
+        report_unsupported_non_utf8_temp_paths();
+        false
+    }
 }
 
 pub fn lines(bytes: &[u8]) -> BTreeSet<String> {

@@ -6,7 +6,7 @@ use std::fs;
 use std::os::unix::ffi::OsStringExt;
 use std::path::PathBuf;
 use std::process::{Command, Output};
-use support::{gnu_find_output, path_arg};
+use support::{gnu_find_output, path_arg, supports_non_utf8_temp_paths};
 use tempfile::tempdir;
 
 fn os(bytes: &[u8]) -> OsString {
@@ -49,6 +49,10 @@ fn build_non_utf8_regex_tree() -> tempfile::TempDir {
 
 #[test]
 fn regex_and_iregex_match_gnu_for_non_utf8_operands() {
+    if !supports_non_utf8_temp_paths() {
+        return;
+    }
+
     let root = build_non_utf8_regex_tree();
 
     for args in [
@@ -101,6 +105,10 @@ fn regex_and_iregex_match_gnu_for_non_utf8_operands() {
 
 #[test]
 fn regex_foundation_matrix_gnu_and_pcre2_preserve_non_utf8_subject_matching() {
+    if !supports_non_utf8_temp_paths() {
+        return;
+    }
+
     let root = build_non_utf8_regex_tree();
 
     for args in [
@@ -149,6 +157,10 @@ fn build_non_utf8_emacs_tree() -> tempfile::TempDir {
 
 #[test]
 fn regex_emacs_followup_matrix_emacs_literal_byte_patterns_match_gnu_for_non_utf8_operands() {
+    if !supports_non_utf8_temp_paths() {
+        return;
+    }
+
     let root = build_non_utf8_emacs_tree();
     let args = vec![
         path_arg(root.path()),
@@ -184,6 +196,10 @@ fn build_non_utf8_gnu_hardening_tree() -> tempfile::TempDir {
 
 #[test]
 fn gnu_hardening_bytes_literal_backslash_and_high_bytes_match_gnu() {
+    if !supports_non_utf8_temp_paths() {
+        return;
+    }
+
     let root = build_non_utf8_gnu_hardening_tree();
 
     for args in [

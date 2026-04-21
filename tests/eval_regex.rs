@@ -1,3 +1,5 @@
+mod support;
+
 use rushfind::entry::EntryContext;
 use rushfind::eval::evaluate;
 use rushfind::follow::FollowMode;
@@ -9,6 +11,8 @@ use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use support::supports_non_utf8_temp_paths;
 use tempfile::tempdir;
 
 #[test]
@@ -72,6 +76,10 @@ fn rust_mode_accepts_rust_specific_grouping_syntax() {
 fn non_utf8_candidate_paths_are_matched_without_lossy_conversion() {
     use std::os::unix::ffi::OsStringExt;
 
+    if !supports_non_utf8_temp_paths() {
+        return;
+    }
+
     let root = tempdir().unwrap();
     let file_name = OsString::from_vec(vec![b'b', b'i', b'n', 0xff]);
     let path = root.path().join(PathBuf::from(file_name));
@@ -90,6 +98,10 @@ fn non_utf8_candidate_paths_are_matched_without_lossy_conversion() {
 fn rust_mode_accepts_non_utf8_literal_bytes_in_patterns() {
     use std::os::unix::ffi::OsStringExt;
 
+    if !supports_non_utf8_temp_paths() {
+        return;
+    }
+
     let root = tempdir().unwrap();
     let file_name = OsString::from_vec(vec![b'f', b'o', b'o', 0xff]);
     let path = root.path().join(PathBuf::from(file_name));
@@ -105,6 +117,10 @@ fn rust_mode_accepts_non_utf8_literal_bytes_in_patterns() {
 #[test]
 fn gnu_facing_dialects_accept_non_utf8_literal_bytes_in_patterns() {
     use std::os::unix::ffi::OsStringExt;
+
+    if !supports_non_utf8_temp_paths() {
+        return;
+    }
 
     let root = tempdir().unwrap();
     let file_name = OsString::from_vec(vec![b'b', b'a', b'r', 0xfe]);
