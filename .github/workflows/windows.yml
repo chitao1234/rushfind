@@ -11,6 +11,16 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Cache Rust toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.rustup/settings.toml
+            ~/.rustup/toolchains/
+            ~/.rustup/update-hashes/
+          key: windows-rustup-1.85.0-x86_64-pc-windows-msvc
+
       - name: Install Rust 1.85.0
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -32,9 +42,20 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Cache Rust toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.rustup/settings.toml
+            ~/.rustup/toolchains/
+            ~/.rustup/update-hashes/
+          key: windows-rustup-1.85.0-x86_64-pc-windows-gnu
+
       - name: Install MinGW toolchain
         uses: msys2/setup-msys2@v2
         with:
+          cache: true
           msystem: MINGW64
           update: true
           path-type: inherit
