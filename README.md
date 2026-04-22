@@ -110,6 +110,10 @@ Find for the occupātus.
 - On Windows, `-user`, `-group`, `-nouser`, `-nogroup`, `%u`, `%g`, `-readable`, `-writable`,
   `-executable`, `-fstype`, `-xdev`, `-mount`, `-ls`, `-fls`, and the `-exec*` / `-ok*` family
   use native Windows contracts.
+- `-flags` is cross-platform, symbolic-only, and accepts only the host-native flag names that
+  the active build supports.
+- On Windows, `-reparse-type` classifies reparse points by semantic class such as `symbolic` and
+  `mount-point`.
 - On Windows, `-uid`, `-gid`, `-perm`, `%U`, `%G`, `%m`, `%M`, `%D`, `%b`, and `%k` fail during
   planning with explicit diagnostics.
 - On Windows, interactive locale handling and case-insensitive glob matching remain approximate
