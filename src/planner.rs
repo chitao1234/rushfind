@@ -367,6 +367,7 @@ fn require_platform_feature(
 }
 
 fn validate_platform_printf_program(
+    flag: &'static str,
     program: &PrintfProgram,
     capabilities: &PlatformCapabilities,
     state: &mut PlanningState,
@@ -382,11 +383,31 @@ fn validate_platform_printf_program(
             PrintfDirectiveKind::ModeOctal | PrintfDirectiveKind::ModeSymbolic => {
                 require_platform_feature(capabilities, PlatformFeature::ModeBits, state)?;
             }
+            PrintfDirectiveKind::Device
+            | PrintfDirectiveKind::Blocks512
+            | PrintfDirectiveKind::Blocks1024 => {
+                if uses_windows_native_output_contract(capabilities) {
+                    return Err(Diagnostic::new(
+                        format!("unsupported {flag} directive on Windows"),
+                        1,
+                    ));
+                }
+            }
             _ => {}
         }
     }
 
     Ok(())
+}
+
+fn uses_windows_native_output_contract(capabilities: &PlatformCapabilities) -> bool {
+    matches!(
+        capabilities.support(PlatformFeature::ModeBits),
+        SupportLevel::Unsupported(message) if message.contains("Windows")
+    ) && matches!(
+        capabilities.support(PlatformFeature::NumericOwnership),
+        SupportLevel::Unsupported(message) if message.contains("Windows")
+    )
 }
 
 fn lower_expr(
@@ -815,7 +836,7 @@ fn lower_action(
                 require_platform_feature(capabilities, PlatformFeature::FsType, state)?;
                 runtime.mount_snapshot = true;
             }
-            validate_platform_printf_program(&compiled.program, capabilities, state)?;
+            validate_platform_printf_program("-printf", &compiled.program, capabilities, state)?;
             state.startup_warnings.extend(compiled.warnings);
             Ok(RuntimeExpr::Action(RuntimeAction::Printf(compiled.program)))
         }
@@ -833,7 +854,7 @@ fn lower_action(
                 require_platform_feature(capabilities, PlatformFeature::FsType, state)?;
                 runtime.mount_snapshot = true;
             }
-            validate_platform_printf_program(&compiled.program, capabilities, state)?;
+            validate_platform_printf_program("-fprintf", &compiled.program, capabilities, state)?;
             state.startup_warnings.extend(compiled.warnings);
             Ok(RuntimeExpr::Action(RuntimeAction::FilePrintf {
                 destination: register_file_output(state, path),
@@ -841,12 +862,16 @@ fn lower_action(
             }))
         }
         Action::Ls => {
-            require_platform_feature(capabilities, PlatformFeature::ModeBits, state)?;
+            if !uses_windows_native_output_contract(capabilities) {
+                require_platform_feature(capabilities, PlatformFeature::ModeBits, state)?;
+            }
             Ok(RuntimeExpr::Action(RuntimeAction::Ls))
         }
         Action::Fls { path } => Ok(RuntimeExpr::Action(RuntimeAction::FileLs {
             destination: {
-                require_platform_feature(capabilities, PlatformFeature::ModeBits, state)?;
+                if !uses_windows_native_output_contract(capabilities) {
+                    require_platform_feature(capabilities, PlatformFeature::ModeBits, state)?;
+                }
                 register_file_output(state, path)
             },
         })),
@@ -1028,6 +1053,22 @@ mod tests {
                 argv(&[".", "-fprintf", "out.txt", "%M\\n"]),
                 "Unix mode bits are not supported on Windows",
             ),
+            (
+                argv(&[".", "-printf", "%D\\n"]),
+                "unsupported -printf directive on Windows",
+            ),
+            (
+                argv(&[".", "-printf", "%b\\n"]),
+                "unsupported -printf directive on Windows",
+            ),
+            (
+                argv(&[".", "-printf", "%k\\n"]),
+                "unsupported -printf directive on Windows",
+            ),
+            (
+                argv(&[".", "-fprintf", "out.txt", "%D\\n"]),
+                "unsupported -fprintf directive on Windows",
+            ),
         ] {
             let ast = parse_command(&args).unwrap();
             let error = plan_command_with_now_and_capabilities(
@@ -1046,23 +1087,21 @@ mod tests {
     }
 
     #[test]
-    fn windows_rejects_ls_until_a_windows_renderer_is_available() {
-        for args in [argv(&[".", "-ls"]), argv(&[".", "-fls", "out.txt"])] {
+    fn windows_accepts_ls_actions_with_the_native_renderer() {
+        for (args, expected_file_outputs) in [
+            (argv(&[".", "-ls"]), 0usize),
+            (argv(&[".", "-fls", "out.txt"]), 1usize),
+        ] {
             let ast = parse_command(&args).unwrap();
-            let error = plan_command_with_now_and_capabilities(
+            let plan = plan_command_with_now_and_capabilities(
                 ast,
                 1,
                 Timestamp::new(0, 0),
                 &windows_like_caps(),
             )
-            .unwrap_err();
-            assert!(
-                error
-                    .message
-                    .contains("Unix mode bits are not supported on Windows"),
-                "{args:?} -> {}",
-                error.message
-            );
+            .unwrap();
+
+            assert_eq!(plan.file_outputs.len(), expected_file_outputs, "{args:?}");
         }
     }
 

@@ -190,7 +190,8 @@ fn render_segments(argv: &[Vec<ExecTemplateSegment>], rendered_path: &OsStr) -> 
 }
 
 pub fn render_prompt_argv(spec: &ImmediateExecAction, path: &Path) -> Vec<OsString> {
-    render_segments(&spec.argv, path.as_os_str())
+    let rendered_path = rendered_path(path, spec.semantics);
+    render_segments(&spec.argv, rendered_path.as_os_str())
 }
 
 pub fn render_immediate_argv(spec: &ImmediateExecAction, path: &Path) -> Vec<OsString> {

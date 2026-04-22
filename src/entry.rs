@@ -306,6 +306,12 @@ impl EntryContext {
             .ok_or_else(|| missing_field("mode bits", &self.path))
     }
 
+    pub fn active_native_attributes(&self, follow_mode: FollowMode) -> Result<u32, Diagnostic> {
+        self.active_view(follow_mode)?
+            .native_attributes
+            .ok_or_else(|| missing_field("native attributes", &self.path))
+    }
+
     pub fn active_size(&self, follow_mode: FollowMode) -> Result<u64, Diagnostic> {
         Ok(self.active_view(follow_mode)?.size)
     }

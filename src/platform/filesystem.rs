@@ -305,16 +305,8 @@ pub(crate) fn is_traversal_link(view: &PlatformMetadataView) -> bool {
         return true;
     }
 
-    #[cfg(windows)]
-    {
-        const IO_REPARSE_TAG_MOUNT_POINT: u32 = 0xA0000003;
-        return view.reparse_tag == Some(IO_REPARSE_TAG_MOUNT_POINT);
-    }
-
-    #[cfg(unix)]
-    {
-        false
-    }
+    const IO_REPARSE_TAG_MOUNT_POINT: u32 = 0xA0000003;
+    view.reparse_tag == Some(IO_REPARSE_TAG_MOUNT_POINT)
 }
 
 #[cfg(unix)]

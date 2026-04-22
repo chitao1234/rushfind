@@ -29,7 +29,7 @@ mod tests {
     use super::{
         BatchLimit, ExecSemantics, OrderedActionSink, ParallelActionSink, PendingBatch,
         SpillBuffer, build_batched_argv, compile_batched_exec, compile_immediate_exec, delete_path,
-        fixed_batch_cost, render_immediate_argv,
+        fixed_batch_cost, render_immediate_argv, render_prompt_argv,
     };
     use crate::entry::EntryContext;
     use crate::eval::{ActionSink, EvalContext};
@@ -82,6 +82,17 @@ mod tests {
 
         assert_eq!(
             render_immediate_argv(&spec, Path::new("dir/file.txt")),
+            vec!["printf", "X./file.txtY"]
+        );
+    }
+
+    #[test]
+    fn execdir_prompt_rendering_uses_gnu_dot_slash_basename() {
+        let spec =
+            compile_immediate_exec(ExecSemantics::DirLocal, &["printf".into(), "X{}Y".into()]);
+
+        assert_eq!(
+            render_prompt_argv(&spec, Path::new("dir/file.txt")),
             vec!["printf", "X./file.txtY"]
         );
     }

@@ -7,16 +7,42 @@ use crate::platform::path::{display_bytes, display_os_bytes, encoded_bytes};
 use crate::printf_time::{ResolvedTimeParts, resolve_local_time_parts};
 use crate::time::Timestamp;
 use std::ffi::OsStr;
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::{
+    FILE_ATTRIBUTE_ARCHIVE, FILE_ATTRIBUTE_COMPRESSED, FILE_ATTRIBUTE_ENCRYPTED,
+    FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_READONLY, FILE_ATTRIBUTE_REPARSE_POINT,
+    FILE_ATTRIBUTE_SYSTEM,
+};
 
 const MONTHS_ABBR: [&[u8]; 12] = [
     b"Jan", b"Feb", b"Mar", b"Apr", b"May", b"Jun", b"Jul", b"Aug", b"Sep", b"Oct", b"Nov", b"Dec",
 ];
 const RECENT_PAST_WINDOW_SECONDS: i64 = 6 * 30 * 24 * 60 * 60;
 const RECENT_FUTURE_WINDOW_SECONDS: i64 = 60 * 60;
+#[cfg(not(windows))]
 const OWNER_GROUP_FIELD_WIDTH: usize = 8;
+#[cfg(windows)]
+const OWNER_GROUP_FIELD_WIDTH: usize = 16;
 const SIZE_FIELD_WIDTH: usize = 8;
 
 pub(crate) fn render_ls_record(
+    entry: &EntryContext,
+    follow_mode: FollowMode,
+    context: &EvalContext,
+) -> Result<Vec<u8>, Diagnostic> {
+    #[cfg(windows)]
+    {
+        return render_windows_ls_record(entry, follow_mode, context);
+    }
+
+    #[cfg(not(windows))]
+    {
+        render_unix_ls_record(entry, follow_mode, context)
+    }
+}
+
+#[cfg(not(windows))]
+fn render_unix_ls_record(
     entry: &EntryContext,
     follow_mode: FollowMode,
     context: &EvalContext,
@@ -50,6 +76,40 @@ pub(crate) fn render_ls_record(
     Ok(out)
 }
 
+#[cfg(windows)]
+fn render_windows_ls_record(
+    entry: &EntryContext,
+    follow_mode: FollowMode,
+    context: &EvalContext,
+) -> Result<Vec<u8>, Diagnostic> {
+    let kind = entry.active_kind(follow_mode)?;
+    let inode = entry.active_inode(follow_mode)?;
+    let attrs = windows_attribute_string(kind, entry.active_native_attributes(follow_mode)?);
+    let links = entry.active_link_count(follow_mode)?;
+    let owner_id = entry.active_owner(follow_mode)?;
+    let group_id = entry.active_group(follow_mode)?;
+    let owner = format_name_or_id(user_name(owner_id.clone())?.as_deref(), &owner_id);
+    let group = format_name_or_id(group_name(group_id.clone())?.as_deref(), &group_id);
+    let size = entry.active_size(follow_mode)?.to_string().into_bytes();
+    let timestamp = render_entry_timestamp(entry, follow_mode, context.evaluation_now()?)?;
+    let path = escape_ls_bytes(&display_bytes(&entry.path));
+    let suffix = render_symlink_suffix(entry, follow_mode)?;
+
+    let mut out = format!("{inode:>9} {} {links:>3} ", attrs).into_bytes();
+    append_padded_field(&mut out, &owner, OWNER_GROUP_FIELD_WIDTH);
+    out.push(b' ');
+    append_padded_field(&mut out, &group, OWNER_GROUP_FIELD_WIDTH);
+    out.push(b' ');
+    out.extend_from_slice(&pad_left(&size, SIZE_FIELD_WIDTH));
+    out.push(b' ');
+    out.extend_from_slice(&timestamp);
+    out.push(b' ');
+    out.extend_from_slice(&path);
+    out.extend_from_slice(&suffix);
+    out.push(b'\n');
+    Ok(out)
+}
+
 fn render_entry_timestamp(
     entry: &EntryContext,
     follow_mode: FollowMode,
@@ -60,6 +120,7 @@ fn render_entry_timestamp(
     render_ls_time_column(&parts, now)
 }
 
+#[cfg(not(windows))]
 fn render_size_field(
     entry: &EntryContext,
     follow_mode: FollowMode,
@@ -108,6 +169,58 @@ fn pad_left(value: &[u8], width: usize) -> Vec<u8> {
     out
 }
 
+#[cfg(windows)]
+fn windows_attribute_string(kind: EntryKind, attributes: u32) -> String {
+    let mut value = String::with_capacity(8);
+    value.push(match kind {
+        EntryKind::File => '-',
+        EntryKind::Directory => 'd',
+        EntryKind::Symlink => 'l',
+        EntryKind::Block => 'b',
+        EntryKind::Character => 'c',
+        EntryKind::Fifo => 'p',
+        EntryKind::Socket => 's',
+        EntryKind::Unknown => '?',
+    });
+    value.push(if attributes & FILE_ATTRIBUTE_READONLY != 0 {
+        'R'
+    } else {
+        '-'
+    });
+    value.push(if attributes & FILE_ATTRIBUTE_HIDDEN != 0 {
+        'H'
+    } else {
+        '-'
+    });
+    value.push(if attributes & FILE_ATTRIBUTE_SYSTEM != 0 {
+        'S'
+    } else {
+        '-'
+    });
+    value.push(if attributes & FILE_ATTRIBUTE_ARCHIVE != 0 {
+        'A'
+    } else {
+        '-'
+    });
+    value.push(if attributes & FILE_ATTRIBUTE_COMPRESSED != 0 {
+        'C'
+    } else {
+        '-'
+    });
+    value.push(if attributes & FILE_ATTRIBUTE_ENCRYPTED != 0 {
+        'E'
+    } else {
+        '-'
+    });
+    value.push(if attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        'P'
+    } else {
+        '-'
+    });
+    value
+}
+
+#[cfg(not(windows))]
 fn symbolic_mode_string(kind: EntryKind, mode: u32) -> String {
     let mut value = String::with_capacity(10);
     value.push(match kind {
@@ -132,6 +245,7 @@ fn symbolic_mode_string(kind: EntryKind, mode: u32) -> String {
     value
 }
 
+#[cfg(not(windows))]
 fn execute_char(
     mode: u32,
     exec_bit: u32,
