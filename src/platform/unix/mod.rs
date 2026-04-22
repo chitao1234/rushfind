@@ -8,6 +8,8 @@ use std::path::Path;
 
 #[cfg(target_os = "linux")]
 pub(crate) mod linux;
+#[cfg(target_os = "linux")]
+use self::linux as backend;
 
 #[cfg(any(
     target_os = "macos",
@@ -17,191 +19,94 @@ pub(crate) mod linux;
     target_os = "dragonfly"
 ))]
 pub(crate) mod bsd;
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "dragonfly"
+))]
+use self::bsd as backend;
 
-#[cfg(target_os = "linux")]
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "dragonfly"
+)))]
+mod backend {
+    use super::*;
+
+    fn unsupported() -> ! {
+        panic!("unix-family phase 1 only supports Linux, macOS, and BSD backends")
+    }
+
+    pub(crate) fn active_capabilities() -> &'static PlatformCapabilities {
+        unsupported()
+    }
+
+    pub(crate) fn active_flag_specs() -> &'static [FlagSpec] {
+        unsupported()
+    }
+
+    pub(crate) fn printf_zero_pads_string_fields() -> bool {
+        unsupported()
+    }
+
+    pub(crate) fn used_requires_strict_atime_after_ctime() -> bool {
+        unsupported()
+    }
+
+    pub(crate) fn filesystem_snapshot() -> Result<FilesystemSnapshot, Diagnostic> {
+        unsupported()
+    }
+
+    pub(crate) fn filesystem_key(_path: &Path, _follow: bool) -> io::Result<FilesystemKey> {
+        unsupported()
+    }
+
+    pub(crate) fn read_file_flags(_path: &Path, _follow: bool) -> io::Result<Option<u64>> {
+        unsupported()
+    }
+
+    pub(crate) fn read_birth_time(
+        _path: &Path,
+        _follow: bool,
+    ) -> Result<Option<Timestamp>, Diagnostic> {
+        unsupported()
+    }
+}
+
 pub(crate) fn active_capabilities() -> &'static PlatformCapabilities {
-    &linux::CAPABILITIES
+    backend::active_capabilities()
 }
 
-#[cfg(target_os = "linux")]
 pub(crate) fn active_flag_specs() -> &'static [FlagSpec] {
-    linux::active_flag_specs()
+    backend::active_flag_specs()
 }
 
-#[cfg(target_os = "linux")]
 pub(crate) fn printf_zero_pads_string_fields() -> bool {
-    linux::printf_zero_pads_string_fields()
+    backend::printf_zero_pads_string_fields()
 }
 
-#[cfg(target_os = "linux")]
 pub(crate) fn used_requires_strict_atime_after_ctime() -> bool {
-    linux::used_requires_strict_atime_after_ctime()
+    backend::used_requires_strict_atime_after_ctime()
 }
 
-#[cfg(any(
-    target_os = "macos",
-    target_os = "freebsd",
-    target_os = "netbsd",
-    target_os = "openbsd",
-    target_os = "dragonfly"
-))]
-pub(crate) fn active_capabilities() -> &'static PlatformCapabilities {
-    &bsd::CAPABILITIES
-}
-
-#[cfg(any(
-    target_os = "macos",
-    target_os = "freebsd",
-    target_os = "netbsd",
-    target_os = "openbsd",
-    target_os = "dragonfly"
-))]
-pub(crate) fn active_flag_specs() -> &'static [FlagSpec] {
-    bsd::active_flag_specs()
-}
-
-#[cfg(any(
-    target_os = "macos",
-    target_os = "freebsd",
-    target_os = "netbsd",
-    target_os = "openbsd",
-    target_os = "dragonfly"
-))]
-pub(crate) fn printf_zero_pads_string_fields() -> bool {
-    bsd::printf_zero_pads_string_fields()
-}
-
-#[cfg(any(
-    target_os = "macos",
-    target_os = "freebsd",
-    target_os = "netbsd",
-    target_os = "openbsd",
-    target_os = "dragonfly"
-))]
-pub(crate) fn used_requires_strict_atime_after_ctime() -> bool {
-    bsd::used_requires_strict_atime_after_ctime()
-}
-
-#[cfg(not(any(
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "freebsd",
-    target_os = "netbsd",
-    target_os = "openbsd",
-    target_os = "dragonfly"
-)))]
-pub(crate) fn active_capabilities() -> &'static PlatformCapabilities {
-    panic!("unix-family phase 1 only supports Linux, macOS, and BSD backends")
-}
-
-#[cfg(not(any(
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "freebsd",
-    target_os = "netbsd",
-    target_os = "openbsd",
-    target_os = "dragonfly"
-)))]
-pub(crate) fn active_flag_specs() -> &'static [FlagSpec] {
-    panic!("unix-family phase 1 only supports Linux, macOS, and BSD backends")
-}
-
-#[cfg(not(any(
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "freebsd",
-    target_os = "netbsd",
-    target_os = "openbsd",
-    target_os = "dragonfly"
-)))]
-pub(crate) fn read_file_flags(_path: &Path, _follow: bool) -> io::Result<Option<u64>> {
-    panic!("unix-family phase 1 only supports Linux, macOS, and BSD backends")
-}
-
-#[cfg(not(any(
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "freebsd",
-    target_os = "netbsd",
-    target_os = "openbsd",
-    target_os = "dragonfly"
-)))]
-pub(crate) fn printf_zero_pads_string_fields() -> bool {
-    panic!("unix-family phase 1 only supports Linux, macOS, and BSD backends")
-}
-
-#[cfg(not(any(
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "freebsd",
-    target_os = "netbsd",
-    target_os = "openbsd",
-    target_os = "dragonfly"
-)))]
-pub(crate) fn used_requires_strict_atime_after_ctime() -> bool {
-    panic!("unix-family phase 1 only supports Linux, macOS, and BSD backends")
-}
-
-#[cfg(target_os = "linux")]
 pub(crate) fn filesystem_snapshot() -> Result<FilesystemSnapshot, Diagnostic> {
-    linux::filesystem_snapshot()
+    backend::filesystem_snapshot()
 }
 
-#[cfg(any(
-    target_os = "macos",
-    target_os = "freebsd",
-    target_os = "netbsd",
-    target_os = "openbsd",
-    target_os = "dragonfly"
-))]
-pub(crate) fn filesystem_snapshot() -> Result<FilesystemSnapshot, Diagnostic> {
-    bsd::filesystem_snapshot()
-}
-
-#[cfg(target_os = "linux")]
 pub(crate) fn filesystem_key(path: &Path, follow: bool) -> io::Result<FilesystemKey> {
-    linux::filesystem_key(path, follow)
+    backend::filesystem_key(path, follow)
 }
 
-#[cfg(target_os = "linux")]
 pub(crate) fn read_file_flags(path: &Path, follow: bool) -> io::Result<Option<u64>> {
-    linux::read_file_flags(path, follow)
+    backend::read_file_flags(path, follow)
 }
 
-#[cfg(any(
-    target_os = "macos",
-    target_os = "freebsd",
-    target_os = "netbsd",
-    target_os = "openbsd",
-    target_os = "dragonfly"
-))]
-pub(crate) fn filesystem_key(path: &Path, follow: bool) -> io::Result<FilesystemKey> {
-    bsd::filesystem_key(path, follow)
-}
-
-#[cfg(any(
-    target_os = "macos",
-    target_os = "freebsd",
-    target_os = "netbsd",
-    target_os = "openbsd",
-    target_os = "dragonfly"
-))]
-pub(crate) fn read_file_flags(path: &Path, follow: bool) -> io::Result<Option<u64>> {
-    bsd::read_file_flags(path, follow)
-}
-
-#[cfg(target_os = "linux")]
 pub(crate) fn read_birth_time(path: &Path, follow: bool) -> Result<Option<Timestamp>, Diagnostic> {
-    linux::read_birth_time(path, follow)
-}
-
-#[cfg(any(
-    target_os = "macos",
-    target_os = "freebsd",
-    target_os = "netbsd",
-    target_os = "openbsd",
-    target_os = "dragonfly"
-))]
-pub(crate) fn read_birth_time(path: &Path, follow: bool) -> Result<Option<Timestamp>, Diagnostic> {
-    bsd::read_birth_time(path, follow)
+    backend::read_birth_time(path, follow)
 }

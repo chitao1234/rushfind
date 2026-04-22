@@ -14,8 +14,8 @@ pub enum BrokerMessage {
     Stderr(Vec<u8>),
 }
 
-pub fn spawn_broker<'scope, 'env, W, E>(
-    scope: &'scope Scope<'scope, 'env>,
+pub fn spawn_broker<'scope, W, E>(
+    scope: &'scope Scope<'scope, '_>,
     stdout: &'scope mut W,
     stderr: &'scope mut E,
 ) -> (
@@ -70,7 +70,7 @@ impl<'a, W: Write> StdoutSink<'a, W> {
     }
 }
 
-impl<'a, W: Write> ActionSink for StdoutSink<'a, W> {
+impl<W: Write> ActionSink for StdoutSink<'_, W> {
     fn dispatch(
         &mut self,
         action: &RuntimeAction,

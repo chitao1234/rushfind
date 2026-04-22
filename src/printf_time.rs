@@ -93,6 +93,7 @@ pub(crate) fn resolve_local_time_parts(
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
+#[allow(clippy::too_many_arguments)]
 fn tm_from_parts(
     year: i32,
     month: i32,
@@ -136,7 +137,7 @@ fn local_time(seconds: i64) -> Result<libc::tm, Diagnostic> {
                 1,
             ));
         }
-        return Ok(unsafe { local.assume_init() });
+        Ok(unsafe { local.assume_init() })
     }
 
     #[cfg(windows)]
@@ -149,7 +150,7 @@ fn local_time(seconds: i64) -> Result<libc::tm, Diagnostic> {
                 1,
             ));
         }
-        return Ok(unsafe { local.assume_init() });
+        Ok(unsafe { local.assume_init() })
     }
 }
 

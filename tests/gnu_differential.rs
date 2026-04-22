@@ -332,12 +332,12 @@ fn touch_time(path: &Path, args: &[&str]) {
 
     let timestamp = parse_relative_touch_time(date.expect("portable touch helper requires `-d`"));
     let metadata = fs::metadata(path).unwrap();
-    let atime = if update_atime || (!update_atime && !update_mtime) {
+    let atime = if update_atime || !update_mtime {
         timestamp
     } else {
         Timestamp::new(metadata.atime(), metadata.atime_nsec() as i32)
     };
-    let mtime = if update_mtime || (!update_atime && !update_mtime) {
+    let mtime = if update_mtime || !update_atime {
         timestamp
     } else {
         Timestamp::new(metadata.mtime(), metadata.mtime_nsec() as i32)

@@ -22,50 +22,30 @@ pub(crate) enum PlatformFeature {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OutputContract {
+    Posix,
+    #[cfg(any(windows, test))]
+    WindowsNative,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PlatformCapabilities {
-    fstype: SupportLevel,
-    same_file_system: SupportLevel,
-    birth_time: SupportLevel,
-    file_flags: SupportLevel,
-    reparse_type: SupportLevel,
-    named_ownership: SupportLevel,
-    numeric_ownership: SupportLevel,
-    access_predicates: SupportLevel,
-    messages_locale: SupportLevel,
-    case_insensitive_glob: SupportLevel,
-    mode_bits: SupportLevel,
+    pub(crate) fstype: SupportLevel,
+    pub(crate) same_file_system: SupportLevel,
+    pub(crate) birth_time: SupportLevel,
+    pub(crate) file_flags: SupportLevel,
+    pub(crate) reparse_type: SupportLevel,
+    pub(crate) named_ownership: SupportLevel,
+    pub(crate) numeric_ownership: SupportLevel,
+    pub(crate) access_predicates: SupportLevel,
+    pub(crate) messages_locale: SupportLevel,
+    pub(crate) case_insensitive_glob: SupportLevel,
+    pub(crate) mode_bits: SupportLevel,
+    pub(crate) output_contract: OutputContract,
 }
 
 impl PlatformCapabilities {
-    pub(crate) const fn new(
-        fstype: SupportLevel,
-        same_file_system: SupportLevel,
-        birth_time: SupportLevel,
-        file_flags: SupportLevel,
-        reparse_type: SupportLevel,
-        named_ownership: SupportLevel,
-        numeric_ownership: SupportLevel,
-        access_predicates: SupportLevel,
-        messages_locale: SupportLevel,
-        case_insensitive_glob: SupportLevel,
-        mode_bits: SupportLevel,
-    ) -> Self {
-        Self {
-            fstype,
-            same_file_system,
-            birth_time,
-            file_flags,
-            reparse_type,
-            named_ownership,
-            numeric_ownership,
-            access_predicates,
-            messages_locale,
-            case_insensitive_glob,
-            mode_bits,
-        }
-    }
-
-    pub(crate) const fn support(self, feature: PlatformFeature) -> SupportLevel {
+    pub(crate) const fn support(&self, feature: PlatformFeature) -> SupportLevel {
         match feature {
             PlatformFeature::FsType => self.fstype,
             PlatformFeature::SameFileSystem => self.same_file_system,
@@ -81,21 +61,40 @@ impl PlatformCapabilities {
         }
     }
 
+    #[cfg(any(windows, test))]
+    pub(crate) const fn with_windows_native_output_contract(mut self) -> Self {
+        self.output_contract = OutputContract::WindowsNative;
+        self
+    }
+
+    pub(crate) const fn uses_windows_native_output_contract(&self) -> bool {
+        #[cfg(any(windows, test))]
+        {
+            matches!(self.output_contract, OutputContract::WindowsNative)
+        }
+
+        #[cfg(not(any(windows, test)))]
+        {
+            false
+        }
+    }
+
     #[cfg(test)]
     pub(crate) const fn for_tests() -> Self {
-        Self::new(
-            SupportLevel::Unsupported("unset"),
-            SupportLevel::Unsupported("unset"),
-            SupportLevel::Unsupported("unset"),
-            SupportLevel::Unsupported("unset"),
-            SupportLevel::Unsupported("unset"),
-            SupportLevel::Unsupported("unset"),
-            SupportLevel::Unsupported("unset"),
-            SupportLevel::Unsupported("unset"),
-            SupportLevel::Unsupported("unset"),
-            SupportLevel::Unsupported("unset"),
-            SupportLevel::Unsupported("unset"),
-        )
+        Self {
+            fstype: SupportLevel::Unsupported("unset"),
+            same_file_system: SupportLevel::Unsupported("unset"),
+            birth_time: SupportLevel::Unsupported("unset"),
+            file_flags: SupportLevel::Unsupported("unset"),
+            reparse_type: SupportLevel::Unsupported("unset"),
+            named_ownership: SupportLevel::Unsupported("unset"),
+            numeric_ownership: SupportLevel::Unsupported("unset"),
+            access_predicates: SupportLevel::Unsupported("unset"),
+            messages_locale: SupportLevel::Unsupported("unset"),
+            case_insensitive_glob: SupportLevel::Unsupported("unset"),
+            mode_bits: SupportLevel::Unsupported("unset"),
+            output_contract: OutputContract::Posix,
+        }
     }
 
     #[cfg(test)]

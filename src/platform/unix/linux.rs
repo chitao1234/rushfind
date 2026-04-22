@@ -1,5 +1,6 @@
 use crate::diagnostics::Diagnostic;
 use crate::file_flags::FlagSpec;
+use crate::platform::capabilities::OutputContract;
 use crate::platform::filesystem::{FilesystemKey, FilesystemSnapshot};
 use crate::platform::{PlatformCapabilities, SupportLevel};
 use crate::time::Timestamp;
@@ -15,19 +16,24 @@ const FS_IMMUTABLE_FL: u64 = 0x0000_0010;
 const FS_APPEND_FL: u64 = 0x0000_0020;
 const FS_NODUMP_FL: u64 = 0x0000_0040;
 
-pub(crate) static CAPABILITIES: PlatformCapabilities = PlatformCapabilities::new(
-    SupportLevel::Exact,
-    SupportLevel::Exact,
-    SupportLevel::Exact,
-    SupportLevel::Exact,
-    SupportLevel::Unsupported("reparse type is only supported on Windows"),
-    SupportLevel::Exact,
-    SupportLevel::Exact,
-    SupportLevel::Exact,
-    SupportLevel::Exact,
-    SupportLevel::Exact,
-    SupportLevel::Exact,
-);
+pub(crate) static CAPABILITIES: PlatformCapabilities = PlatformCapabilities {
+    fstype: SupportLevel::Exact,
+    same_file_system: SupportLevel::Exact,
+    birth_time: SupportLevel::Exact,
+    file_flags: SupportLevel::Exact,
+    reparse_type: SupportLevel::Unsupported("reparse type is only supported on Windows"),
+    named_ownership: SupportLevel::Exact,
+    numeric_ownership: SupportLevel::Exact,
+    access_predicates: SupportLevel::Exact,
+    messages_locale: SupportLevel::Exact,
+    case_insensitive_glob: SupportLevel::Exact,
+    mode_bits: SupportLevel::Exact,
+    output_contract: OutputContract::Posix,
+};
+
+pub(crate) fn active_capabilities() -> &'static PlatformCapabilities {
+    &CAPABILITIES
+}
 
 pub(crate) const fn printf_zero_pads_string_fields() -> bool {
     false

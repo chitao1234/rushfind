@@ -408,7 +408,7 @@ fn validate_platform_printf_program(
             PrintfDirectiveKind::Device
             | PrintfDirectiveKind::Blocks512
             | PrintfDirectiveKind::Blocks1024 => {
-                if uses_windows_native_output_contract(capabilities) {
+                if capabilities.uses_windows_native_output_contract() {
                     return Err(Diagnostic::new(
                         format!("unsupported {flag} directive on Windows"),
                         1,
@@ -420,16 +420,6 @@ fn validate_platform_printf_program(
     }
 
     Ok(())
-}
-
-fn uses_windows_native_output_contract(capabilities: &PlatformCapabilities) -> bool {
-    matches!(
-        capabilities.support(PlatformFeature::ModeBits),
-        SupportLevel::Unsupported(message) if message.contains("Windows")
-    ) && matches!(
-        capabilities.support(PlatformFeature::NumericOwnership),
-        SupportLevel::Unsupported(message) if message.contains("Windows")
-    )
 }
 
 fn lower_expr(
@@ -896,14 +886,14 @@ fn lower_action(
             }))
         }
         Action::Ls => {
-            if !uses_windows_native_output_contract(capabilities) {
+            if !capabilities.uses_windows_native_output_contract() {
                 require_platform_feature(capabilities, PlatformFeature::ModeBits, state)?;
             }
             Ok(RuntimeExpr::Action(RuntimeAction::Ls))
         }
         Action::Fls { path } => Ok(RuntimeExpr::Action(RuntimeAction::FileLs {
             destination: {
-                if !uses_windows_native_output_contract(capabilities) {
+                if !capabilities.uses_windows_native_output_contract() {
                     require_platform_feature(capabilities, PlatformFeature::ModeBits, state)?;
                 }
                 register_file_output(state, path)
@@ -987,6 +977,7 @@ mod tests {
 
     fn windows_like_caps() -> PlatformCapabilities {
         PlatformCapabilities::for_tests()
+            .with_windows_native_output_contract()
             .with(PlatformFeature::FsType, SupportLevel::Exact)
             .with(PlatformFeature::SameFileSystem, SupportLevel::Exact)
             .with(PlatformFeature::BirthTime, SupportLevel::Exact)
@@ -1137,6 +1128,23 @@ mod tests {
 
             assert_eq!(plan.file_outputs.len(), expected_file_outputs, "{args:?}");
         }
+    }
+
+    #[test]
+    fn ls_still_requires_mode_bits_without_the_windows_output_contract() {
+        let ast = parse_command(&argv(&[".", "-ls"])).unwrap();
+        let error = plan_command_with_now_and_capabilities(
+            ast,
+            1,
+            Timestamp::new(0, 0),
+            &PlatformCapabilities::for_tests().with(
+                PlatformFeature::ModeBits,
+                SupportLevel::Unsupported("mode bits are unavailable here"),
+            ),
+        )
+        .unwrap_err();
+
+        assert!(error.message.contains("mode bits are unavailable here"));
     }
 
     #[test]

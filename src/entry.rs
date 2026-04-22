@@ -359,12 +359,11 @@ impl EntryContext {
     }
 
     pub fn active_mount_id(&self, follow_mode: FollowMode) -> Result<u64, Diagnostic> {
-        Ok(self
-            .active_view(follow_mode)?
+        self.active_view(follow_mode)?
             .filesystem_key
             .as_ref()
             .and_then(|key| key.numeric())
-            .ok_or_else(|| missing_field("filesystem boundary key", &self.path))?)
+            .ok_or_else(|| missing_field("filesystem boundary key", &self.path))
     }
 
     pub fn active_birth_time(

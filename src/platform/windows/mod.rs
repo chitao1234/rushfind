@@ -3,6 +3,7 @@ pub(crate) mod filesystem;
 pub(crate) mod locale;
 
 use crate::file_flags::FlagSpec;
+use crate::platform::capabilities::OutputContract;
 use crate::platform::{PlatformCapabilities, SupportLevel};
 use windows_sys::Win32::Storage::FileSystem::{
     FILE_ATTRIBUTE_ARCHIVE, FILE_ATTRIBUTE_COMPRESSED, FILE_ATTRIBUTE_ENCRYPTED,
@@ -13,21 +14,24 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_ATTRIBUTE_SYSTEM, FILE_ATTRIBUTE_TEMPORARY, FILE_ATTRIBUTE_UNPINNED,
 };
 
-pub(crate) static CAPABILITIES: PlatformCapabilities = PlatformCapabilities::new(
-    SupportLevel::Exact,
-    SupportLevel::Exact,
-    SupportLevel::Exact,
-    SupportLevel::Exact,
-    SupportLevel::Exact,
-    SupportLevel::Exact,
-    SupportLevel::Unsupported("numeric ownership is not supported on Windows"),
-    SupportLevel::Exact,
-    SupportLevel::Approximate("interactive locale behavior is approximate on Windows"),
-    SupportLevel::Approximate(
+pub(crate) static CAPABILITIES: PlatformCapabilities = PlatformCapabilities {
+    fstype: SupportLevel::Exact,
+    same_file_system: SupportLevel::Exact,
+    birth_time: SupportLevel::Exact,
+    file_flags: SupportLevel::Exact,
+    reparse_type: SupportLevel::Exact,
+    named_ownership: SupportLevel::Exact,
+    numeric_ownership: SupportLevel::Unsupported("numeric ownership is not supported on Windows"),
+    access_predicates: SupportLevel::Exact,
+    messages_locale: SupportLevel::Approximate(
+        "interactive locale behavior is approximate on Windows",
+    ),
+    case_insensitive_glob: SupportLevel::Approximate(
         "case-insensitive glob matching may differ outside the C locale on Windows",
     ),
-    SupportLevel::Unsupported("Unix mode bits are not supported on Windows"),
-);
+    mode_bits: SupportLevel::Unsupported("Unix mode bits are not supported on Windows"),
+    output_contract: OutputContract::WindowsNative,
+};
 
 pub(crate) static FLAG_SPECS: &[FlagSpec] = &[
     FlagSpec {

@@ -92,19 +92,10 @@ pub(crate) struct EvalOutcome {
     pub(crate) status: RuntimeStatus,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct EvalContext {
     mount_snapshot: Option<Arc<FilesystemSnapshot>>,
     evaluation_now: Option<Timestamp>,
-}
-
-impl Default for EvalContext {
-    fn default() -> Self {
-        Self {
-            mount_snapshot: None,
-            evaluation_now: None,
-        }
-    }
 }
 
 impl EvalContext {

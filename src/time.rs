@@ -608,7 +608,7 @@ fn local_time(seconds: i64) -> Result<libc::tm, Diagnostic> {
             ));
         }
 
-        return Ok(unsafe { local.assume_init() });
+        Ok(unsafe { local.assume_init() })
     }
 
     #[cfg(windows)]
@@ -623,7 +623,7 @@ fn local_time(seconds: i64) -> Result<libc::tm, Diagnostic> {
             ));
         }
 
-        return Ok(unsafe { local.assume_init() });
+        Ok(unsafe { local.assume_init() })
     }
 }
 

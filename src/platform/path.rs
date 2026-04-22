@@ -9,12 +9,12 @@ use std::path::{Path, PathBuf};
 pub(crate) fn display_bytes(path: &Path) -> Vec<u8> {
     #[cfg(unix)]
     {
-        return path.as_os_str().as_encoded_bytes().to_vec();
+        path.as_os_str().as_encoded_bytes().to_vec()
     }
 
     #[cfg(windows)]
     {
-        return path.display().to_string().replace('/', "\\").into_bytes();
+        path.display().to_string().replace('/', "\\").into_bytes()
     }
 }
 
@@ -35,7 +35,7 @@ pub(crate) fn os_string_from_encoded_bytes(bytes: Vec<u8>) -> OsString {
     unsafe { OsString::from_encoded_bytes_unchecked(bytes) }
 }
 
-pub(crate) fn normalize_match_text<'a>(value: &'a OsStr) -> Cow<'a, OsStr> {
+pub(crate) fn normalize_match_text(value: &OsStr) -> Cow<'_, OsStr> {
     #[cfg(unix)]
     {
         Cow::Borrowed(value)
@@ -59,14 +59,14 @@ pub(crate) fn execdir_placeholder(path: &Path) -> OsString {
     {
         let mut bytes = b"./".to_vec();
         bytes.extend_from_slice(encoded_bytes(basename));
-        return os_string_from_encoded_bytes(bytes);
+        os_string_from_encoded_bytes(bytes)
     }
 
     #[cfg(windows)]
     {
         let mut wide = ".\\".encode_utf16().collect::<Vec<_>>();
         wide.extend(basename.encode_wide());
-        return OsString::from_wide(&wide);
+        OsString::from_wide(&wide)
     }
 }
 
@@ -79,14 +79,14 @@ pub(crate) fn relative_dir_for_printf(path: &Path) -> PathBuf {
 fn normalize_match_bytes(value: &OsStr) -> Vec<u8> {
     #[cfg(unix)]
     {
-        return encoded_bytes(value).to_vec();
+        encoded_bytes(value).to_vec()
     }
 
     #[cfg(windows)]
     {
-        return encoded_bytes(value)
+        encoded_bytes(value)
             .iter()
             .map(|byte| if *byte == b'\\' { b'/' } else { *byte })
-            .collect();
+            .collect()
     }
 }
