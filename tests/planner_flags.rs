@@ -11,7 +11,7 @@ fn lowers_supported_flags_operand_on_this_host() {
     } else if cfg!(target_os = "linux") {
         "+immutable,noappend"
     } else {
-        "+uchg,nouchg"
+        "+uchg,noarch"
     };
 
     let plan = plan_command(parse_command(&argv(&[".", "-flags", raw])).unwrap(), 1).unwrap();
