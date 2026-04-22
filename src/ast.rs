@@ -61,6 +61,8 @@ pub enum Predicate {
     NoUser,
     NoGroup,
     Perm(OsString),
+    Flags(OsString),
+    ReparseType(OsString),
     Size(OsString),
     Empty,
     Used(OsString),

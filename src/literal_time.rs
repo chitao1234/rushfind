@@ -1,9 +1,9 @@
 use crate::diagnostics::Diagnostic;
 use crate::time::Timestamp;
 use std::ffi::OsStr;
-use std::str;
 #[cfg(windows)]
 use std::ptr::null;
+use std::str;
 #[cfg(windows)]
 use windows_sys::Win32::Foundation::{FILETIME, SYSTEMTIME};
 #[cfg(windows)]

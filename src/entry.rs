@@ -306,10 +306,18 @@ impl EntryContext {
             .ok_or_else(|| missing_field("mode bits", &self.path))
     }
 
+    pub fn active_flag_bits(&self, follow_mode: FollowMode) -> Result<Option<u64>, Diagnostic> {
+        Ok(self.active_view(follow_mode)?.flag_bits)
+    }
+
     pub fn active_native_attributes(&self, follow_mode: FollowMode) -> Result<u32, Diagnostic> {
         self.active_view(follow_mode)?
             .native_attributes
             .ok_or_else(|| missing_field("native attributes", &self.path))
+    }
+
+    pub fn physical_reparse_tag(&self) -> Result<Option<u32>, Diagnostic> {
+        Ok(self.physical_view()?.reparse_tag)
     }
 
     pub fn active_size(&self, follow_mode: FollowMode) -> Result<u64, Diagnostic> {
@@ -779,6 +787,7 @@ mod tests {
                     owner: Some(PlatformPrincipalId::Numeric(501)),
                     group: Some(PlatformPrincipalId::Numeric(20)),
                     mode_bits: Some(0o640),
+                    flag_bits: None,
                     native_attributes: None,
                     reparse_tag: None,
                     link_count: Some(2),
@@ -817,6 +826,7 @@ mod tests {
                     owner: None,
                     group: None,
                     mode_bits: Some(0o640),
+                    flag_bits: None,
                     native_attributes: None,
                     reparse_tag: None,
                     link_count: Some(2),
@@ -963,6 +973,7 @@ mod tests {
             owner: None,
             group: None,
             mode_bits: None,
+            flag_bits: Some(0),
             native_attributes: Some(0),
             reparse_tag: Some(MOUNT_POINT_REPARSE_TAG),
             link_count: Some(1),
@@ -984,6 +995,7 @@ mod tests {
             owner: None,
             group: None,
             mode_bits: None,
+            flag_bits: Some(0),
             native_attributes: Some(0),
             reparse_tag: None,
             link_count: Some(1),

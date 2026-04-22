@@ -58,6 +58,7 @@ pub(crate) struct PlatformMetadataView {
     pub owner: Option<PlatformPrincipalId>,
     pub group: Option<PlatformPrincipalId>,
     pub mode_bits: Option<u32>,
+    pub flag_bits: Option<u64>,
     pub native_attributes: Option<u32>,
     pub reparse_tag: Option<u32>,
     pub link_count: Option<u64>,
@@ -68,6 +69,18 @@ pub(crate) struct PlatformMetadataView {
     pub birth_time: Option<Timestamp>,
     pub filesystem_key: Option<FilesystemKey>,
     pub device_number: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReparseTypeClass {
+    Symbolic,
+    MountPoint,
+    AppExecLink,
+    WslSymlink,
+    AfUnix,
+    Cloud,
+    ProjFs,
+    Other,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -201,6 +214,7 @@ pub(crate) fn metadata_view_from_metadata(
         owner: Some(PlatformPrincipalId::Numeric(metadata.uid())),
         group: Some(PlatformPrincipalId::Numeric(metadata.gid())),
         mode_bits: Some(metadata.mode() & 0o7777),
+        flag_bits: read_file_flags(path, follow).ok().flatten(),
         native_attributes: None,
         reparse_tag: None,
         link_count: Some(metadata.nlink()),
@@ -230,6 +244,7 @@ pub(crate) fn metadata_view_from_metadata(
         owner: None,
         group: None,
         mode_bits: None,
+        flag_bits: None,
         native_attributes: None,
         reparse_tag: None,
         link_count: None,
@@ -258,9 +273,19 @@ pub(crate) fn filesystem_key(path: &Path, follow: bool) -> io::Result<Filesystem
     crate::platform::unix::filesystem_key(path, follow)
 }
 
+#[cfg(unix)]
+pub(crate) fn read_file_flags(path: &Path, follow: bool) -> io::Result<Option<u64>> {
+    crate::platform::unix::read_file_flags(path, follow)
+}
+
 #[cfg(windows)]
 pub(crate) fn filesystem_key(path: &Path, follow: bool) -> io::Result<FilesystemKey> {
     crate::platform::windows::filesystem::filesystem_key(path, follow)
+}
+
+#[cfg(windows)]
+pub(crate) fn read_file_flags(_path: &Path, _follow: bool) -> io::Result<Option<u64>> {
+    Ok(None)
 }
 
 #[cfg(unix)]
@@ -298,6 +323,16 @@ pub(crate) fn read_birth_time(path: &Path, follow: bool) -> Result<Option<Timest
 #[cfg(windows)]
 pub(crate) fn read_birth_time(path: &Path, follow: bool) -> Result<Option<Timestamp>, Diagnostic> {
     crate::platform::windows::filesystem::read_birth_time(path, follow)
+}
+
+#[cfg(windows)]
+pub(crate) fn classify_reparse_tag(tag: u32) -> ReparseTypeClass {
+    crate::platform::windows::filesystem::classify_reparse_type(tag)
+}
+
+#[cfg(not(windows))]
+pub(crate) fn classify_reparse_tag(_tag: u32) -> ReparseTypeClass {
+    ReparseTypeClass::Other
 }
 
 pub(crate) fn is_traversal_link(view: &PlatformMetadataView) -> bool {

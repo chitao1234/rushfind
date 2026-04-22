@@ -91,19 +91,16 @@ mod tests {
         let spec =
             compile_immediate_exec(ExecSemantics::DirLocal, &["printf".into(), "X{}Y".into()]);
 
-        assert_eq!(
-            render_prompt_argv(&spec, Path::new("dir/file.txt")),
+        assert_eq!(render_prompt_argv(&spec, Path::new("dir/file.txt")), {
+            #[cfg(windows)]
             {
-                #[cfg(windows)]
-                {
-                    vec!["printf", "X./file.txtY"]
-                }
-                #[cfg(not(windows))]
-                {
-                    vec!["printf", "Xdir/file.txtY"]
-                }
+                vec!["printf", "X./file.txtY"]
             }
-        );
+            #[cfg(not(windows))]
+            {
+                vec!["printf", "Xdir/file.txtY"]
+            }
+        });
     }
 
     #[test]

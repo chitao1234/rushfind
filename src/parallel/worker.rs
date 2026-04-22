@@ -704,11 +704,7 @@ fn run_postorder_pending_root(
         );
     }
 
-    let barrier = barriers.begin_directory(
-        entry,
-        child_units,
-        notify_parent,
-    )?;
+    let barrier = barriers.begin_directory(entry, child_units, notify_parent)?;
     let mut status = RuntimeStatus::default();
 
     if has_local_batch {

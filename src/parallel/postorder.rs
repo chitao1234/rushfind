@@ -130,9 +130,7 @@ mod tests {
     fn resume_task_is_released_only_after_the_last_spilled_chunk_finishes() {
         let table = BarrierTable::default();
         let entry = EntryContext::new(PathBuf::from("dir"), 1, false);
-        let barrier = table
-            .begin_directory(entry.clone(), 2, None)
-            .unwrap();
+        let barrier = table.begin_directory(entry.clone(), 2, None).unwrap();
 
         assert!(table.finish_spilled_chunk(barrier).unwrap().is_none());
 

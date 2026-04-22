@@ -274,18 +274,14 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn execdir_path_validation_is_skipped_on_windows() {
-        assert!(validate_execdir_path_value(OsStr::new(
-            r"C:\Windows\System32;C:\Windows"
-        ))
-        .is_ok());
+        assert!(validate_execdir_path_value(OsStr::new(r"C:\Windows\System32;C:\Windows")).is_ok());
         assert!(validate_execdir_path_value(OsStr::new("")).is_ok());
         assert!(validate_execdir_path_value(OsStr::new(r".;C:\Windows\System32")).is_ok());
         assert!(validate_execdir_path_value(OsStr::new(r"bin;C:\Windows\System32")).is_ok());
         assert!(validate_execdir_path_value(OsStr::new(r";C:\Windows\System32")).is_ok());
         assert!(validate_execdir_path_value(OsStr::new(r"C:\Windows\System32;")).is_ok());
-        assert!(validate_execdir_path_value(OsStr::new(
-            r"C:\Windows\System32;;C:\Windows"
-        ))
-        .is_ok());
+        assert!(
+            validate_execdir_path_value(OsStr::new(r"C:\Windows\System32;;C:\Windows")).is_ok()
+        );
     }
 }

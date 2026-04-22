@@ -5,6 +5,7 @@ use crate::exec::{
     BatchedExecAction, ExecBatchId, ExecSemantics, ImmediateExecAction, compile_batched_exec,
     compile_immediate_exec,
 };
+use crate::file_flags::{FileFlagsMatcher, parse_flags_argument};
 use crate::file_output::{FileOutputId, FileOutputTerminator, PlannedFileOutput};
 use crate::follow::FollowMode;
 use crate::identity::FileIdentity;
@@ -28,6 +29,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
+
+pub use crate::platform::filesystem::ReparseTypeClass;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParallelExecutionPolicy {
@@ -133,6 +136,8 @@ pub enum RuntimePredicate {
     NoUser,
     NoGroup,
     Perm(PermMatcher),
+    Flags(FileFlagsMatcher),
+    ReparseType(ReparseTypeClass),
     Size(SizeMatcher),
     Empty,
     Used(UsedMatcher),
@@ -193,6 +198,23 @@ fn compile_glob(
 
 fn normalize_match_pattern(pattern: &std::ffi::OsStr) -> std::borrow::Cow<'_, std::ffi::OsStr> {
     crate::platform::path::normalize_match_text(pattern)
+}
+
+fn parse_reparse_type(raw: &std::ffi::OsStr) -> Result<ReparseTypeClass, Diagnostic> {
+    match raw.to_string_lossy().as_ref() {
+        "symbolic" => Ok(ReparseTypeClass::Symbolic),
+        "mount-point" => Ok(ReparseTypeClass::MountPoint),
+        "app-exec-link" => Ok(ReparseTypeClass::AppExecLink),
+        "wsl-symlink" => Ok(ReparseTypeClass::WslSymlink),
+        "af-unix" => Ok(ReparseTypeClass::AfUnix),
+        "cloud" => Ok(ReparseTypeClass::Cloud),
+        "projfs" => Ok(ReparseTypeClass::ProjFs),
+        "other" => Ok(ReparseTypeClass::Other),
+        other => Err(Diagnostic::new(
+            format!("unknown -reparse-type name `{other}`"),
+            1,
+        )),
+    }
 }
 
 pub fn plan_command(ast: CommandAst, workers: usize) -> Result<ExecutionPlan, Diagnostic> {
@@ -631,6 +653,18 @@ fn lower_predicate(
             require_platform_feature(capabilities, PlatformFeature::ModeBits, state)?;
             Ok(RuntimeExpr::Predicate(RuntimePredicate::Perm(
                 parse_perm_argument(raw.as_os_str())?,
+            )))
+        }
+        Predicate::Flags(raw) => {
+            require_platform_feature(capabilities, PlatformFeature::FileFlags, state)?;
+            Ok(RuntimeExpr::Predicate(RuntimePredicate::Flags(
+                parse_flags_argument(raw.as_os_str(), crate::platform::active_flag_specs())?,
+            )))
+        }
+        Predicate::ReparseType(raw) => {
+            require_platform_feature(capabilities, PlatformFeature::ReparseType, state)?;
+            Ok(RuntimeExpr::Predicate(RuntimePredicate::ReparseType(
+                parse_reparse_type(raw.as_os_str())?,
             )))
         }
         Predicate::Size(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Size(

@@ -255,6 +255,12 @@ impl<'a> Parser<'a> {
             Expr::Predicate(Predicate::NoGroup)
         } else if token.matches("-perm") {
             Expr::Predicate(Predicate::Perm(self.take_os_string("-perm")?))
+        } else if token.matches("-flags") {
+            Expr::Predicate(Predicate::Flags(self.take_os_string("-flags")?))
+        } else if token.matches("-reparse-type") {
+            Expr::Predicate(Predicate::ReparseType(
+                self.take_os_string("-reparse-type")?,
+            ))
         } else if token.matches("-size") {
             Expr::Predicate(Predicate::Size(self.take_os_string("-size")?))
         } else if token.matches("-empty") {

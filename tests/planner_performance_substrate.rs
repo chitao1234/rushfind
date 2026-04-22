@@ -246,6 +246,8 @@ fn predicate_label(predicate: &RuntimePredicate) -> &'static str {
         RuntimePredicate::NoUser => "nouser",
         RuntimePredicate::NoGroup => "nogroup",
         RuntimePredicate::Perm(_) => "perm",
+        RuntimePredicate::Flags(_) => "flags",
+        RuntimePredicate::ReparseType(_) => "reparse-type",
         RuntimePredicate::Size(_) => "size",
         RuntimePredicate::Empty => "empty",
         RuntimePredicate::Used(_) => "used",

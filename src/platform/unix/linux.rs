@@ -1,4 +1,5 @@
 use crate::diagnostics::Diagnostic;
+use crate::file_flags::FlagSpec;
 use crate::platform::filesystem::{FilesystemKey, FilesystemSnapshot};
 use crate::platform::{PlatformCapabilities, SupportLevel};
 use crate::time::Timestamp;
@@ -7,12 +8,19 @@ use std::fs;
 use std::io;
 use std::mem::MaybeUninit;
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
+
+const FS_IMMUTABLE_FL: u64 = 0x0000_0010;
+const FS_APPEND_FL: u64 = 0x0000_0020;
+const FS_NODUMP_FL: u64 = 0x0000_0040;
 
 pub(crate) static CAPABILITIES: PlatformCapabilities = PlatformCapabilities::new(
     SupportLevel::Exact,
     SupportLevel::Exact,
     SupportLevel::Exact,
+    SupportLevel::Exact,
+    SupportLevel::Unsupported("reparse type is only supported on Windows"),
     SupportLevel::Exact,
     SupportLevel::Exact,
     SupportLevel::Exact,
@@ -27,6 +35,25 @@ pub(crate) const fn printf_zero_pads_string_fields() -> bool {
 
 pub(crate) const fn used_requires_strict_atime_after_ctime() -> bool {
     false
+}
+
+pub(crate) static FLAG_SPECS: &[FlagSpec] = &[
+    FlagSpec {
+        name: "append",
+        bit: FS_APPEND_FL,
+    },
+    FlagSpec {
+        name: "immutable",
+        bit: FS_IMMUTABLE_FL,
+    },
+    FlagSpec {
+        name: "nodump",
+        bit: FS_NODUMP_FL,
+    },
+];
+
+pub(crate) fn active_flag_specs() -> &'static [FlagSpec] {
+    FLAG_SPECS
 }
 
 pub(crate) fn filesystem_snapshot() -> Result<FilesystemSnapshot, Diagnostic> {
@@ -104,4 +131,43 @@ pub(crate) fn read_birth_time(path: &Path, follow: bool) -> Result<Option<Timest
     }
 
     Ok(Some(Timestamp::new(birth.tv_sec, birth.tv_nsec as i32)))
+}
+
+pub(crate) fn read_file_flags(path: &Path, follow: bool) -> io::Result<Option<u64>> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true).custom_flags(libc::O_CLOEXEC);
+    if !follow {
+        options.custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
+    }
+    let file = match options.open(path) {
+        Ok(file) => file,
+        Err(error)
+            if !follow
+                && matches!(
+                    error.raw_os_error(),
+                    Some(libc::ELOOP) | Some(libc::EMLINK) | Some(libc::ENOENT)
+                ) =>
+        {
+            return Ok(None);
+        }
+        Err(error) => return Err(error),
+    };
+
+    let mut bits: libc::c_long = 0;
+    let rc = unsafe {
+        libc::ioctl(
+            std::os::fd::AsRawFd::as_raw_fd(&file),
+            libc::FS_IOC_GETFLAGS,
+            &mut bits,
+        )
+    };
+    if rc != 0 {
+        let error = io::Error::last_os_error();
+        return match error.raw_os_error() {
+            Some(libc::ENOTTY) | Some(libc::EOPNOTSUPP) | Some(libc::ENOSYS) => Ok(None),
+            _ => Err(error),
+        };
+    }
+
+    Ok(Some(bits as u64))
 }

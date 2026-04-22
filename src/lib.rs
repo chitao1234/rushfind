@@ -8,6 +8,7 @@ pub mod diagnostics;
 pub mod entry;
 pub mod eval;
 pub mod exec;
+pub mod file_flags;
 pub mod file_output;
 pub mod follow;
 pub mod identity;

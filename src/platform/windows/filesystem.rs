@@ -38,6 +38,14 @@ use windows_sys::Win32::System::Threading::{
 
 const IO_REPARSE_TAG_MOUNT_POINT: u32 = 0xA0000003;
 const IO_REPARSE_TAG_SYMLINK: u32 = 0xA000000C;
+const IO_REPARSE_TAG_APPEXECLINK: u32 = 0x8000001B;
+const IO_REPARSE_TAG_LX_SYMLINK: u32 = 0xA000001D;
+const IO_REPARSE_TAG_AF_UNIX: u32 = 0x80000023;
+const IO_REPARSE_TAG_CLOUD: u32 = 0x9000001A;
+const IO_REPARSE_TAG_CLOUD_F: u32 = 0x9000F01A;
+const IO_REPARSE_TAG_ONEDRIVE: u32 = 0x80000021;
+const IO_REPARSE_TAG_PROJFS: u32 = 0x9000001C;
+const IO_REPARSE_TAG_PROJFS_TOMBSTONE: u32 = 0xA0000022;
 const WINDOWS_TICKS_PER_SECOND: i64 = 10_000_000;
 const WINDOWS_TO_UNIX_EPOCH_SECONDS: i64 = 11_644_473_600;
 const VOLUME_BUFFER_LEN: usize = 1024;
@@ -62,6 +70,7 @@ pub(crate) fn metadata_view(path: &Path, follow: bool) -> io::Result<PlatformMet
         owner,
         group,
         mode_bits: None,
+        flag_bits: Some(attributes.FileAttributes as u64),
         native_attributes: Some(attributes.FileAttributes),
         reparse_tag: reparse_tag(&attributes),
         link_count: Some(handle_info.nNumberOfLinks as u64),
@@ -577,6 +586,23 @@ fn reparse_tag(attributes: &FILE_ATTRIBUTE_TAG_INFO) -> Option<u32> {
         Some(attributes.ReparseTag)
     } else {
         None
+    }
+}
+
+pub(crate) fn classify_reparse_type(tag: u32) -> crate::platform::filesystem::ReparseTypeClass {
+    use crate::platform::filesystem::ReparseTypeClass;
+
+    match tag {
+        IO_REPARSE_TAG_SYMLINK => ReparseTypeClass::Symbolic,
+        IO_REPARSE_TAG_MOUNT_POINT => ReparseTypeClass::MountPoint,
+        IO_REPARSE_TAG_APPEXECLINK => ReparseTypeClass::AppExecLink,
+        IO_REPARSE_TAG_LX_SYMLINK => ReparseTypeClass::WslSymlink,
+        IO_REPARSE_TAG_AF_UNIX => ReparseTypeClass::AfUnix,
+        IO_REPARSE_TAG_PROJFS | IO_REPARSE_TAG_PROJFS_TOMBSTONE => ReparseTypeClass::ProjFs,
+        IO_REPARSE_TAG_ONEDRIVE | IO_REPARSE_TAG_CLOUD..=IO_REPARSE_TAG_CLOUD_F => {
+            ReparseTypeClass::Cloud
+        }
+        _ => ReparseTypeClass::Other,
     }
 }
 

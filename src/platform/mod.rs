@@ -21,6 +21,16 @@ pub(crate) fn active_capabilities() -> &'static PlatformCapabilities {
 }
 
 #[cfg(unix)]
+pub(crate) fn active_flag_specs() -> &'static [crate::file_flags::FlagSpec] {
+    unix::active_flag_specs()
+}
+
+#[cfg(windows)]
+pub(crate) fn active_flag_specs() -> &'static [crate::file_flags::FlagSpec] {
+    windows::active_flag_specs()
+}
+
+#[cfg(unix)]
 pub(crate) fn printf_zero_pads_string_fields() -> bool {
     unix::printf_zero_pads_string_fields()
 }

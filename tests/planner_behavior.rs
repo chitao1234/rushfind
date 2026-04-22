@@ -65,8 +65,8 @@ fn rejects_glob_collating_and_equivalence_classes_clearly() {
         ("-iname", "[[=a=]]"),
         ("-ipath", "./[[.ch.]]"),
     ] {
-        let error = plan_command(parse_command(&argv(&[".", flag, pattern])).unwrap(), 1)
-            .unwrap_err();
+        let error =
+            plan_command(parse_command(&argv(&[".", flag, pattern])).unwrap(), 1).unwrap_err();
 
         assert!(error.message.contains(flag), "{error:?}");
         assert!(error.message.contains("unsupported construct"), "{error:?}");

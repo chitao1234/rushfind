@@ -271,6 +271,13 @@ pub(crate) fn evaluate_predicate(
         RuntimePredicate::Perm(matcher) => {
             Ok(matcher.matches(entry.active_mode_bits(follow_mode)?))
         }
+        RuntimePredicate::Flags(matcher) => {
+            Ok(matcher.matches(entry.active_flag_bits(follow_mode)?))
+        }
+        RuntimePredicate::ReparseType(expected) => Ok(entry
+            .physical_reparse_tag()?
+            .map(crate::platform::filesystem::classify_reparse_tag)
+            .is_some_and(|actual| actual == *expected)),
         RuntimePredicate::Size(matcher) => Ok(matcher.matches(entry.active_size(follow_mode)?)),
         RuntimePredicate::Empty => entry.active_is_empty(follow_mode),
         RuntimePredicate::Used(matcher) => Ok(matcher.matches(

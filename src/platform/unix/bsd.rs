@@ -1,4 +1,5 @@
 use crate::diagnostics::Diagnostic;
+use crate::file_flags::FlagSpec;
 use crate::platform::filesystem::{FilesystemKey, FilesystemSnapshot};
 use crate::platform::{PlatformCapabilities, SupportLevel};
 use crate::time::Timestamp;
@@ -21,6 +22,8 @@ pub(crate) static CAPABILITIES: PlatformCapabilities = PlatformCapabilities::new
     SupportLevel::Exact,
     SupportLevel::Exact,
     SupportLevel::Exact,
+    SupportLevel::Unsupported("reparse type is only supported on Windows"),
+    SupportLevel::Exact,
     SupportLevel::Exact,
     SupportLevel::Exact,
     SupportLevel::Approximate("interactive locale behavior is approximate on this platform"),
@@ -33,6 +36,8 @@ pub(crate) static CAPABILITIES: PlatformCapabilities = PlatformCapabilities::new
     SupportLevel::Exact,
     SupportLevel::Exact,
     SupportLevel::Exact,
+    SupportLevel::Exact,
+    SupportLevel::Unsupported("reparse type is only supported on Windows"),
     SupportLevel::Exact,
     SupportLevel::Exact,
     SupportLevel::Exact,
@@ -47,6 +52,25 @@ pub(crate) const fn printf_zero_pads_string_fields() -> bool {
 
 pub(crate) const fn used_requires_strict_atime_after_ctime() -> bool {
     cfg!(target_os = "openbsd")
+}
+
+pub(crate) static FLAG_SPECS: &[FlagSpec] = &[
+    FlagSpec {
+        name: "arch",
+        bit: libc::SF_ARCHIVED as u64,
+    },
+    FlagSpec {
+        name: "nodump",
+        bit: libc::UF_NODUMP as u64,
+    },
+    FlagSpec {
+        name: "uchg",
+        bit: libc::UF_IMMUTABLE as u64,
+    },
+];
+
+pub(crate) fn active_flag_specs() -> &'static [FlagSpec] {
+    FLAG_SPECS
 }
 
 #[cfg(any(target_os = "dragonfly", doc))]
@@ -152,6 +176,15 @@ pub(crate) fn read_birth_time(path: &Path, follow: bool) -> Result<Option<Timest
         stat.st_birthtime,
         stat.st_birthtime_nsec as i32,
     )))
+}
+
+pub(crate) fn read_file_flags(path: &Path, follow: bool) -> io::Result<Option<u64>> {
+    let metadata = if follow {
+        fs::metadata(path)
+    } else {
+        fs::symlink_metadata(path)
+    }?;
+    Ok(Some(metadata.st_flags() as u64))
 }
 
 #[cfg(not(target_os = "openbsd"))]

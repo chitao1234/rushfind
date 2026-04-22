@@ -98,11 +98,7 @@ fn ordered_exec_plus_flushes_before_quit() {
         )
     };
 
-    let output = cargo_bin_output_with_timeout(
-        &args,
-        1,
-        Duration::from_secs(5),
-    );
+    let output = cargo_bin_output_with_timeout(&args, 1, Duration::from_secs(5));
 
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert_eq!(output.status.code(), Some(0));
@@ -180,11 +176,7 @@ fn parallel_exec_plus_quit_flushes_buffered_batches_before_exit() {
         )
     };
 
-    let output = cargo_bin_output_with_timeout(
-        &args,
-        4,
-        Duration::from_secs(5),
-    );
+    let output = cargo_bin_output_with_timeout(&args, 4, Duration::from_secs(5));
 
     let stdout = String::from_utf8(output.stdout).unwrap();
     let line_count = stdout.lines().count();

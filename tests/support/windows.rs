@@ -20,7 +20,9 @@ pub(crate) fn symlink_creation_available() -> bool {
     if std::os::windows::fs::symlink_file(&target, &link).is_err() {
         return false;
     }
-    fs::read_to_string(&link).map(|content| content == "target").unwrap_or(false)
+    fs::read_to_string(&link)
+        .map(|content| content == "target")
+        .unwrap_or(false)
 }
 
 pub(crate) fn directory_symlink_creation_available() -> bool {

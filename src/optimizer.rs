@@ -129,6 +129,8 @@ pub(crate) fn predicate_profile(predicate: &RuntimePredicate) -> PredicateProfil
         | RuntimePredicate::User(_)
         | RuntimePredicate::Group(_)
         | RuntimePredicate::Perm(_)
+        | RuntimePredicate::Flags(_)
+        | RuntimePredicate::ReparseType(_)
         | RuntimePredicate::Size(_)
         | RuntimePredicate::Used(_)
         | RuntimePredicate::RelativeTime(_) => profile(ACTIVE_METADATA, CostTier::ActiveMetadata),
