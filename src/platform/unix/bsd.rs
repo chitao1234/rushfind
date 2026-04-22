@@ -22,7 +22,9 @@ pub(crate) static CAPABILITIES: PlatformCapabilities = PlatformCapabilities::new
     SupportLevel::Exact,
     SupportLevel::Exact,
     SupportLevel::Exact,
+    SupportLevel::Exact,
     SupportLevel::Approximate("interactive locale behavior is approximate on this platform"),
+    SupportLevel::Exact,
     SupportLevel::Exact,
 );
 
@@ -33,7 +35,9 @@ pub(crate) static CAPABILITIES: PlatformCapabilities = PlatformCapabilities::new
     SupportLevel::Exact,
     SupportLevel::Exact,
     SupportLevel::Exact,
+    SupportLevel::Exact,
     SupportLevel::Approximate("interactive locale behavior is approximate on this platform"),
+    SupportLevel::Exact,
     SupportLevel::Exact,
 );
 
@@ -103,7 +107,10 @@ pub(crate) fn filesystem_snapshot() -> Result<FilesystemSnapshot, Diagnostic> {
         let Ok(metadata) = fs::metadata(&mount_path) else {
             continue;
         };
-        snapshot.insert(FilesystemKey(metadata.dev()), mount_type_name(mount));
+        snapshot.insert(
+            FilesystemKey::Numeric(metadata.dev()),
+            mount_type_name(mount),
+        );
     }
     Ok(snapshot)
 }
@@ -114,7 +121,7 @@ pub(crate) fn filesystem_key(path: &Path, follow: bool) -> io::Result<Filesystem
     } else {
         fs::symlink_metadata(path)
     }?;
-    Ok(FilesystemKey(metadata.dev()))
+    Ok(FilesystemKey::Numeric(metadata.dev()))
 }
 
 #[cfg(target_os = "openbsd")]

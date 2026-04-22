@@ -546,40 +546,43 @@ fn lower_predicate(
             )))
         }
         Predicate::Uid(raw) => {
-            require_platform_feature(capabilities, PlatformFeature::Ownership, state)?;
+            require_platform_feature(capabilities, PlatformFeature::NumericOwnership, state)?;
             Ok(RuntimeExpr::Predicate(RuntimePredicate::Uid(
                 parse_numeric_argument("-uid", raw.as_os_str())?,
             )))
         }
         Predicate::Gid(raw) => {
-            require_platform_feature(capabilities, PlatformFeature::Ownership, state)?;
+            require_platform_feature(capabilities, PlatformFeature::NumericOwnership, state)?;
             Ok(RuntimeExpr::Predicate(RuntimePredicate::Gid(
                 parse_numeric_argument("-gid", raw.as_os_str())?,
             )))
         }
         Predicate::User(raw) => {
-            require_platform_feature(capabilities, PlatformFeature::Ownership, state)?;
+            require_platform_feature(capabilities, PlatformFeature::NamedOwnership, state)?;
             Ok(RuntimeExpr::Predicate(RuntimePredicate::User(
                 resolve_user_id(raw.as_os_str())?,
             )))
         }
         Predicate::Group(raw) => {
-            require_platform_feature(capabilities, PlatformFeature::Ownership, state)?;
+            require_platform_feature(capabilities, PlatformFeature::NamedOwnership, state)?;
             Ok(RuntimeExpr::Predicate(RuntimePredicate::Group(
                 resolve_group_id(raw.as_os_str())?,
             )))
         }
         Predicate::NoUser => {
-            require_platform_feature(capabilities, PlatformFeature::Ownership, state)?;
+            require_platform_feature(capabilities, PlatformFeature::NamedOwnership, state)?;
             Ok(RuntimeExpr::Predicate(RuntimePredicate::NoUser))
         }
         Predicate::NoGroup => {
-            require_platform_feature(capabilities, PlatformFeature::Ownership, state)?;
+            require_platform_feature(capabilities, PlatformFeature::NamedOwnership, state)?;
             Ok(RuntimeExpr::Predicate(RuntimePredicate::NoGroup))
         }
-        Predicate::Perm(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Perm(
-            parse_perm_argument(raw.as_os_str())?,
-        ))),
+        Predicate::Perm(raw) => {
+            require_platform_feature(capabilities, PlatformFeature::ModeBits, state)?;
+            Ok(RuntimeExpr::Predicate(RuntimePredicate::Perm(
+                parse_perm_argument(raw.as_os_str())?,
+            )))
+        }
         Predicate::Size(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Size(
             parse_size_argument(raw.as_os_str())?,
         ))),
@@ -878,10 +881,12 @@ mod tests {
             .with(PlatformFeature::FsType, SupportLevel::Exact)
             .with(PlatformFeature::SameFileSystem, SupportLevel::Exact)
             .with(PlatformFeature::BirthTime, SupportLevel::Exact)
-            .with(PlatformFeature::Ownership, SupportLevel::Exact)
+            .with(PlatformFeature::NamedOwnership, SupportLevel::Exact)
+            .with(PlatformFeature::NumericOwnership, SupportLevel::Exact)
             .with(PlatformFeature::AccessPredicates, SupportLevel::Exact)
             .with(PlatformFeature::MessagesLocale, SupportLevel::Exact)
             .with(PlatformFeature::CaseInsensitiveGlob, SupportLevel::Exact)
+            .with(PlatformFeature::ModeBits, SupportLevel::Exact)
     }
 
     #[test]

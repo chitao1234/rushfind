@@ -11,10 +11,12 @@ pub(crate) enum PlatformFeature {
     FsType,
     SameFileSystem,
     BirthTime,
-    Ownership,
+    NamedOwnership,
+    NumericOwnership,
     AccessPredicates,
     MessagesLocale,
     CaseInsensitiveGlob,
+    ModeBits,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,10 +24,12 @@ pub(crate) struct PlatformCapabilities {
     fstype: SupportLevel,
     same_file_system: SupportLevel,
     birth_time: SupportLevel,
-    ownership: SupportLevel,
+    named_ownership: SupportLevel,
+    numeric_ownership: SupportLevel,
     access_predicates: SupportLevel,
     messages_locale: SupportLevel,
     case_insensitive_glob: SupportLevel,
+    mode_bits: SupportLevel,
 }
 
 impl PlatformCapabilities {
@@ -33,19 +37,23 @@ impl PlatformCapabilities {
         fstype: SupportLevel,
         same_file_system: SupportLevel,
         birth_time: SupportLevel,
-        ownership: SupportLevel,
+        named_ownership: SupportLevel,
+        numeric_ownership: SupportLevel,
         access_predicates: SupportLevel,
         messages_locale: SupportLevel,
         case_insensitive_glob: SupportLevel,
+        mode_bits: SupportLevel,
     ) -> Self {
         Self {
             fstype,
             same_file_system,
             birth_time,
-            ownership,
+            named_ownership,
+            numeric_ownership,
             access_predicates,
             messages_locale,
             case_insensitive_glob,
+            mode_bits,
         }
     }
 
@@ -54,16 +62,20 @@ impl PlatformCapabilities {
             PlatformFeature::FsType => self.fstype,
             PlatformFeature::SameFileSystem => self.same_file_system,
             PlatformFeature::BirthTime => self.birth_time,
-            PlatformFeature::Ownership => self.ownership,
+            PlatformFeature::NamedOwnership => self.named_ownership,
+            PlatformFeature::NumericOwnership => self.numeric_ownership,
             PlatformFeature::AccessPredicates => self.access_predicates,
             PlatformFeature::MessagesLocale => self.messages_locale,
             PlatformFeature::CaseInsensitiveGlob => self.case_insensitive_glob,
+            PlatformFeature::ModeBits => self.mode_bits,
         }
     }
 
     #[cfg(test)]
     pub(crate) const fn for_tests() -> Self {
         Self::new(
+            SupportLevel::Unsupported("unset"),
+            SupportLevel::Unsupported("unset"),
             SupportLevel::Unsupported("unset"),
             SupportLevel::Unsupported("unset"),
             SupportLevel::Unsupported("unset"),
@@ -80,10 +92,12 @@ impl PlatformCapabilities {
             PlatformFeature::FsType => self.fstype = support,
             PlatformFeature::SameFileSystem => self.same_file_system = support,
             PlatformFeature::BirthTime => self.birth_time = support,
-            PlatformFeature::Ownership => self.ownership = support,
+            PlatformFeature::NamedOwnership => self.named_ownership = support,
+            PlatformFeature::NumericOwnership => self.numeric_ownership = support,
             PlatformFeature::AccessPredicates => self.access_predicates = support,
             PlatformFeature::MessagesLocale => self.messages_locale = support,
             PlatformFeature::CaseInsensitiveGlob => self.case_insensitive_glob = support,
+            PlatformFeature::ModeBits => self.mode_bits = support,
         }
         self
     }

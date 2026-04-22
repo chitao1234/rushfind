@@ -10,17 +10,47 @@ use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct FilesystemKey(pub u64);
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) enum FilesystemKey {
+    Numeric(u64),
+    Text(OsString),
+}
+
+impl FilesystemKey {
+    pub(crate) fn numeric(&self) -> Option<u64> {
+        match self {
+            Self::Numeric(value) => Some(*value),
+            Self::Text(_) => None,
+        }
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum PlatformPrincipalId {
+    Numeric(u32),
+    Sid(String),
+}
+
+impl PlatformPrincipalId {
+    pub(crate) fn numeric(&self) -> Option<u32> {
+        match self {
+            Self::Numeric(value) => Some(*value),
+            Self::Sid(_) => None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PlatformMetadataView {
     pub kind: EntryKind,
     pub identity: Option<FileIdentity>,
     pub size: u64,
-    pub owner: Option<u32>,
-    pub group: Option<u32>,
+    pub owner: Option<PlatformPrincipalId>,
+    pub group: Option<PlatformPrincipalId>,
     pub mode_bits: Option<u32>,
+    pub native_attributes: Option<u32>,
     pub link_count: Option<u64>,
     pub blocks_512: Option<u64>,
     pub atime: Timestamp,
@@ -93,7 +123,10 @@ impl FilesystemSnapshot {
                 .next()
                 .ok_or_else(|| Diagnostic::new(format!("invalid mountinfo line `{line}`"), 1))?;
 
-            snapshot.insert(FilesystemKey(mount_id), OsString::from(file_system_type));
+            snapshot.insert(
+                FilesystemKey::Numeric(mount_id),
+                OsString::from(file_system_type),
+            );
         }
 
         Ok(snapshot)
@@ -105,7 +138,7 @@ impl FilesystemSnapshot {
 
     pub(crate) fn type_for_mount_id(&self, mount_id: u64) -> Option<&OsStr> {
         self.types_by_key
-            .get(&FilesystemKey(mount_id))
+            .get(&FilesystemKey::Numeric(mount_id))
             .map(|type_name| type_name.as_os_str())
     }
 
@@ -139,14 +172,12 @@ pub(crate) fn metadata_view_from_metadata(
 
     PlatformMetadataView {
         kind,
-        identity: Some(FileIdentity {
-            dev: metadata.dev(),
-            ino: metadata.ino(),
-        }),
+        identity: Some(FileIdentity::from_metadata(metadata)),
         size: metadata.len(),
-        owner: Some(metadata.uid()),
-        group: Some(metadata.gid()),
+        owner: Some(PlatformPrincipalId::Numeric(metadata.uid())),
+        group: Some(PlatformPrincipalId::Numeric(metadata.gid())),
         mode_bits: Some(metadata.mode() & 0o7777),
+        native_attributes: None,
         link_count: Some(metadata.nlink()),
         blocks_512: Some(metadata.blocks()),
         atime: Timestamp::new(metadata.atime(), metadata.atime_nsec() as i32),

@@ -433,6 +433,7 @@ dependencies = [
  "regex",
  "tempfile",
  "wait-timeout",
+ "windows-sys",
 ]
 
 [[package]]

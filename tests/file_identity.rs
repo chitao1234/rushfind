@@ -14,8 +14,8 @@ fn file_identity_matches_metadata_device_and_inode() {
     let metadata = fs::metadata(&path).unwrap();
     let identity = FileIdentity::from_metadata(&metadata);
 
-    assert_eq!(identity.dev, metadata.dev());
-    assert_eq!(identity.ino, metadata.ino());
+    assert_eq!(identity.device_number(), metadata.dev());
+    assert_eq!(identity.inode_number(), metadata.ino());
 }
 
 #[test]

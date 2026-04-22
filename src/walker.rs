@@ -375,9 +375,11 @@ pub(crate) fn should_descend_directory(
         return Err(loop_error(&pending.path));
     }
 
-    let root_device = pending.root_device.or(Some(directory_identity.dev));
+    let root_device = pending
+        .root_device
+        .or(Some(directory_identity.device_number()));
     if options.same_file_system
-        && root_device.is_some_and(|device| directory_identity.dev != device)
+        && root_device.is_some_and(|device| directory_identity.device_number() != device)
     {
         return Ok(None);
     }

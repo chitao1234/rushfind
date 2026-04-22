@@ -223,7 +223,7 @@ pub(crate) fn evaluate_predicate(
                 return Ok(false);
             }
 
-            let mount_key = FilesystemKey(entry.active_mount_id(follow_mode)?);
+            let mount_key = FilesystemKey::Numeric(entry.active_mount_id(follow_mode)?);
             Ok(snapshot
                 .type_for_mount_key(mount_key)
                 .is_some_and(|actual| actual == type_name.as_os_str()))
@@ -235,9 +235,7 @@ pub(crate) fn evaluate_predicate(
             let basename = entry.path.file_name().unwrap_or_else(|| OsStr::new(""));
             glob.is_match(basename)
         }
-        RuntimePredicate::Path(glob) => {
-            glob.is_match(entry.path.as_os_str())
-        }
+        RuntimePredicate::Path(glob) => glob.is_match(entry.path.as_os_str()),
         RuntimePredicate::Regex(matcher) => matcher.is_match(entry.path.as_os_str()),
         RuntimePredicate::Inum(expected) => Ok(expected.matches(entry.active_inode(follow_mode)?)),
         RuntimePredicate::Links(expected) => {

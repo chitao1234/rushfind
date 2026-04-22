@@ -2,7 +2,7 @@ use crate::diagnostics::Diagnostic;
 use crate::follow::FollowMode;
 use crate::identity::FileIdentity;
 use crate::platform::filesystem::{
-    FsPlatformReader, PlatformMetadataView, PlatformReader, missing_field,
+    FsPlatformReader, PlatformMetadataView, PlatformPrincipalId, PlatformReader, missing_field,
 };
 use crate::time::Timestamp;
 use std::ffi::OsString;
@@ -256,11 +256,11 @@ impl EntryContext {
     }
 
     pub fn active_inode(&self, follow_mode: FollowMode) -> Result<u64, Diagnostic> {
-        Ok(self.active_identity(follow_mode)?.ino)
+        Ok(self.active_identity(follow_mode)?.inode_number())
     }
 
     pub fn active_device(&self, follow_mode: FollowMode) -> Result<u64, Diagnostic> {
-        Ok(self.active_identity(follow_mode)?.dev)
+        Ok(self.active_identity(follow_mode)?.device_number())
     }
 
     pub fn active_device_number(&self, follow_mode: FollowMode) -> Result<Option<u64>, Diagnostic> {
@@ -270,12 +270,16 @@ impl EntryContext {
     pub fn active_uid(&self, follow_mode: FollowMode) -> Result<u32, Diagnostic> {
         self.active_view(follow_mode)?
             .owner
+            .as_ref()
+            .and_then(PlatformPrincipalId::numeric)
             .ok_or_else(|| missing_field("owner id", &self.path))
     }
 
     pub fn active_gid(&self, follow_mode: FollowMode) -> Result<u32, Diagnostic> {
         self.active_view(follow_mode)?
             .group
+            .as_ref()
+            .and_then(PlatformPrincipalId::numeric)
             .ok_or_else(|| missing_field("group id", &self.path))
     }
 
@@ -327,8 +331,9 @@ impl EntryContext {
         Ok(self
             .active_view(follow_mode)?
             .filesystem_key
-            .ok_or_else(|| missing_field("filesystem boundary key", &self.path))?
-            .0)
+            .as_ref()
+            .and_then(|key| key.numeric())
+            .ok_or_else(|| missing_field("filesystem boundary key", &self.path))?)
     }
 
     pub fn active_birth_time(
@@ -667,7 +672,7 @@ mod tests {
     use super::test_support::CountingReader;
     use super::{AccessMode, EntryKind};
     use crate::follow::FollowMode;
-    use crate::platform::filesystem::{FilesystemKey, PlatformMetadataView};
+    use crate::platform::filesystem::{FilesystemKey, PlatformMetadataView, PlatformPrincipalId};
     use crate::platform::filesystem::{PlatformReader, metadata_view_from_metadata};
     use crate::time::Timestamp;
     use std::ffi::OsString;
@@ -688,18 +693,19 @@ mod tests {
             Arc::new(super::test_support::FakePlatformReader::with_view(
                 PlatformMetadataView {
                     kind: EntryKind::File,
-                    identity: Some(crate::identity::FileIdentity { dev: 11, ino: 22 }),
+                    identity: Some(crate::identity::FileIdentity::Unix { dev: 11, ino: 22 }),
                     size: 99,
-                    owner: Some(501),
-                    group: Some(20),
+                    owner: Some(PlatformPrincipalId::Numeric(501)),
+                    group: Some(PlatformPrincipalId::Numeric(20)),
                     mode_bits: Some(0o640),
+                    native_attributes: None,
                     link_count: Some(2),
                     blocks_512: Some(8),
                     atime: Timestamp::new(10, 1),
                     ctime: Timestamp::new(11, 2),
                     mtime: Timestamp::new(12, 3),
                     birth_time: Some(Timestamp::new(13, 4)),
-                    filesystem_key: Some(FilesystemKey(7)),
+                    filesystem_key: Some(FilesystemKey::Numeric(7)),
                     device_number: None,
                 },
             )),
@@ -724,11 +730,12 @@ mod tests {
             Arc::new(super::test_support::FakePlatformReader::with_view(
                 PlatformMetadataView {
                     kind: EntryKind::File,
-                    identity: Some(crate::identity::FileIdentity { dev: 11, ino: 22 }),
+                    identity: Some(crate::identity::FileIdentity::Unix { dev: 11, ino: 22 }),
                     size: 99,
                     owner: None,
                     group: None,
                     mode_bits: Some(0o640),
+                    native_attributes: None,
                     link_count: Some(2),
                     blocks_512: None,
                     atime: Timestamp::new(10, 1),
@@ -984,8 +991,8 @@ mod tests {
             view.filesystem_key = match (follow, self.fail_logical_mount_id, self.logical_mount_id)
             {
                 (true, true, _) => None,
-                (true, false, Some(mount_id)) => Some(FilesystemKey(mount_id)),
-                _ => Some(FilesystemKey(self.physical_mount_id)),
+                (true, false, Some(mount_id)) => Some(FilesystemKey::Numeric(mount_id)),
+                _ => Some(FilesystemKey::Numeric(self.physical_mount_id)),
             };
             Ok(view)
         }

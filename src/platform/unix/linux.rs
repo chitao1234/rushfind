@@ -17,6 +17,8 @@ pub(crate) static CAPABILITIES: PlatformCapabilities = PlatformCapabilities::new
     SupportLevel::Exact,
     SupportLevel::Exact,
     SupportLevel::Exact,
+    SupportLevel::Exact,
+    SupportLevel::Exact,
 );
 
 pub(crate) const fn printf_zero_pads_string_fields() -> bool {
@@ -61,7 +63,7 @@ pub(crate) fn filesystem_key(path: &Path, follow: bool) -> io::Result<Filesystem
         return Err(io::Error::from_raw_os_error(libc::EOPNOTSUPP));
     }
 
-    Ok(FilesystemKey(statx.stx_mnt_id))
+    Ok(FilesystemKey::Numeric(statx.stx_mnt_id))
 }
 
 pub(crate) fn read_birth_time(path: &Path, follow: bool) -> Result<Option<Timestamp>, Diagnostic> {
