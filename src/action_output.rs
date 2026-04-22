@@ -4,7 +4,6 @@ use crate::eval::EvalContext;
 use crate::file_output::{FileOutputId, FileOutputTerminator};
 use crate::follow::FollowMode;
 use crate::planner::{OutputAction, RuntimeAction};
-use std::os::unix::ffi::OsStrExt;
 
 pub(crate) enum RenderedAction {
     Stdout(Vec<u8>),
@@ -15,7 +14,7 @@ pub(crate) enum RenderedAction {
 }
 
 pub(crate) fn render_output_bytes(action: OutputAction, entry: &EntryContext) -> Vec<u8> {
-    let mut bytes = entry.path.as_os_str().as_bytes().to_vec();
+    let mut bytes = crate::platform::path::display_bytes(&entry.path);
     match action {
         OutputAction::Print => bytes.push(b'\n'),
         OutputAction::Print0 => bytes.push(0),
@@ -27,7 +26,7 @@ pub(crate) fn render_file_print_bytes(
     entry: &EntryContext,
     terminator: FileOutputTerminator,
 ) -> Vec<u8> {
-    let mut bytes = entry.path.as_os_str().as_bytes().to_vec();
+    let mut bytes = crate::platform::path::display_bytes(&entry.path);
     match terminator {
         FileOutputTerminator::Newline => bytes.push(b'\n'),
         FileOutputTerminator::Nul => bytes.push(0),

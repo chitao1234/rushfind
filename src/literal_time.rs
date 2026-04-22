@@ -324,21 +324,16 @@ fn local_timestamp(
     ensure_valid_date(year, month, day, original)?;
     ensure_valid_time(hour, minute, second, original)?;
 
-    let mut tm = libc::tm {
-        tm_sec: second as i32,
-        tm_min: minute as i32,
-        tm_hour: hour as i32,
-        tm_mday: day as i32,
-        tm_mon: month as i32 - 1,
-        tm_year: year - 1900,
-        tm_wday: 0,
-        tm_yday: 0,
-        tm_isdst: -1,
-        tm_gmtoff: 0,
-        tm_zone: std::ptr::null_mut::<libc::c_char>() as _,
-    };
+    let mut tm = empty_tm();
+    tm.tm_sec = second as i32;
+    tm.tm_min = minute as i32;
+    tm.tm_hour = hour as i32;
+    tm.tm_mday = day as i32;
+    tm.tm_mon = month as i32 - 1;
+    tm.tm_year = year - 1900;
+    tm.tm_isdst = -1;
 
-    let seconds = unsafe { libc::mktime(&mut tm) };
+    let seconds = local_mktime(&mut tm)?;
     if tm.tm_sec != second as i32
         || tm.tm_min != minute as i32
         || tm.tm_hour != hour as i32
@@ -350,6 +345,23 @@ fn local_timestamp(
     }
 
     Ok(Timestamp::new(seconds as i64, nanos))
+}
+
+fn empty_tm() -> libc::tm {
+    unsafe { std::mem::zeroed() }
+}
+
+#[cfg(unix)]
+fn local_mktime(tm: &mut libc::tm) -> Result<libc::time_t, Diagnostic> {
+    Ok(unsafe { libc::mktime(tm) })
+}
+
+#[cfg(windows)]
+fn local_mktime(_tm: &mut libc::tm) -> Result<libc::time_t, Diagnostic> {
+    Err(Diagnostic::new(
+        "local literal times are not implemented on Windows yet",
+        1,
+    ))
 }
 
 fn fixed_offset_timestamp(

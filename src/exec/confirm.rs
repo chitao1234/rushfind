@@ -1,3 +1,5 @@
+#![cfg_attr(windows, allow(dead_code))]
+
 use crate::diagnostics::Diagnostic;
 use crate::exec::PreparedExecCommand;
 use crate::messages_locale::{MessagesLocale, PromptLocale};
@@ -209,7 +211,7 @@ fn io_error(error: std::io::Error) -> Diagnostic {
     Diagnostic::new(format!("failed to use prompt session: {error}"), 1)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::{ConfirmOutcome, PromptCoordinator, render_prompt};
     use crate::exec::PreparedExecCommand;

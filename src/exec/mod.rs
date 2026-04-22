@@ -24,7 +24,7 @@ pub(crate) use child::{run_immediate_parallel, run_parallel_ready_batch, run_pre
 pub(crate) use confirm::{ConfirmOutcome, PromptCoordinator};
 pub(crate) use delete::delete_path;
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::{
         BatchLimit, ExecSemantics, OrderedActionSink, ParallelActionSink, PendingBatch,

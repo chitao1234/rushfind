@@ -322,7 +322,7 @@ fn matches_newer(
     Ok(matcher.matches_timestamp(entry_timestamp(entry, follow_mode, matcher.current)?))
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::{
         ActionOutcome, ActionSink, EvalContext, RuntimeStatus, evaluate,

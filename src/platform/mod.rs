@@ -2,6 +2,7 @@ pub(crate) mod accounts;
 pub(crate) mod capabilities;
 pub(crate) mod filesystem;
 pub(crate) mod locale;
+pub(crate) mod path;
 #[cfg(unix)]
 pub(crate) mod unix;
 #[cfg(windows)]

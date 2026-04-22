@@ -87,7 +87,7 @@ impl CompiledGlob {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::{CompiledGlob, GlobCaseMode, GlobSlashMode, matches_pattern};
     use std::ffi::{OsStr, OsString};
@@ -96,13 +96,8 @@ mod tests {
 
     #[test]
     fn matches_pattern_uses_owned_case_insensitive_semantics() {
-        let matched = matches_pattern(
-            OsStr::new("*.rs"),
-            OsStr::new("MAIN.RS"),
-            true,
-            true,
-        )
-        .unwrap();
+        let matched =
+            matches_pattern(OsStr::new("*.rs"), OsStr::new("MAIN.RS"), true, true).unwrap();
 
         assert!(matched);
     }

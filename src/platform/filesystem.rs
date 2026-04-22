@@ -1,13 +1,15 @@
+#![cfg_attr(windows, allow(dead_code))]
+
 use crate::diagnostics::Diagnostic;
 use crate::entry::{AccessMode, EntryKind, file_type_to_kind};
 use crate::identity::FileIdentity;
 use crate::time::Timestamp;
 use std::collections::{BTreeMap, BTreeSet};
-use std::ffi::{CString, OsStr, OsString};
+#[cfg(unix)]
+use std::ffi::CString;
+use std::ffi::{OsStr, OsString};
 use std::fs::{self, Metadata};
 use std::io;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 #[allow(dead_code)]
@@ -100,8 +102,17 @@ impl PlatformReader for FsPlatformReader {
 }
 
 impl FilesystemSnapshot {
+    #[cfg(unix)]
     pub(crate) fn load_proc_self_mountinfo() -> Result<Self, Diagnostic> {
         crate::platform::unix::filesystem_snapshot()
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn load_proc_self_mountinfo() -> Result<Self, Diagnostic> {
+        Err(Diagnostic::new(
+            "filesystem snapshots are not implemented on Windows yet",
+            1,
+        ))
     }
 
     #[cfg(any(test, target_os = "linux"))]
@@ -154,6 +165,7 @@ impl FilesystemSnapshot {
     }
 }
 
+#[cfg(unix)]
 pub(crate) fn load_metadata_view(path: &Path, follow: bool) -> io::Result<PlatformMetadataView> {
     let metadata = if follow {
         fs::metadata(path)
@@ -163,11 +175,21 @@ pub(crate) fn load_metadata_view(path: &Path, follow: bool) -> io::Result<Platfo
     Ok(metadata_view_from_metadata(path, &metadata, follow))
 }
 
+#[cfg(windows)]
+pub(crate) fn load_metadata_view(_path: &Path, _follow: bool) -> io::Result<PlatformMetadataView> {
+    Err(unsupported_io(
+        "metadata views are not implemented on Windows yet",
+    ))
+}
+
+#[cfg(unix)]
 pub(crate) fn metadata_view_from_metadata(
     path: &Path,
     metadata: &Metadata,
     follow: bool,
 ) -> PlatformMetadataView {
+    use std::os::unix::fs::MetadataExt;
+
     let kind = file_type_to_kind(metadata.file_type());
 
     PlatformMetadataView {
@@ -192,6 +214,31 @@ pub(crate) fn metadata_view_from_metadata(
     }
 }
 
+#[cfg(windows)]
+pub(crate) fn metadata_view_from_metadata(
+    _path: &Path,
+    metadata: &Metadata,
+    _follow: bool,
+) -> PlatformMetadataView {
+    PlatformMetadataView {
+        kind: file_type_to_kind(metadata.file_type()),
+        identity: None,
+        size: metadata.len(),
+        owner: None,
+        group: None,
+        mode_bits: None,
+        native_attributes: None,
+        link_count: None,
+        blocks_512: None,
+        atime: Timestamp::new(0, 0),
+        ctime: Timestamp::new(0, 0),
+        mtime: Timestamp::new(0, 0),
+        birth_time: None,
+        filesystem_key: None,
+        device_number: None,
+    }
+}
+
 pub(crate) fn missing_field(label: &str, path: &Path) -> Diagnostic {
     Diagnostic::new(
         format!(
@@ -202,17 +249,34 @@ pub(crate) fn missing_field(label: &str, path: &Path) -> Diagnostic {
     )
 }
 
+#[cfg(unix)]
 pub(crate) fn filesystem_key(path: &Path, follow: bool) -> io::Result<FilesystemKey> {
     crate::platform::unix::filesystem_key(path, follow)
 }
 
+#[cfg(windows)]
+pub(crate) fn filesystem_key(_path: &Path, _follow: bool) -> io::Result<FilesystemKey> {
+    Err(unsupported_io(
+        "filesystem keys are not implemented on Windows yet",
+    ))
+}
+
+#[cfg(unix)]
 pub(crate) fn read_access(path: &Path, mode: AccessMode) -> io::Result<bool> {
-    let c_path = CString::new(path.as_os_str().as_bytes())
+    let c_path = CString::new(path.as_os_str().as_encoded_bytes())
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid path"))?;
 
     read_access_with(c_path.as_ptr(), mode, faccessat_access, access_access)
 }
 
+#[cfg(windows)]
+pub(crate) fn read_access(_path: &Path, _mode: AccessMode) -> io::Result<bool> {
+    Err(unsupported_io(
+        "access predicates are not implemented on Windows yet",
+    ))
+}
+
+#[cfg(unix)]
 pub(crate) fn read_access_with(
     path: *const libc::c_char,
     mode: AccessMode,
@@ -226,10 +290,23 @@ pub(crate) fn read_access_with(
     }
 }
 
+#[cfg(unix)]
 pub(crate) fn read_birth_time(path: &Path, follow: bool) -> Result<Option<Timestamp>, Diagnostic> {
     crate::platform::unix::read_birth_time(path, follow)
 }
 
+#[cfg(windows)]
+pub(crate) fn read_birth_time(
+    _path: &Path,
+    _follow: bool,
+) -> Result<Option<Timestamp>, Diagnostic> {
+    Err(Diagnostic::new(
+        "birth time predicates are not implemented on Windows yet",
+        1,
+    ))
+}
+
+#[cfg(unix)]
 fn faccessat_access(path: *const libc::c_char, mode: AccessMode) -> io::Result<bool> {
     let rc = unsafe { libc::faccessat(libc::AT_FDCWD, path, mode.as_flag(), 0) };
     if rc == 0 {
@@ -239,7 +316,13 @@ fn faccessat_access(path: *const libc::c_char, mode: AccessMode) -> io::Result<b
     }
 }
 
+#[cfg(unix)]
 fn access_access(path: *const libc::c_char, mode: AccessMode) -> io::Result<bool> {
     let rc = unsafe { libc::access(path, mode.as_flag()) };
     if rc == 0 { Ok(true) } else { Ok(false) }
+}
+
+#[allow(dead_code)]
+fn unsupported_io(message: &str) -> io::Error {
+    io::Error::new(io::ErrorKind::Unsupported, message)
 }

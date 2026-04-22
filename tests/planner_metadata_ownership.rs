@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 mod support;
 
 use rushfind::account::{group_name, user_name};

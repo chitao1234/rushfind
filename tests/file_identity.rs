@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 use rushfind::entry::{EntryContext, EntryKind};
 use rushfind::follow::FollowMode;
 use rushfind::identity::FileIdentity;

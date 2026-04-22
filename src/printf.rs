@@ -4,11 +4,13 @@ use crate::entry::{EntryContext, EntryKind, PrintfTargetKind};
 use crate::eval::EvalContext;
 use crate::follow::FollowMode;
 use crate::platform;
+use crate::platform::path::{
+    display_bytes, display_os_bytes, encoded_bytes, relative_dir_for_printf,
+};
 use crate::printf_time::{
     ResolvedTimeParts, render_full_time_bytes, render_selector_bytes, resolve_local_time_parts,
 };
 use std::ffi::OsStr;
-use std::os::unix::ffi::OsStrExt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrintfProgram {
@@ -433,25 +435,20 @@ fn render_directive_bytes(
 ) -> Result<Vec<u8>, Diagnostic> {
     Ok(match directive.kind {
         PrintfDirectiveKind::Path => {
-            format_string_like(entry.path.as_os_str().as_bytes(), directive.format)
+            format_string_like(&display_bytes(&entry.path), directive.format)
         }
-        PrintfDirectiveKind::RelativePath => format_string_like(
-            entry.relative_to_root()?.as_os_str().as_bytes(),
-            directive.format,
-        ),
+        PrintfDirectiveKind::RelativePath => {
+            format_string_like(&display_bytes(entry.relative_to_root()?), directive.format)
+        }
         PrintfDirectiveKind::StartPath => {
-            format_string_like(entry.start_path().as_os_str().as_bytes(), directive.format)
+            format_string_like(&display_bytes(entry.start_path()), directive.format)
         }
         PrintfDirectiveKind::Basename => format_string_like(
-            entry
-                .path
-                .file_name()
-                .unwrap_or_else(|| OsStr::new(""))
-                .as_bytes(),
+            &display_os_bytes(entry.path.file_name().unwrap_or_else(|| OsStr::new(""))),
             directive.format,
         ),
         PrintfDirectiveKind::Dirname => format_string_like(
-            entry.dirname_for_printf().as_os_str().as_bytes(),
+            &display_bytes(relative_dir_for_printf(&entry.path).as_path()),
             directive.format,
         ),
         PrintfDirectiveKind::Depth => format_depth(entry.depth, directive.format),
@@ -490,11 +487,12 @@ fn render_directive_bytes(
             format_string_like(mode.as_bytes(), directive.format)
         }
         PrintfDirectiveKind::LinkTarget => format_string_like(
-            entry
-                .active_link_target(follow_mode)?
-                .as_deref()
-                .unwrap_or_else(|| OsStr::new(""))
-                .as_bytes(),
+            &display_os_bytes(
+                entry
+                    .active_link_target(follow_mode)?
+                    .as_deref()
+                    .unwrap_or_else(|| OsStr::new("")),
+            ),
             directive.format,
         ),
         PrintfDirectiveKind::Inode => format_string_like(
@@ -550,7 +548,7 @@ fn render_directive_bytes(
                     1,
                 )
             })?;
-            format_string_like(type_name.as_bytes(), directive.format)
+            format_string_like(encoded_bytes(type_name), directive.format)
         }
         PrintfDirectiveKind::FullTimestamp(family) => {
             match resolve_cached_time_parts(state, family, entry, follow_mode)? {
@@ -610,7 +608,7 @@ fn resolve_cached_time_parts<'a>(
 
 fn name_or_id_bytes(name: Option<&OsStr>, id: u32) -> Vec<u8> {
     match name {
-        Some(name) => name.as_bytes().to_vec(),
+        Some(name) => encoded_bytes(name).to_vec(),
         None => id.to_string().into_bytes(),
     }
 }
@@ -807,7 +805,7 @@ fn execute_char(
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::{
         PrintfAtom, PrintfDirective, PrintfDirectiveKind, PrintfFieldFormat, PrintfTimeFamily,

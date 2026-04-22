@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 use rushfind::ast::FileTypeFilter;
 use rushfind::entry::EntryContext;
 use rushfind::eval::evaluate;

@@ -1,6 +1,5 @@
 use crate::diagnostics::Diagnostic;
 use std::ffi::{OsStr, OsString};
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 
 pub type ExecBatchId = u32;
@@ -112,7 +111,7 @@ pub fn compile_batched_exec(
 }
 
 fn compile_segments(arg: &OsStr) -> Vec<ExecTemplateSegment> {
-    let bytes = arg.as_bytes();
+    let bytes = crate::platform::path::encoded_bytes(arg);
     let mut segments = Vec::new();
     let mut start = 0;
     let mut index = 0;
@@ -142,15 +141,17 @@ fn compile_segments(arg: &OsStr) -> Vec<ExecTemplateSegment> {
 }
 
 fn is_standalone_placeholder(arg: &OsStr) -> bool {
-    arg.as_bytes() == b"{}"
+    crate::platform::path::encoded_bytes(arg) == b"{}"
 }
 
 fn contains_placeholder(arg: &OsStr) -> bool {
-    arg.as_bytes().windows(2).any(|window| window == b"{}")
+    crate::platform::path::encoded_bytes(arg)
+        .windows(2)
+        .any(|window| window == b"{}")
 }
 
 fn os_string_from_bytes(bytes: &[u8]) -> OsString {
-    OsString::from_vec(bytes.to_vec())
+    crate::platform::path::os_string_from_encoded_bytes(bytes.to_vec())
 }
 
 pub fn execdir_cwd(path: &Path) -> PathBuf {
@@ -163,17 +164,12 @@ pub fn execdir_cwd(path: &Path) -> PathBuf {
 fn rendered_path(path: &Path, semantics: ExecSemantics) -> OsString {
     match semantics {
         ExecSemantics::Normal => path.as_os_str().to_os_string(),
-        ExecSemantics::DirLocal => {
-            let basename = path.file_name().expect("matched path has a basename");
-            let mut bytes = b"./".to_vec();
-            bytes.extend_from_slice(basename.as_bytes());
-            OsString::from_vec(bytes)
-        }
+        ExecSemantics::DirLocal => crate::platform::path::execdir_placeholder(path),
     }
 }
 
 fn render_segments(argv: &[Vec<ExecTemplateSegment>], rendered_path: &OsStr) -> Vec<OsString> {
-    let path_bytes = rendered_path.as_bytes();
+    let path_bytes = crate::platform::path::encoded_bytes(rendered_path);
 
     argv.iter()
         .map(|template| {
@@ -181,12 +177,14 @@ fn render_segments(argv: &[Vec<ExecTemplateSegment>], rendered_path: &OsStr) -> 
             for segment in template {
                 match segment {
                     ExecTemplateSegment::Literal(literal) => {
-                        rendered.extend_from_slice(literal.as_os_str().as_bytes());
+                        rendered.extend_from_slice(crate::platform::path::encoded_bytes(
+                            literal.as_os_str(),
+                        ));
                     }
                     ExecTemplateSegment::Path => rendered.extend_from_slice(path_bytes),
                 }
             }
-            OsString::from_vec(rendered)
+            crate::platform::path::os_string_from_encoded_bytes(rendered)
         })
         .collect()
 }
@@ -208,11 +206,7 @@ pub fn build_immediate_command(spec: &ImmediateExecAction, path: &Path) -> Prepa
 }
 
 pub fn batched_path_cost(spec: &BatchedExecAction, path: &Path) -> usize {
-    rendered_path(path, spec.semantics)
-        .as_os_str()
-        .as_bytes()
-        .len()
-        + 1
+    crate::platform::path::encoded_bytes(rendered_path(path, spec.semantics).as_os_str()).len() + 1
 }
 
 pub fn build_batched_argv(

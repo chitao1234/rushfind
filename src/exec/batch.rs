@@ -1,7 +1,5 @@
 use crate::diagnostics::Diagnostic;
-use libc::_SC_ARG_MAX;
 use std::ffi::OsStr;
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 use super::template::{BatchedExecAction, ExecBatchId};
@@ -13,8 +11,7 @@ pub struct BatchLimit {
 
 impl BatchLimit {
     pub fn detect() -> Self {
-        let arg_max = unsafe { libc::sysconf(_SC_ARG_MAX) };
-        let arg_max = usize::try_from(arg_max.max(4096)).unwrap_or(4096);
+        let arg_max = detect_arg_max();
         let env_bytes = std::env::vars_os()
             .map(|(key, value)| os_bytes_len(key.as_os_str()) + os_bytes_len(value.as_os_str()) + 2)
             .sum::<usize>();
@@ -112,5 +109,16 @@ pub(crate) fn fixed_batch_cost(spec: &BatchedExecAction) -> usize {
 }
 
 fn os_bytes_len(value: &OsStr) -> usize {
-    value.as_bytes().len()
+    crate::platform::path::encoded_bytes(value).len()
+}
+
+#[cfg(unix)]
+fn detect_arg_max() -> usize {
+    let arg_max = unsafe { libc::sysconf(libc::_SC_ARG_MAX) };
+    usize::try_from(arg_max.max(4096)).unwrap_or(4096)
+}
+
+#[cfg(windows)]
+fn detect_arg_max() -> usize {
+    32_767
 }

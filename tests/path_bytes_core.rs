@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 use rushfind::entry::EntryContext;
 use rushfind::file_output::{FileOutputTerminator, render_file_print_bytes};
 use rushfind::output::render_output_bytes;

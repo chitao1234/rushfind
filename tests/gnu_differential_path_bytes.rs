@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 mod support;
 
 use assert_cmd::cargo::CommandCargoExt;

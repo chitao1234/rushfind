@@ -1,9 +1,5 @@
 use crate::diagnostics::Diagnostic;
-use std::collections::HashMap;
-use std::ffi::{CString, OsStr, OsString};
-use std::io;
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
-use std::sync::{Mutex, OnceLock};
+use std::ffi::{OsStr, OsString};
 
 pub(crate) trait AccountBackend: Send + Sync {
     fn resolve_user_id(&self, raw: &OsStr) -> Result<u32, Diagnostic>;
@@ -15,313 +11,377 @@ pub(crate) trait AccountBackend: Send + Sync {
 }
 
 pub(crate) fn backend() -> &'static dyn AccountBackend {
-    &POSIX_ACCOUNT_BACKEND
+    imp::backend()
 }
 
-static USER_EXISTS_CACHE: OnceLock<Mutex<HashMap<u32, bool>>> = OnceLock::new();
-static GROUP_EXISTS_CACHE: OnceLock<Mutex<HashMap<u32, bool>>> = OnceLock::new();
-static USER_NAME_CACHE: OnceLock<Mutex<HashMap<u32, Option<OsString>>>> = OnceLock::new();
-static GROUP_NAME_CACHE: OnceLock<Mutex<HashMap<u32, Option<OsString>>>> = OnceLock::new();
-static POSIX_ACCOUNT_BACKEND: PosixAccountBackend = PosixAccountBackend;
+#[cfg(unix)]
+mod imp {
+    use super::{AccountBackend, Diagnostic};
+    use crate::platform::path::os_string_from_encoded_bytes;
+    use std::collections::HashMap;
+    use std::ffi::{CString, OsStr, OsString};
+    use std::io;
+    use std::sync::{Mutex, OnceLock};
 
-struct PosixAccountBackend;
+    pub(crate) fn backend() -> &'static dyn AccountBackend {
+        &POSIX_ACCOUNT_BACKEND
+    }
 
-impl AccountBackend for PosixAccountBackend {
-    fn resolve_user_id(&self, raw: &OsStr) -> Result<u32, Diagnostic> {
-        if let Some(uid) = parse_decimal_id(raw) {
-            return Ok(uid);
+    static USER_EXISTS_CACHE: OnceLock<Mutex<HashMap<u32, bool>>> = OnceLock::new();
+    static GROUP_EXISTS_CACHE: OnceLock<Mutex<HashMap<u32, bool>>> = OnceLock::new();
+    static USER_NAME_CACHE: OnceLock<Mutex<HashMap<u32, Option<OsString>>>> = OnceLock::new();
+    static GROUP_NAME_CACHE: OnceLock<Mutex<HashMap<u32, Option<OsString>>>> = OnceLock::new();
+    static POSIX_ACCOUNT_BACKEND: PosixAccountBackend = PosixAccountBackend;
+
+    struct PosixAccountBackend;
+
+    impl AccountBackend for PosixAccountBackend {
+        fn resolve_user_id(&self, raw: &OsStr) -> Result<u32, Diagnostic> {
+            if let Some(uid) = parse_decimal_id(raw) {
+                return Ok(uid);
+            }
+
+            let name = raw.to_string_lossy().into_owned();
+            match lookup_user_by_name(raw)? {
+                Some(uid) => Ok(uid),
+                None => Err(Diagnostic::new(
+                    format!("`{name}` is not the name of a known user"),
+                    1,
+                )),
+            }
         }
 
-        let name = raw.to_string_lossy().into_owned();
-        match lookup_user_by_name(raw)? {
-            Some(uid) => Ok(uid),
-            None => Err(Diagnostic::new(
-                format!("`{name}` is not the name of a known user"),
+        fn resolve_group_id(&self, raw: &OsStr) -> Result<u32, Diagnostic> {
+            if let Some(gid) = parse_decimal_id(raw) {
+                return Ok(gid);
+            }
+
+            let name = raw.to_string_lossy().into_owned();
+            match lookup_group_by_name(raw)? {
+                Some(gid) => Ok(gid),
+                None => Err(Diagnostic::new(
+                    format!("`{name}` is not the name of an existing group"),
+                    1,
+                )),
+            }
+        }
+
+        fn user_exists(&self, uid: u32) -> Result<bool, Diagnostic> {
+            cached_exists(&USER_EXISTS_CACHE, uid, lookup_user_by_id)
+        }
+
+        fn group_exists(&self, gid: u32) -> Result<bool, Diagnostic> {
+            cached_exists(&GROUP_EXISTS_CACHE, gid, lookup_group_by_id)
+        }
+
+        fn user_name(&self, uid: u32) -> Result<Option<OsString>, Diagnostic> {
+            cached_value(&USER_NAME_CACHE, uid, lookup_user_name_by_id)
+        }
+
+        fn group_name(&self, gid: u32) -> Result<Option<OsString>, Diagnostic> {
+            cached_value(&GROUP_NAME_CACHE, gid, lookup_group_name_by_id)
+        }
+    }
+
+    fn parse_decimal_id(raw: &OsStr) -> Option<u32> {
+        let bytes = raw.as_encoded_bytes();
+        if bytes.is_empty() || !bytes.iter().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+
+        std::str::from_utf8(bytes).ok()?.parse::<u32>().ok()
+    }
+
+    fn cached_exists(
+        cache: &'static OnceLock<Mutex<HashMap<u32, bool>>>,
+        id: u32,
+        lookup: fn(u32) -> Result<bool, Diagnostic>,
+    ) -> Result<bool, Diagnostic> {
+        cached_value(cache, id, lookup)
+    }
+
+    fn cached_value<T: Clone>(
+        cache: &'static OnceLock<Mutex<HashMap<u32, T>>>,
+        id: u32,
+        lookup: fn(u32) -> Result<T, Diagnostic>,
+    ) -> Result<T, Diagnostic> {
+        let cache = cache.get_or_init(|| Mutex::new(HashMap::new()));
+        if let Some(value) = cache.lock().unwrap().get(&id).cloned() {
+            return Ok(value);
+        }
+
+        let value = lookup(id)?;
+        cache.lock().unwrap().insert(id, value.clone());
+        Ok(value)
+    }
+
+    fn lookup_user_by_name(raw: &OsStr) -> Result<Option<u32>, Diagnostic> {
+        let name = c_string(raw, "user name")?;
+        let mut buffer = vec![0u8; initial_buffer_size(libc::_SC_GETPW_R_SIZE_MAX)];
+
+        loop {
+            let mut passwd = unsafe { std::mem::zeroed::<libc::passwd>() };
+            let mut result: *mut libc::passwd = std::ptr::null_mut();
+            let status = unsafe {
+                libc::getpwnam_r(
+                    name.as_ptr(),
+                    &mut passwd,
+                    buffer.as_mut_ptr().cast(),
+                    buffer.len(),
+                    &mut result,
+                )
+            };
+
+            if status == 0 {
+                return Ok((!result.is_null()).then_some(passwd.pw_uid));
+            }
+            if status == libc::ERANGE {
+                buffer.resize(buffer.len() * 2, 0);
+                continue;
+            }
+            if is_not_found_status(status) {
+                return Ok(None);
+            }
+
+            return Err(nss_error("failed to look up user by name", status));
+        }
+    }
+
+    fn lookup_group_by_name(raw: &OsStr) -> Result<Option<u32>, Diagnostic> {
+        let name = c_string(raw, "group name")?;
+        let mut buffer = vec![0u8; initial_buffer_size(libc::_SC_GETGR_R_SIZE_MAX)];
+
+        loop {
+            let mut group = unsafe { std::mem::zeroed::<libc::group>() };
+            let mut result: *mut libc::group = std::ptr::null_mut();
+            let status = unsafe {
+                libc::getgrnam_r(
+                    name.as_ptr(),
+                    &mut group,
+                    buffer.as_mut_ptr().cast(),
+                    buffer.len(),
+                    &mut result,
+                )
+            };
+
+            if status == 0 {
+                return Ok((!result.is_null()).then_some(group.gr_gid));
+            }
+            if status == libc::ERANGE {
+                buffer.resize(buffer.len() * 2, 0);
+                continue;
+            }
+            if is_not_found_status(status) {
+                return Ok(None);
+            }
+
+            return Err(nss_error("failed to look up group by name", status));
+        }
+    }
+
+    fn lookup_user_by_id(uid: u32) -> Result<bool, Diagnostic> {
+        let mut buffer = vec![0u8; initial_buffer_size(libc::_SC_GETPW_R_SIZE_MAX)];
+
+        loop {
+            let mut passwd = unsafe { std::mem::zeroed::<libc::passwd>() };
+            let mut result: *mut libc::passwd = std::ptr::null_mut();
+            let status = unsafe {
+                libc::getpwuid_r(
+                    uid as libc::uid_t,
+                    &mut passwd,
+                    buffer.as_mut_ptr().cast(),
+                    buffer.len(),
+                    &mut result,
+                )
+            };
+
+            if status == 0 {
+                return Ok(!result.is_null());
+            }
+            if status == libc::ERANGE {
+                buffer.resize(buffer.len() * 2, 0);
+                continue;
+            }
+            if is_not_found_status(status) {
+                return Ok(false);
+            }
+
+            return Err(nss_error("failed to look up user by id", status));
+        }
+    }
+
+    fn lookup_group_by_id(gid: u32) -> Result<bool, Diagnostic> {
+        let mut buffer = vec![0u8; initial_buffer_size(libc::_SC_GETGR_R_SIZE_MAX)];
+
+        loop {
+            let mut group = unsafe { std::mem::zeroed::<libc::group>() };
+            let mut result: *mut libc::group = std::ptr::null_mut();
+            let status = unsafe {
+                libc::getgrgid_r(
+                    gid as libc::gid_t,
+                    &mut group,
+                    buffer.as_mut_ptr().cast(),
+                    buffer.len(),
+                    &mut result,
+                )
+            };
+
+            if status == 0 {
+                return Ok(!result.is_null());
+            }
+            if status == libc::ERANGE {
+                buffer.resize(buffer.len() * 2, 0);
+                continue;
+            }
+            if is_not_found_status(status) {
+                return Ok(false);
+            }
+
+            return Err(nss_error("failed to look up group by id", status));
+        }
+    }
+
+    fn lookup_user_name_by_id(uid: u32) -> Result<Option<OsString>, Diagnostic> {
+        let mut buffer = vec![0u8; initial_buffer_size(libc::_SC_GETPW_R_SIZE_MAX)];
+
+        loop {
+            let mut passwd = unsafe { std::mem::zeroed::<libc::passwd>() };
+            let mut result: *mut libc::passwd = std::ptr::null_mut();
+            let status = unsafe {
+                libc::getpwuid_r(
+                    uid as libc::uid_t,
+                    &mut passwd,
+                    buffer.as_mut_ptr().cast(),
+                    buffer.len(),
+                    &mut result,
+                )
+            };
+
+            if status == 0 {
+                return Ok((!result.is_null()).then(|| unsafe {
+                    os_string_from_encoded_bytes(
+                        std::ffi::CStr::from_ptr(passwd.pw_name).to_bytes().to_vec(),
+                    )
+                }));
+            }
+            if status == libc::ERANGE {
+                buffer.resize(buffer.len() * 2, 0);
+                continue;
+            }
+            if is_not_found_status(status) {
+                return Ok(None);
+            }
+
+            return Err(nss_error("failed to look up user name by id", status));
+        }
+    }
+
+    fn lookup_group_name_by_id(gid: u32) -> Result<Option<OsString>, Diagnostic> {
+        let mut buffer = vec![0u8; initial_buffer_size(libc::_SC_GETGR_R_SIZE_MAX)];
+
+        loop {
+            let mut group = unsafe { std::mem::zeroed::<libc::group>() };
+            let mut result: *mut libc::group = std::ptr::null_mut();
+            let status = unsafe {
+                libc::getgrgid_r(
+                    gid as libc::gid_t,
+                    &mut group,
+                    buffer.as_mut_ptr().cast(),
+                    buffer.len(),
+                    &mut result,
+                )
+            };
+
+            if status == 0 {
+                return Ok((!result.is_null()).then(|| unsafe {
+                    os_string_from_encoded_bytes(
+                        std::ffi::CStr::from_ptr(group.gr_name).to_bytes().to_vec(),
+                    )
+                }));
+            }
+            if status == libc::ERANGE {
+                buffer.resize(buffer.len() * 2, 0);
+                continue;
+            }
+            if is_not_found_status(status) {
+                return Ok(None);
+            }
+
+            return Err(nss_error("failed to look up group name by id", status));
+        }
+    }
+
+    fn c_string(raw: &OsStr, label: &str) -> Result<CString, Diagnostic> {
+        CString::new(raw.as_encoded_bytes())
+            .map_err(|_| Diagnostic::new(format!("{label} contains an interior NUL byte"), 1))
+    }
+
+    fn initial_buffer_size(kind: libc::c_int) -> usize {
+        let reported = unsafe { libc::sysconf(kind) };
+        if reported > 0 {
+            reported as usize
+        } else {
+            16 * 1024
+        }
+    }
+
+    fn nss_error(prefix: &str, code: i32) -> Diagnostic {
+        Diagnostic::new(
+            format!("{prefix}: {}", io::Error::from_raw_os_error(code)),
+            1,
+        )
+    }
+
+    fn is_not_found_status(status: i32) -> bool {
+        matches!(
+            status,
+            libc::ENOENT | libc::ESRCH | libc::EBADF | libc::EPERM
+        )
+    }
+}
+
+#[cfg(windows)]
+mod imp {
+    use super::{AccountBackend, Diagnostic};
+    use std::ffi::{OsStr, OsString};
+
+    pub(crate) fn backend() -> &'static dyn AccountBackend {
+        &WINDOWS_ACCOUNT_BACKEND
+    }
+
+    static WINDOWS_ACCOUNT_BACKEND: WindowsAccountBackend = WindowsAccountBackend;
+
+    struct WindowsAccountBackend;
+
+    impl AccountBackend for WindowsAccountBackend {
+        fn resolve_user_id(&self, _raw: &OsStr) -> Result<u32, Diagnostic> {
+            Err(Diagnostic::new(
+                "named ownership predicates are not implemented on Windows yet",
                 1,
-            )),
-        }
-    }
-
-    fn resolve_group_id(&self, raw: &OsStr) -> Result<u32, Diagnostic> {
-        if let Some(gid) = parse_decimal_id(raw) {
-            return Ok(gid);
+            ))
         }
 
-        let name = raw.to_string_lossy().into_owned();
-        match lookup_group_by_name(raw)? {
-            Some(gid) => Ok(gid),
-            None => Err(Diagnostic::new(
-                format!("`{name}` is not the name of an existing group"),
+        fn resolve_group_id(&self, _raw: &OsStr) -> Result<u32, Diagnostic> {
+            Err(Diagnostic::new(
+                "named ownership predicates are not implemented on Windows yet",
                 1,
-            )),
+            ))
+        }
+
+        fn user_exists(&self, _uid: u32) -> Result<bool, Diagnostic> {
+            Ok(false)
+        }
+
+        fn group_exists(&self, _gid: u32) -> Result<bool, Diagnostic> {
+            Ok(false)
+        }
+
+        fn user_name(&self, _uid: u32) -> Result<Option<OsString>, Diagnostic> {
+            Ok(None)
+        }
+
+        fn group_name(&self, _gid: u32) -> Result<Option<OsString>, Diagnostic> {
+            Ok(None)
         }
     }
-
-    fn user_exists(&self, uid: u32) -> Result<bool, Diagnostic> {
-        cached_exists(&USER_EXISTS_CACHE, uid, lookup_user_by_id)
-    }
-
-    fn group_exists(&self, gid: u32) -> Result<bool, Diagnostic> {
-        cached_exists(&GROUP_EXISTS_CACHE, gid, lookup_group_by_id)
-    }
-
-    fn user_name(&self, uid: u32) -> Result<Option<OsString>, Diagnostic> {
-        cached_value(&USER_NAME_CACHE, uid, lookup_user_name_by_id)
-    }
-
-    fn group_name(&self, gid: u32) -> Result<Option<OsString>, Diagnostic> {
-        cached_value(&GROUP_NAME_CACHE, gid, lookup_group_name_by_id)
-    }
-}
-
-fn parse_decimal_id(raw: &OsStr) -> Option<u32> {
-    let bytes = raw.as_bytes();
-    if bytes.is_empty() || !bytes.iter().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-
-    std::str::from_utf8(bytes).ok()?.parse::<u32>().ok()
-}
-
-fn cached_exists(
-    cache: &'static OnceLock<Mutex<HashMap<u32, bool>>>,
-    id: u32,
-    lookup: fn(u32) -> Result<bool, Diagnostic>,
-) -> Result<bool, Diagnostic> {
-    cached_value(cache, id, lookup)
-}
-
-fn cached_value<T: Clone>(
-    cache: &'static OnceLock<Mutex<HashMap<u32, T>>>,
-    id: u32,
-    lookup: fn(u32) -> Result<T, Diagnostic>,
-) -> Result<T, Diagnostic> {
-    let cache = cache.get_or_init(|| Mutex::new(HashMap::new()));
-    if let Some(value) = cache.lock().unwrap().get(&id).cloned() {
-        return Ok(value);
-    }
-
-    let value = lookup(id)?;
-    cache.lock().unwrap().insert(id, value.clone());
-    Ok(value)
-}
-
-fn lookup_user_by_name(raw: &OsStr) -> Result<Option<u32>, Diagnostic> {
-    let name = c_string(raw, "user name")?;
-    let mut buffer = vec![0u8; initial_buffer_size(libc::_SC_GETPW_R_SIZE_MAX)];
-
-    loop {
-        let mut passwd = unsafe { std::mem::zeroed::<libc::passwd>() };
-        let mut result = std::ptr::null_mut();
-        let status = unsafe {
-            libc::getpwnam_r(
-                name.as_ptr(),
-                &mut passwd,
-                buffer.as_mut_ptr().cast(),
-                buffer.len(),
-                &mut result,
-            )
-        };
-
-        if status == 0 {
-            return Ok((!result.is_null()).then_some(passwd.pw_uid));
-        }
-        if status == libc::ERANGE {
-            buffer.resize(buffer.len() * 2, 0);
-            continue;
-        }
-        if is_not_found_status(status) {
-            return Ok(None);
-        }
-
-        return Err(nss_error("failed to look up user by name", status));
-    }
-}
-
-fn lookup_group_by_name(raw: &OsStr) -> Result<Option<u32>, Diagnostic> {
-    let name = c_string(raw, "group name")?;
-    let mut buffer = vec![0u8; initial_buffer_size(libc::_SC_GETGR_R_SIZE_MAX)];
-
-    loop {
-        let mut group = unsafe { std::mem::zeroed::<libc::group>() };
-        let mut result = std::ptr::null_mut();
-        let status = unsafe {
-            libc::getgrnam_r(
-                name.as_ptr(),
-                &mut group,
-                buffer.as_mut_ptr().cast(),
-                buffer.len(),
-                &mut result,
-            )
-        };
-
-        if status == 0 {
-            return Ok((!result.is_null()).then_some(group.gr_gid));
-        }
-        if status == libc::ERANGE {
-            buffer.resize(buffer.len() * 2, 0);
-            continue;
-        }
-        if is_not_found_status(status) {
-            return Ok(None);
-        }
-
-        return Err(nss_error("failed to look up group by name", status));
-    }
-}
-
-fn lookup_user_by_id(uid: u32) -> Result<bool, Diagnostic> {
-    let mut buffer = vec![0u8; initial_buffer_size(libc::_SC_GETPW_R_SIZE_MAX)];
-
-    loop {
-        let mut passwd = unsafe { std::mem::zeroed::<libc::passwd>() };
-        let mut result = std::ptr::null_mut();
-        let status = unsafe {
-            libc::getpwuid_r(
-                uid as libc::uid_t,
-                &mut passwd,
-                buffer.as_mut_ptr().cast(),
-                buffer.len(),
-                &mut result,
-            )
-        };
-
-        if status == 0 {
-            return Ok(!result.is_null());
-        }
-        if status == libc::ERANGE {
-            buffer.resize(buffer.len() * 2, 0);
-            continue;
-        }
-        if is_not_found_status(status) {
-            return Ok(false);
-        }
-
-        return Err(nss_error("failed to look up user by id", status));
-    }
-}
-
-fn lookup_group_by_id(gid: u32) -> Result<bool, Diagnostic> {
-    let mut buffer = vec![0u8; initial_buffer_size(libc::_SC_GETGR_R_SIZE_MAX)];
-
-    loop {
-        let mut group = unsafe { std::mem::zeroed::<libc::group>() };
-        let mut result = std::ptr::null_mut();
-        let status = unsafe {
-            libc::getgrgid_r(
-                gid as libc::gid_t,
-                &mut group,
-                buffer.as_mut_ptr().cast(),
-                buffer.len(),
-                &mut result,
-            )
-        };
-
-        if status == 0 {
-            return Ok(!result.is_null());
-        }
-        if status == libc::ERANGE {
-            buffer.resize(buffer.len() * 2, 0);
-            continue;
-        }
-        if is_not_found_status(status) {
-            return Ok(false);
-        }
-
-        return Err(nss_error("failed to look up group by id", status));
-    }
-}
-
-fn lookup_user_name_by_id(uid: u32) -> Result<Option<OsString>, Diagnostic> {
-    let mut buffer = vec![0u8; initial_buffer_size(libc::_SC_GETPW_R_SIZE_MAX)];
-
-    loop {
-        let mut passwd = unsafe { std::mem::zeroed::<libc::passwd>() };
-        let mut result = std::ptr::null_mut();
-        let status = unsafe {
-            libc::getpwuid_r(
-                uid as libc::uid_t,
-                &mut passwd,
-                buffer.as_mut_ptr().cast(),
-                buffer.len(),
-                &mut result,
-            )
-        };
-
-        if status == 0 {
-            return Ok((!result.is_null()).then(|| unsafe {
-                OsString::from_vec(std::ffi::CStr::from_ptr(passwd.pw_name).to_bytes().to_vec())
-            }));
-        }
-        if status == libc::ERANGE {
-            buffer.resize(buffer.len() * 2, 0);
-            continue;
-        }
-        if is_not_found_status(status) {
-            return Ok(None);
-        }
-
-        return Err(nss_error("failed to look up user name by id", status));
-    }
-}
-
-fn lookup_group_name_by_id(gid: u32) -> Result<Option<OsString>, Diagnostic> {
-    let mut buffer = vec![0u8; initial_buffer_size(libc::_SC_GETGR_R_SIZE_MAX)];
-
-    loop {
-        let mut group = unsafe { std::mem::zeroed::<libc::group>() };
-        let mut result = std::ptr::null_mut();
-        let status = unsafe {
-            libc::getgrgid_r(
-                gid as libc::gid_t,
-                &mut group,
-                buffer.as_mut_ptr().cast(),
-                buffer.len(),
-                &mut result,
-            )
-        };
-
-        if status == 0 {
-            return Ok((!result.is_null()).then(|| unsafe {
-                OsString::from_vec(std::ffi::CStr::from_ptr(group.gr_name).to_bytes().to_vec())
-            }));
-        }
-        if status == libc::ERANGE {
-            buffer.resize(buffer.len() * 2, 0);
-            continue;
-        }
-        if is_not_found_status(status) {
-            return Ok(None);
-        }
-
-        return Err(nss_error("failed to look up group name by id", status));
-    }
-}
-
-fn c_string(raw: &OsStr, label: &str) -> Result<CString, Diagnostic> {
-    CString::new(raw.as_bytes())
-        .map_err(|_| Diagnostic::new(format!("{label} contains an interior NUL byte"), 1))
-}
-
-fn initial_buffer_size(kind: libc::c_int) -> usize {
-    let reported = unsafe { libc::sysconf(kind) };
-    if reported > 0 {
-        reported as usize
-    } else {
-        16 * 1024
-    }
-}
-
-fn nss_error(prefix: &str, code: i32) -> Diagnostic {
-    Diagnostic::new(
-        format!("{prefix}: {}", io::Error::from_raw_os_error(code)),
-        1,
-    )
-}
-
-fn is_not_found_status(status: i32) -> bool {
-    matches!(
-        status,
-        libc::ENOENT | libc::ESRCH | libc::EBADF | libc::EPERM
-    )
 }

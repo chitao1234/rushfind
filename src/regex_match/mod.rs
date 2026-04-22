@@ -1,3 +1,5 @@
+#![cfg_attr(windows, allow(dead_code))]
+
 mod backend;
 mod gnu;
 mod ir;
@@ -173,7 +175,7 @@ fn push_hex_byte(out: &mut String, byte: u8) {
     write!(out, r"\x{:02X}", byte).unwrap();
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::{RegexDialect, RegexMatcher};
     use crate::regex_match::backend::RegexBackendKind;

@@ -3,10 +3,10 @@ use crate::diagnostics::Diagnostic;
 use crate::entry::{EntryContext, EntryKind};
 use crate::eval::EvalContext;
 use crate::follow::FollowMode;
+use crate::platform::path::{display_bytes, display_os_bytes, encoded_bytes};
 use crate::printf_time::{ResolvedTimeParts, resolve_local_time_parts};
 use crate::time::Timestamp;
 use std::ffi::OsStr;
-use std::os::unix::ffi::OsStrExt;
 
 const MONTHS_ABBR: [&[u8]; 12] = [
     b"Jan", b"Feb", b"Mar", b"Apr", b"May", b"Jun", b"Jul", b"Aug", b"Sep", b"Oct", b"Nov", b"Dec",
@@ -32,7 +32,7 @@ pub(crate) fn render_ls_record(
     let group = format_name_or_id(group_name(gid)?.as_deref(), gid);
     let size = render_size_field(entry, follow_mode, kind)?;
     let timestamp = render_entry_timestamp(entry, follow_mode, context.evaluation_now()?)?;
-    let path = escape_ls_bytes(entry.path.as_os_str().as_bytes());
+    let path = escape_ls_bytes(&display_bytes(&entry.path));
     let suffix = render_symlink_suffix(entry, follow_mode)?;
 
     let mut out = format!("{inode:>9} {blocks_1k:>6} {mode} {links:>3} ").into_bytes();
@@ -66,6 +66,7 @@ fn render_size_field(
     kind: EntryKind,
 ) -> Result<Vec<u8>, Diagnostic> {
     match (kind, entry.active_device_number(follow_mode)?) {
+        #[cfg(unix)]
         (EntryKind::Block | EntryKind::Character, Some(device)) => {
             let major = libc::major(device as libc::dev_t) as u64;
             let minor = libc::minor(device as libc::dev_t) as u64;
@@ -82,7 +83,7 @@ fn render_symlink_suffix(
     match entry.active_link_target(follow_mode)? {
         Some(target) => {
             let mut bytes = b" -> ".to_vec();
-            bytes.extend_from_slice(&escape_ls_bytes(target.as_bytes()));
+            bytes.extend_from_slice(&escape_ls_bytes(&display_os_bytes(target.as_os_str())));
             Ok(bytes)
         }
         None => Ok(Vec::new()),
@@ -185,11 +186,12 @@ fn render_ls_time_column(parts: &ResolvedTimeParts, now: Timestamp) -> Result<Ve
 
 fn format_name_or_id(name: Option<&OsStr>, id: u32) -> Vec<u8> {
     match name {
-        Some(name) => name.as_bytes().to_vec(),
+        Some(name) => encoded_bytes(name).to_vec(),
         None => id.to_string().into_bytes(),
     }
 }
 
+#[cfg_attr(windows, allow(dead_code))]
 fn format_device_field(major: u64, minor: u64) -> Vec<u8> {
     format!("{major}, {minor:>3}").into_bytes()
 }

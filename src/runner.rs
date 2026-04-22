@@ -6,7 +6,6 @@ use crate::planner::{ExecutionMode, ExecutionPlan, RuntimeExpr, TraversalOrder};
 use crate::traversal_control::{TraversalControl, evaluate_for_traversal_with_context};
 use std::ffi::OsStr;
 use std::io::Write;
-use std::os::unix::ffi::OsStrExt;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct RunSummary {
@@ -26,8 +25,8 @@ pub(crate) fn write_startup_warnings<E: Write>(
 }
 
 pub(crate) fn validate_execdir_path_value(path: &OsStr) -> Result<(), Diagnostic> {
-    for entry in path.as_bytes().split(|byte| *byte == b':') {
-        if entry.is_empty() || entry[0] != b'/' {
+    for entry in std::env::split_paths(path) {
+        if entry.as_os_str().is_empty() || !entry.is_absolute() {
             return Err(Diagnostic::new(
                 "unsafe PATH for `-execdir`: PATH entries must be absolute and non-empty",
                 1,

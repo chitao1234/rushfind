@@ -1,7 +1,10 @@
 #![allow(dead_code, unused_imports)]
 
+#[cfg(unix)]
 pub mod gnu;
 pub mod planner;
+#[cfg(windows)]
+pub mod windows;
 
 use assert_cmd::cargo::cargo_bin;
 use rushfind::birth::read_birth_time;
@@ -19,6 +22,7 @@ use std::sync::{Once, OnceLock};
 use std::time::Duration;
 use wait_timeout::ChildExt;
 
+#[cfg(unix)]
 pub use gnu::{
     PRINTF_TIME_TZ, assert_file_output_matches_gnu_with_env, assert_matches_gnu_as_sets,
     assert_matches_gnu_as_sets_with_env, assert_matches_gnu_exact,
@@ -229,6 +233,7 @@ pub fn resolved_messages_locale(locale: &str) -> Option<String> {
     })
 }
 
+#[cfg(unix)]
 pub fn locale_affirmative_accepts(locale: &str, reply: &str) -> bool {
     let output = match Command::new("locale")
         .env("LANG", "C")
@@ -281,6 +286,11 @@ pub fn locale_affirmative_accepts(locale: &str, reply: &str) -> bool {
     }
 
     exec_status == 0
+}
+
+#[cfg(windows)]
+pub fn locale_affirmative_accepts(_locale: &str, _reply: &str) -> bool {
+    false
 }
 
 pub fn existing_path_without_birth_time() -> Option<std::path::PathBuf> {

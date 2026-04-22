@@ -1,6 +1,9 @@
+#![cfg_attr(windows, allow(dead_code))]
+
 use crate::diagnostics::Diagnostic;
 use crate::printf::PrintfTimeSelector;
 use crate::time::Timestamp;
+#[cfg(unix)]
 use std::ffi::CStr;
 use std::mem::MaybeUninit;
 
@@ -59,19 +62,18 @@ impl ResolvedTimeParts {
     ) -> Self {
         Self {
             timestamp,
-            local: libc::tm {
-                tm_sec: second,
-                tm_min: minute,
-                tm_hour: hour,
-                tm_mday: day,
-                tm_mon: month - 1,
-                tm_year: year - 1900,
-                tm_wday: weekday,
-                tm_yday: yearday - 1,
-                tm_isdst: is_dst,
-                tm_gmtoff: utc_offset_seconds as libc::c_long,
-                tm_zone: std::ptr::null_mut::<libc::c_char>() as _,
-            },
+            local: tm_from_parts(
+                year,
+                month,
+                day,
+                hour,
+                minute,
+                second,
+                weekday,
+                yearday,
+                is_dst,
+                utc_offset_seconds,
+            ),
             timezone_name,
             utc_offset_seconds,
         }
@@ -81,23 +83,83 @@ impl ResolvedTimeParts {
 pub(crate) fn resolve_local_time_parts(
     timestamp: Timestamp,
 ) -> Result<ResolvedTimeParts, Diagnostic> {
-    let raw = timestamp.seconds as libc::time_t;
-    let mut local = MaybeUninit::<libc::tm>::uninit();
-    let ptr = unsafe { libc::localtime_r(&raw, local.as_mut_ptr()) };
-    if ptr.is_null() {
-        return Err(Diagnostic::new(
-            "failed to resolve local time for -printf",
-            1,
-        ));
-    }
-
-    let local = unsafe { local.assume_init() };
+    let local = local_time(timestamp.seconds)?;
     Ok(ResolvedTimeParts {
         timestamp,
         timezone_name: timezone_name_bytes(&local),
-        utc_offset_seconds: local.tm_gmtoff as i32,
+        utc_offset_seconds: utc_offset_seconds(&local),
         local,
     })
+}
+
+fn tm_from_parts(
+    year: i32,
+    month: i32,
+    day: i32,
+    hour: i32,
+    minute: i32,
+    second: i32,
+    weekday: i32,
+    yearday: i32,
+    is_dst: i32,
+    _utc_offset_seconds: i32,
+) -> libc::tm {
+    let mut local = unsafe { std::mem::zeroed::<libc::tm>() };
+    local.tm_sec = second;
+    local.tm_min = minute;
+    local.tm_hour = hour;
+    local.tm_mday = day;
+    local.tm_mon = month - 1;
+    local.tm_year = year - 1900;
+    local.tm_wday = weekday;
+    local.tm_yday = yearday - 1;
+    local.tm_isdst = is_dst;
+    #[cfg(unix)]
+    {
+        local.tm_gmtoff = utc_offset_seconds as libc::c_long;
+        local.tm_zone = std::ptr::null_mut::<libc::c_char>() as _;
+    }
+    local
+}
+
+fn local_time(seconds: i64) -> Result<libc::tm, Diagnostic> {
+    let raw = seconds as libc::time_t;
+
+    #[cfg(unix)]
+    {
+        let mut local = MaybeUninit::<libc::tm>::uninit();
+        let ptr = unsafe { libc::localtime_r(&raw, local.as_mut_ptr()) };
+        if ptr.is_null() {
+            return Err(Diagnostic::new(
+                "failed to resolve local time for -printf",
+                1,
+            ));
+        }
+        return Ok(unsafe { local.assume_init() });
+    }
+
+    #[cfg(windows)]
+    {
+        let mut local = MaybeUninit::<libc::tm>::zeroed();
+        let status = unsafe { libc::localtime_s(local.as_mut_ptr(), &raw) };
+        if status != 0 {
+            return Err(Diagnostic::new(
+                "failed to resolve local time for -printf",
+                1,
+            ));
+        }
+        return Ok(unsafe { local.assume_init() });
+    }
+}
+
+#[cfg(unix)]
+fn utc_offset_seconds(local: &libc::tm) -> i32 {
+    local.tm_gmtoff as i32
+}
+
+#[cfg(windows)]
+fn utc_offset_seconds(_local: &libc::tm) -> i32 {
+    0
 }
 
 pub(crate) fn render_full_time_bytes(parts: &ResolvedTimeParts) -> Result<Vec<u8>, Diagnostic> {
@@ -316,11 +378,20 @@ fn is_leap_year(year: i32) -> bool {
 
 #[allow(dead_code)]
 fn timezone_name_bytes(local: &libc::tm) -> Vec<u8> {
-    if local.tm_zone.is_null() {
+    #[cfg(windows)]
+    {
+        let _ = local;
         return Vec::new();
     }
 
-    unsafe { CStr::from_ptr(local.tm_zone) }.to_bytes().to_vec()
+    #[cfg(unix)]
+    {
+        if local.tm_zone.is_null() {
+            return Vec::new();
+        }
+
+        unsafe { CStr::from_ptr(local.tm_zone) }.to_bytes().to_vec()
+    }
 }
 
 #[cfg(test)]

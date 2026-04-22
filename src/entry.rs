@@ -1,3 +1,5 @@
+#![cfg_attr(windows, allow(dead_code))]
+
 use crate::diagnostics::Diagnostic;
 use crate::follow::FollowMode;
 use crate::identity::FileIdentity;
@@ -9,6 +11,7 @@ use std::ffi::OsString;
 use std::fmt;
 use std::fs::FileType;
 use std::io;
+#[cfg(unix)]
 use std::os::unix::fs::FileTypeExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -43,9 +46,18 @@ pub enum AccessMode {
 impl AccessMode {
     pub(crate) fn as_flag(self) -> libc::c_int {
         match self {
+            #[cfg(unix)]
             Self::Read => libc::R_OK,
+            #[cfg(windows)]
+            Self::Read => 4,
+            #[cfg(unix)]
             Self::Write => libc::W_OK,
+            #[cfg(windows)]
+            Self::Write => 2,
+            #[cfg(unix)]
             Self::Execute => libc::X_OK,
+            #[cfg(windows)]
+            Self::Execute => 0,
         }
     }
 }
@@ -497,29 +509,69 @@ pub fn file_type_to_kind(file_type: FileType) -> EntryKind {
         EntryKind::File
     } else if file_type.is_symlink() {
         EntryKind::Symlink
-    } else if file_type.is_block_device() {
+    } else if is_block_device(&file_type) {
         EntryKind::Block
-    } else if file_type.is_char_device() {
+    } else if is_char_device(&file_type) {
         EntryKind::Character
-    } else if file_type.is_fifo() {
+    } else if is_fifo(&file_type) {
         EntryKind::Fifo
-    } else if file_type.is_socket() {
+    } else if is_socket(&file_type) {
         EntryKind::Socket
     } else {
         EntryKind::Unknown
     }
 }
 
+#[cfg(unix)]
+fn is_block_device(file_type: &FileType) -> bool {
+    file_type.is_block_device()
+}
+
+#[cfg(windows)]
+fn is_block_device(_file_type: &FileType) -> bool {
+    false
+}
+
+#[cfg(unix)]
+fn is_char_device(file_type: &FileType) -> bool {
+    file_type.is_char_device()
+}
+
+#[cfg(windows)]
+fn is_char_device(_file_type: &FileType) -> bool {
+    false
+}
+
+#[cfg(unix)]
+fn is_fifo(file_type: &FileType) -> bool {
+    file_type.is_fifo()
+}
+
+#[cfg(windows)]
+fn is_fifo(_file_type: &FileType) -> bool {
+    false
+}
+
+#[cfg(unix)]
+fn is_socket(file_type: &FileType) -> bool {
+    file_type.is_socket()
+}
+
+#[cfg(windows)]
+fn is_socket(_file_type: &FileType) -> bool {
+    false
+}
+
 fn path_error(path: &Path, error: io::Error) -> Diagnostic {
     Diagnostic::new(format!("{}: {error}", path.display()), 1)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 fn read_access(path: &Path, mode: AccessMode) -> io::Result<bool> {
     crate::platform::filesystem::read_access(path, mode)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 fn read_access_with(
     path: *const libc::c_char,
     mode: AccessMode,
@@ -529,7 +581,7 @@ fn read_access_with(
     crate::platform::filesystem::read_access_with(path, mode, primary, fallback)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) mod test_support {
     use super::{AccessMode, EntryContext};
     use crate::platform::filesystem::{
@@ -666,7 +718,7 @@ pub(crate) mod test_support {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::EntryContext;
     use super::test_support::CountingReader;

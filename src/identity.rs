@@ -17,6 +17,11 @@ impl FileIdentity {
         }
     }
 
+    #[cfg(windows)]
+    pub fn from_metadata(_metadata: &Metadata) -> Self {
+        unimplemented!("windows file identity is not implemented yet")
+    }
+
     pub fn device_number(self) -> u64 {
         match self {
             Self::Unix { dev, .. } => dev,

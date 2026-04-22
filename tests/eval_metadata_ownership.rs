@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 use rushfind::entry::EntryContext;
 use rushfind::eval::evaluate;
 use rushfind::follow::FollowMode;

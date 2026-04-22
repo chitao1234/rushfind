@@ -578,7 +578,7 @@ pub fn local_day_start(now: Timestamp) -> Result<Timestamp, Diagnostic> {
     local.tm_sec = 0;
     local.tm_isdst = -1;
 
-    let day_start = unsafe { libc::mktime(&mut local) };
+    let day_start = local_mktime(&mut local)?;
     if day_start == -1 {
         return Err(Diagnostic::new("failed to compute local day start", 1));
     }
@@ -596,17 +596,48 @@ fn local_calendar_day(timestamp: Timestamp) -> Result<i64, Diagnostic> {
 }
 
 fn local_time(seconds: i64) -> Result<libc::tm, Diagnostic> {
-    let raw = seconds as libc::time_t;
-    let mut local = MaybeUninit::<libc::tm>::uninit();
-    let ptr = unsafe { libc::localtime_r(&raw, local.as_mut_ptr()) };
-    if ptr.is_null() {
-        return Err(Diagnostic::new(
-            "failed to resolve local time for relative time matching",
-            1,
-        ));
+    #[cfg(unix)]
+    {
+        let raw = seconds as libc::time_t;
+        let mut local = MaybeUninit::<libc::tm>::uninit();
+        let ptr = unsafe { libc::localtime_r(&raw, local.as_mut_ptr()) };
+        if ptr.is_null() {
+            return Err(Diagnostic::new(
+                "failed to resolve local time for relative time matching",
+                1,
+            ));
+        }
+
+        return Ok(unsafe { local.assume_init() });
     }
 
-    Ok(unsafe { local.assume_init() })
+    #[cfg(windows)]
+    {
+        let raw = seconds as libc::time_t;
+        let mut local = MaybeUninit::<libc::tm>::zeroed();
+        let status = unsafe { libc::localtime_s(local.as_mut_ptr(), &raw) };
+        if status != 0 {
+            return Err(Diagnostic::new(
+                "failed to resolve local time for relative time matching",
+                1,
+            ));
+        }
+
+        return Ok(unsafe { local.assume_init() });
+    }
+}
+
+#[cfg(unix)]
+fn local_mktime(local: &mut libc::tm) -> Result<libc::time_t, Diagnostic> {
+    Ok(unsafe { libc::mktime(local) })
+}
+
+#[cfg(windows)]
+fn local_mktime(_local: &mut libc::tm) -> Result<libc::time_t, Diagnostic> {
+    Err(Diagnostic::new(
+        "local day-start calculations are not implemented on Windows yet",
+        1,
+    ))
 }
 
 fn days_from_civil(year: i32, month: u32, day: u32) -> i64 {
