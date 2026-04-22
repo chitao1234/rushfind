@@ -191,6 +191,10 @@ fn compile_glob(
     )
 }
 
+fn normalize_match_pattern(pattern: &std::ffi::OsStr) -> std::borrow::Cow<'_, std::ffi::OsStr> {
+    crate::platform::path::normalize_match_text(pattern)
+}
+
 pub fn plan_command(ast: CommandAst, workers: usize) -> Result<ExecutionPlan, Diagnostic> {
     plan_command_with_now(
         ast,
@@ -479,10 +483,11 @@ fn lower_predicate(
                     state,
                 )?;
             }
+            let normalized_pattern = normalize_match_pattern(pattern.as_os_str());
             Ok(RuntimeExpr::Predicate(RuntimePredicate::Path(
                 compile_glob(
                     if case_insensitive { "-ipath" } else { "-path" },
-                    pattern.as_os_str(),
+                    normalized_pattern.as_ref(),
                     case_insensitive,
                     GlobSlashMode::Literal,
                 )?,
@@ -532,6 +537,7 @@ fn lower_predicate(
                     state,
                 )?;
             }
+            let normalized_pattern = normalize_match_pattern(pattern.as_os_str());
             Ok(RuntimeExpr::Predicate(RuntimePredicate::LName(
                 compile_glob(
                     if case_insensitive {
@@ -539,7 +545,7 @@ fn lower_predicate(
                     } else {
                         "-lname"
                     },
-                    pattern.as_os_str(),
+                    normalized_pattern.as_ref(),
                     case_insensitive,
                     GlobSlashMode::Literal,
                 )?,

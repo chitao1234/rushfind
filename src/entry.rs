@@ -4,7 +4,8 @@ use crate::diagnostics::Diagnostic;
 use crate::follow::FollowMode;
 use crate::identity::FileIdentity;
 use crate::platform::filesystem::{
-    FsPlatformReader, PlatformMetadataView, PlatformPrincipalId, PlatformReader, missing_field,
+    FsPlatformReader, PlatformMetadataView, PlatformPrincipalId, PlatformReader, is_traversal_link,
+    missing_field,
 };
 use crate::time::Timestamp;
 use std::ffi::OsString;
@@ -199,14 +200,7 @@ impl EntryContext {
     }
 
     pub fn dirname_for_printf(&self) -> PathBuf {
-        if !self.path.as_os_str().as_encoded_bytes().contains(&b'/') {
-            return PathBuf::from(".");
-        }
-
-        self.path
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .to_path_buf()
+        crate::platform::path::relative_dir_for_printf(&self.path)
     }
 
     pub fn start_path(&self) -> &Path {
@@ -214,6 +208,7 @@ impl EntryContext {
     }
 
     pub fn physical_kind(&self) -> Result<EntryKind, Diagnostic> {
+        #[cfg(unix)]
         if let Some(file_type) = self.data.physical_file_type_hint {
             return Ok(file_type_to_kind(file_type));
         }
@@ -228,7 +223,7 @@ impl EntryContext {
     }
 
     fn active_view(&self, follow_mode: FollowMode) -> Result<&PlatformMetadataView, Diagnostic> {
-        if self.uses_logical_view(follow_mode) && self.physical_kind()? == EntryKind::Symlink {
+        if self.uses_logical_view(follow_mode) && self.physical_is_traversal_link()? {
             if let Some(view) = self.logical_view() {
                 return Ok(view);
             }
@@ -238,7 +233,7 @@ impl EntryContext {
     }
 
     pub fn logical_kind(&self) -> Result<EntryKind, Diagnostic> {
-        if self.physical_kind()? != EntryKind::Symlink {
+        if !self.physical_is_traversal_link()? {
             return self.physical_kind();
         }
 
@@ -250,7 +245,7 @@ impl EntryContext {
     }
 
     pub fn logical_identity(&self) -> Option<FileIdentity> {
-        if self.physical_kind().ok()? != EntryKind::Symlink {
+        if !self.physical_is_traversal_link().ok()? {
             return self.physical_identity().ok();
         }
 
@@ -258,7 +253,7 @@ impl EntryContext {
     }
 
     pub fn active_identity(&self, follow_mode: FollowMode) -> Result<FileIdentity, Diagnostic> {
-        if self.uses_logical_view(follow_mode) && self.physical_kind()? == EntryKind::Symlink {
+        if self.uses_logical_view(follow_mode) && self.physical_is_traversal_link()? {
             if let Some(identity) = self.logical_identity() {
                 return Ok(identity);
             }
@@ -379,7 +374,7 @@ impl EntryContext {
     }
 
     pub fn active_kind(&self, follow_mode: FollowMode) -> Result<EntryKind, Diagnostic> {
-        if self.uses_logical_view(follow_mode) && self.physical_kind()? == EntryKind::Symlink {
+        if self.uses_logical_view(follow_mode) && self.physical_is_traversal_link()? {
             if let Some(view) = self.logical_view() {
                 return Ok(view.kind);
             }
@@ -411,6 +406,10 @@ impl EntryContext {
         &self,
         follow_mode: FollowMode,
     ) -> Result<Option<FileIdentity>, Diagnostic> {
+        if self.physical_is_traversal_link()? && !self.uses_logical_view(follow_mode) {
+            return Ok(None);
+        }
+
         if self.active_kind(follow_mode)? != EntryKind::Directory {
             return Ok(None);
         }
@@ -491,7 +490,7 @@ impl EntryContext {
     }
 
     fn logical_view(&self) -> Option<&PlatformMetadataView> {
-        if self.physical_kind().ok()? != EntryKind::Symlink {
+        if !self.physical_is_traversal_link().ok()? {
             return None;
         }
 
@@ -499,6 +498,10 @@ impl EntryContext {
             .logical_view
             .get_or_init(|| self.data.reader.metadata_view(&self.path, true).ok())
             .as_ref()
+    }
+
+    fn physical_is_traversal_link(&self) -> Result<bool, Diagnostic> {
+        Ok(is_traversal_link(self.physical_view()?))
     }
 }
 
@@ -691,6 +694,16 @@ pub(crate) mod test_support {
                 logical_view: Some(view),
             }
         }
+
+        pub(crate) fn with_views(
+            physical_view: PlatformMetadataView,
+            logical_view: Option<PlatformMetadataView>,
+        ) -> Self {
+            Self {
+                physical_view,
+                logical_view,
+            }
+        }
     }
 
     impl PlatformReader for FakePlatformReader {
@@ -751,6 +764,7 @@ mod tests {
                     group: Some(PlatformPrincipalId::Numeric(20)),
                     mode_bits: Some(0o640),
                     native_attributes: None,
+                    reparse_tag: None,
                     link_count: Some(2),
                     blocks_512: Some(8),
                     atime: Timestamp::new(10, 1),
@@ -788,6 +802,7 @@ mod tests {
                     group: None,
                     mode_bits: Some(0o640),
                     native_attributes: None,
+                    reparse_tag: None,
                     link_count: Some(2),
                     blocks_512: None,
                     atime: Timestamp::new(10, 1),
@@ -916,6 +931,110 @@ mod tests {
             EntryKind::File
         );
         assert_eq!(reader.metadata_calls(), 0);
+    }
+
+    #[test]
+    fn directory_reparse_points_follow_only_in_logical_modes() {
+        const MOUNT_POINT_REPARSE_TAG: u32 = 0xA0000003;
+
+        let physical_view = PlatformMetadataView {
+            kind: EntryKind::Directory,
+            identity: Some(crate::identity::FileIdentity::Windows {
+                volume_serial: 11,
+                file_id: 22,
+            }),
+            size: 0,
+            owner: None,
+            group: None,
+            mode_bits: None,
+            native_attributes: Some(0),
+            reparse_tag: Some(MOUNT_POINT_REPARSE_TAG),
+            link_count: Some(1),
+            blocks_512: None,
+            atime: Timestamp::new(10, 0),
+            ctime: Timestamp::new(11, 0),
+            mtime: Timestamp::new(12, 0),
+            birth_time: Some(Timestamp::new(13, 0)),
+            filesystem_key: Some(FilesystemKey::Numeric(11)),
+            device_number: None,
+        };
+        let logical_view = PlatformMetadataView {
+            kind: EntryKind::Directory,
+            identity: Some(crate::identity::FileIdentity::Windows {
+                volume_serial: 33,
+                file_id: 44,
+            }),
+            size: 0,
+            owner: None,
+            group: None,
+            mode_bits: None,
+            native_attributes: Some(0),
+            reparse_tag: None,
+            link_count: Some(1),
+            blocks_512: None,
+            atime: Timestamp::new(20, 0),
+            ctime: Timestamp::new(21, 0),
+            mtime: Timestamp::new(22, 0),
+            birth_time: Some(Timestamp::new(23, 0)),
+            filesystem_key: Some(FilesystemKey::Numeric(33)),
+            device_number: None,
+        };
+
+        let root_entry = EntryContext::new_with_reader(
+            PathBuf::from("junction"),
+            0,
+            true,
+            Arc::new(super::test_support::FakePlatformReader::with_views(
+                physical_view.clone(),
+                Some(logical_view.clone()),
+            )),
+        );
+        let child_entry = EntryContext::new_with_reader(
+            PathBuf::from("junction"),
+            1,
+            false,
+            Arc::new(super::test_support::FakePlatformReader::with_views(
+                physical_view,
+                Some(logical_view),
+            )),
+        );
+
+        assert_eq!(
+            root_entry
+                .active_directory_identity(FollowMode::Physical)
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            root_entry
+                .active_directory_identity(FollowMode::Logical)
+                .unwrap(),
+            Some(crate::identity::FileIdentity::Windows {
+                volume_serial: 33,
+                file_id: 44,
+            })
+        );
+        assert_eq!(
+            root_entry
+                .active_directory_identity(FollowMode::CommandLineOnly)
+                .unwrap(),
+            Some(crate::identity::FileIdentity::Windows {
+                volume_serial: 33,
+                file_id: 44,
+            })
+        );
+        assert_eq!(
+            root_entry
+                .active_mount_id(FollowMode::CommandLineOnly)
+                .unwrap(),
+            33
+        );
+        assert_eq!(
+            child_entry
+                .active_directory_identity(FollowMode::CommandLineOnly)
+                .unwrap(),
+            None
+        );
     }
 
     #[test]

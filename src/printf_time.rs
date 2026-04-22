@@ -92,6 +92,7 @@ pub(crate) fn resolve_local_time_parts(
     })
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn tm_from_parts(
     year: i32,
     month: i32,
@@ -116,7 +117,7 @@ fn tm_from_parts(
     local.tm_isdst = is_dst;
     #[cfg(unix)]
     {
-        local.tm_gmtoff = utc_offset_seconds as libc::c_long;
+        local.tm_gmtoff = _utc_offset_seconds as libc::c_long;
         local.tm_zone = std::ptr::null_mut::<libc::c_char>() as _;
     }
     local

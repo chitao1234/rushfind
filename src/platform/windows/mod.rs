@@ -1,9 +1,11 @@
+pub(crate) mod filesystem;
+
 use crate::platform::{PlatformCapabilities, SupportLevel};
 
 pub(crate) static CAPABILITIES: PlatformCapabilities = PlatformCapabilities::new(
-    SupportLevel::Unsupported("`-fstype` is not implemented on Windows yet"),
-    SupportLevel::Unsupported("`-xdev`/`-mount` are not implemented on Windows yet"),
-    SupportLevel::Unsupported("birth time predicates are not implemented on Windows yet"),
+    SupportLevel::Exact,
+    SupportLevel::Exact,
+    SupportLevel::Exact,
     SupportLevel::Unsupported("named ownership predicates are not implemented on Windows yet"),
     SupportLevel::Unsupported("numeric ownership is not supported on Windows"),
     SupportLevel::Unsupported("access predicates are not implemented on Windows yet"),

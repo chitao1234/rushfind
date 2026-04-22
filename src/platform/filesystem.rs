@@ -53,6 +53,7 @@ pub(crate) struct PlatformMetadataView {
     pub group: Option<PlatformPrincipalId>,
     pub mode_bits: Option<u32>,
     pub native_attributes: Option<u32>,
+    pub reparse_tag: Option<u32>,
     pub link_count: Option<u64>,
     pub blocks_512: Option<u64>,
     pub atime: Timestamp,
@@ -109,10 +110,7 @@ impl FilesystemSnapshot {
 
     #[cfg(windows)]
     pub(crate) fn load_proc_self_mountinfo() -> Result<Self, Diagnostic> {
-        Err(Diagnostic::new(
-            "filesystem snapshots are not implemented on Windows yet",
-            1,
-        ))
+        crate::platform::windows::filesystem::filesystem_snapshot()
     }
 
     #[cfg(any(test, target_os = "linux"))]
@@ -176,10 +174,8 @@ pub(crate) fn load_metadata_view(path: &Path, follow: bool) -> io::Result<Platfo
 }
 
 #[cfg(windows)]
-pub(crate) fn load_metadata_view(_path: &Path, _follow: bool) -> io::Result<PlatformMetadataView> {
-    Err(unsupported_io(
-        "metadata views are not implemented on Windows yet",
-    ))
+pub(crate) fn load_metadata_view(path: &Path, follow: bool) -> io::Result<PlatformMetadataView> {
+    crate::platform::windows::filesystem::metadata_view(path, follow)
 }
 
 #[cfg(unix)]
@@ -200,6 +196,7 @@ pub(crate) fn metadata_view_from_metadata(
         group: Some(PlatformPrincipalId::Numeric(metadata.gid())),
         mode_bits: Some(metadata.mode() & 0o7777),
         native_attributes: None,
+        reparse_tag: None,
         link_count: Some(metadata.nlink()),
         blocks_512: Some(metadata.blocks()),
         atime: Timestamp::new(metadata.atime(), metadata.atime_nsec() as i32),
@@ -228,6 +225,7 @@ pub(crate) fn metadata_view_from_metadata(
         group: None,
         mode_bits: None,
         native_attributes: None,
+        reparse_tag: None,
         link_count: None,
         blocks_512: None,
         atime: Timestamp::new(0, 0),
@@ -255,10 +253,8 @@ pub(crate) fn filesystem_key(path: &Path, follow: bool) -> io::Result<Filesystem
 }
 
 #[cfg(windows)]
-pub(crate) fn filesystem_key(_path: &Path, _follow: bool) -> io::Result<FilesystemKey> {
-    Err(unsupported_io(
-        "filesystem keys are not implemented on Windows yet",
-    ))
+pub(crate) fn filesystem_key(path: &Path, follow: bool) -> io::Result<FilesystemKey> {
+    crate::platform::windows::filesystem::filesystem_key(path, follow)
 }
 
 #[cfg(unix)]
@@ -270,10 +266,8 @@ pub(crate) fn read_access(path: &Path, mode: AccessMode) -> io::Result<bool> {
 }
 
 #[cfg(windows)]
-pub(crate) fn read_access(_path: &Path, _mode: AccessMode) -> io::Result<bool> {
-    Err(unsupported_io(
-        "access predicates are not implemented on Windows yet",
-    ))
+pub(crate) fn read_access(path: &Path, mode: AccessMode) -> io::Result<bool> {
+    crate::platform::windows::filesystem::read_access(path, mode)
 }
 
 #[cfg(unix)]
@@ -296,14 +290,25 @@ pub(crate) fn read_birth_time(path: &Path, follow: bool) -> Result<Option<Timest
 }
 
 #[cfg(windows)]
-pub(crate) fn read_birth_time(
-    _path: &Path,
-    _follow: bool,
-) -> Result<Option<Timestamp>, Diagnostic> {
-    Err(Diagnostic::new(
-        "birth time predicates are not implemented on Windows yet",
-        1,
-    ))
+pub(crate) fn read_birth_time(path: &Path, follow: bool) -> Result<Option<Timestamp>, Diagnostic> {
+    crate::platform::windows::filesystem::read_birth_time(path, follow)
+}
+
+pub(crate) fn is_traversal_link(view: &PlatformMetadataView) -> bool {
+    if view.kind == EntryKind::Symlink {
+        return true;
+    }
+
+    #[cfg(windows)]
+    {
+        const IO_REPARSE_TAG_MOUNT_POINT: u32 = 0xA0000003;
+        return view.reparse_tag == Some(IO_REPARSE_TAG_MOUNT_POINT);
+    }
+
+    #[cfg(unix)]
+    {
+        false
+    }
 }
 
 #[cfg(unix)]

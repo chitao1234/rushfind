@@ -5,6 +5,7 @@ use crate::entry::{AccessMode, EntryContext, EntryKind};
 use crate::follow::FollowMode;
 use crate::planner::{RuntimeAction, RuntimeExpr, RuntimePredicate};
 use crate::platform::filesystem::{FilesystemKey, FilesystemSnapshot};
+use crate::platform::path::normalize_match_text;
 use crate::runtime_pipeline::{EvalStep, begin_entry_eval, resume_entry_eval};
 use crate::time::{NewerMatcher, Timestamp, TimestampKind};
 use std::ffi::OsStr;
@@ -235,8 +236,14 @@ pub(crate) fn evaluate_predicate(
             let basename = entry.path.file_name().unwrap_or_else(|| OsStr::new(""));
             glob.is_match(basename)
         }
-        RuntimePredicate::Path(glob) => glob.is_match(entry.path.as_os_str()),
-        RuntimePredicate::Regex(matcher) => matcher.is_match(entry.path.as_os_str()),
+        RuntimePredicate::Path(glob) => {
+            let normalized = normalize_match_text(entry.path.as_os_str());
+            glob.is_match(normalized.as_ref())
+        }
+        RuntimePredicate::Regex(matcher) => {
+            let normalized = normalize_match_text(entry.path.as_os_str());
+            matcher.is_match(normalized.as_ref())
+        }
         RuntimePredicate::Inum(expected) => Ok(expected.matches(entry.active_inode(follow_mode)?)),
         RuntimePredicate::Links(expected) => {
             Ok(expected.matches(entry.active_link_count(follow_mode)?))
@@ -245,7 +252,10 @@ pub(crate) fn evaluate_predicate(
             Ok(*expected == entry.active_identity(follow_mode)?)
         }
         RuntimePredicate::LName(glob) => match entry.active_link_target(follow_mode)? {
-            Some(target) => glob.is_match(target.as_os_str()),
+            Some(target) => {
+                let normalized = normalize_match_text(target.as_os_str());
+                glob.is_match(normalized.as_ref())
+            }
             None => Ok(false),
         },
         RuntimePredicate::Uid(expected) => {

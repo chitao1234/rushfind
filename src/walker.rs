@@ -428,15 +428,18 @@ mod tests {
         load_entry, walk_ordered_with_backend,
     };
     use crate::diagnostics::Diagnostic;
-    use crate::entry::EntryContext;
+    use crate::entry::{EntryContext, EntryKind};
     use crate::follow::FollowMode;
     use crate::identity::FileIdentity;
     use crate::planner::{TraversalOptions, TraversalOrder};
+    use crate::platform::filesystem::{FilesystemKey, PlatformMetadataView, PlatformReader};
+    use crate::time::Timestamp;
     use crate::traversal_control::TraversalControl;
     use std::ffi::OsString;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use tempfile::tempdir;
 
     #[test]
@@ -592,6 +595,154 @@ mod tests {
                 "done:".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn physical_walk_does_not_descend_into_directory_reparse_points() {
+        const MOUNT_POINT_REPARSE_TAG: u32 = 0xA0000003;
+
+        #[derive(Clone)]
+        struct ReparseBackend {
+            entry: EntryContext,
+            visited_children: Arc<AtomicBool>,
+        }
+
+        #[derive(Clone)]
+        struct ReparseReader {
+            physical_view: PlatformMetadataView,
+            logical_view: PlatformMetadataView,
+        }
+
+        impl PlatformReader for ReparseReader {
+            fn metadata_view(
+                &self,
+                _path: &Path,
+                follow: bool,
+            ) -> std::io::Result<PlatformMetadataView> {
+                if follow {
+                    Ok(self.logical_view.clone())
+                } else {
+                    Ok(self.physical_view.clone())
+                }
+            }
+
+            fn read_link(&self, _path: &Path) -> std::io::Result<PathBuf> {
+                Err(std::io::Error::from_raw_os_error(libc::ENOENT))
+            }
+
+            fn directory_is_empty(&self, _path: &Path) -> std::io::Result<bool> {
+                Ok(false)
+            }
+
+            fn access(
+                &self,
+                _path: &Path,
+                _mode: crate::entry::AccessMode,
+            ) -> std::io::Result<bool> {
+                Ok(false)
+            }
+        }
+
+        impl WalkBackend for ReparseBackend {
+            fn load_entry(&self, _pending: &PendingPath) -> Result<EntryContext, Diagnostic> {
+                Ok(self.entry.clone())
+            }
+
+            fn visit_children(
+                &self,
+                _path: &Path,
+                _visit: &mut dyn FnMut(Result<DiscoveredChild, Diagnostic>),
+            ) -> Result<(), Diagnostic> {
+                self.visited_children.store(true, Ordering::SeqCst);
+                Ok(())
+            }
+
+            fn active_directory_identity(
+                &self,
+                entry: &EntryContext,
+                follow_mode: FollowMode,
+            ) -> Result<Option<FileIdentity>, Diagnostic> {
+                entry.active_directory_identity(follow_mode)
+            }
+        }
+
+        let physical_view = PlatformMetadataView {
+            kind: EntryKind::Directory,
+            identity: Some(FileIdentity::Windows {
+                volume_serial: 10,
+                file_id: 20,
+            }),
+            size: 0,
+            owner: None,
+            group: None,
+            mode_bits: None,
+            native_attributes: Some(0),
+            reparse_tag: Some(MOUNT_POINT_REPARSE_TAG),
+            link_count: Some(1),
+            blocks_512: None,
+            atime: Timestamp::new(1, 0),
+            ctime: Timestamp::new(2, 0),
+            mtime: Timestamp::new(3, 0),
+            birth_time: Some(Timestamp::new(4, 0)),
+            filesystem_key: Some(FilesystemKey::Numeric(10)),
+            device_number: None,
+        };
+        let logical_view = PlatformMetadataView {
+            kind: EntryKind::Directory,
+            identity: Some(FileIdentity::Windows {
+                volume_serial: 30,
+                file_id: 40,
+            }),
+            size: 0,
+            owner: None,
+            group: None,
+            mode_bits: None,
+            native_attributes: Some(0),
+            reparse_tag: None,
+            link_count: Some(1),
+            blocks_512: None,
+            atime: Timestamp::new(5, 0),
+            ctime: Timestamp::new(6, 0),
+            mtime: Timestamp::new(7, 0),
+            birth_time: Some(Timestamp::new(8, 0)),
+            filesystem_key: Some(FilesystemKey::Numeric(30)),
+            device_number: None,
+        };
+
+        let backend = Arc::new(ReparseBackend {
+            entry: EntryContext::new_with_reader(
+                PathBuf::from("junction"),
+                0,
+                true,
+                Arc::new(ReparseReader {
+                    physical_view,
+                    logical_view,
+                }),
+            ),
+            visited_children: Arc::new(AtomicBool::new(false)),
+        });
+
+        walk_ordered_with_backend(
+            backend.clone(),
+            &[PathBuf::from("junction")],
+            FollowMode::Physical,
+            TraversalOptions {
+                min_depth: 0,
+                max_depth: None,
+                same_file_system: false,
+                order: TraversalOrder::PreOrder,
+            },
+            |_entry| {
+                Ok(TraversalControl {
+                    matched: true,
+                    prune: false,
+                })
+            },
+            |_event| Ok(OrderedWalkDirective::Continue),
+        )
+        .unwrap();
+
+        assert!(!backend.visited_children.load(Ordering::SeqCst));
     }
 
     struct TestBackend;
