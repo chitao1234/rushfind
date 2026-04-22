@@ -2,6 +2,8 @@ mod support;
 
 use std::fs;
 use std::time::Duration;
+#[cfg(windows)]
+use support::windows::write_arg_echo_script;
 use support::{cargo_bin_output_with_timeout, path_arg};
 use tempfile::tempdir;
 
@@ -92,17 +94,38 @@ fn parallel_v2_exec_plus_flushes_worker_shards_on_shutdown() {
         fs::write(root.path().join(format!("file-{index:02}.txt")), "x\n").unwrap();
     }
 
+    #[cfg(unix)]
+    let args = vec![
+        path_arg(root.path()),
+        "-type".into(),
+        "f".into(),
+        "-exec".into(),
+        "printf".into(),
+        "B:%s\\n".into(),
+        "{}".into(),
+        "+".into(),
+    ];
+    #[cfg(windows)]
+    let (_script_dir, args) = {
+        let (script_dir, script) = write_arg_echo_script("B:");
+        (
+            script_dir,
+            vec![
+                path_arg(root.path()),
+                "-type".into(),
+                "f".into(),
+                "-exec".into(),
+                "cmd".into(),
+                "/C".into(),
+                path_arg(&script),
+                "{}".into(),
+                "+".into(),
+            ],
+        )
+    };
+
     let output = cargo_bin_output_with_timeout(
-        &[
-            path_arg(root.path()),
-            "-type".into(),
-            "f".into(),
-            "-exec".into(),
-            "printf".into(),
-            "B:%s\\n".into(),
-            "{}".into(),
-            "+".into(),
-        ],
+        &args,
         4,
         Duration::from_secs(5),
     );

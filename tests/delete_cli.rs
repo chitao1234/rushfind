@@ -5,6 +5,18 @@ use std::time::Duration;
 use support::{cargo_bin_output_with_timeout, path_arg};
 use tempfile::tempdir;
 
+fn directory_not_empty_fragment() -> &'static str {
+    #[cfg(windows)]
+    {
+        "directory is not empty"
+    }
+
+    #[cfg(unix)]
+    {
+        "Directory not empty"
+    }
+}
+
 #[test]
 fn ordered_delete_removes_entries_reached_by_the_expression() {
     let root = tempdir().unwrap();
@@ -87,7 +99,8 @@ fn ordered_delete_failure_falls_through_or_branch_and_sets_exit_one() {
     assert!(
         String::from_utf8(output.stderr)
             .unwrap()
-            .contains("Directory not empty")
+            .to_ascii_lowercase()
+            .contains(&directory_not_empty_fragment().to_ascii_lowercase())
     );
 }
 

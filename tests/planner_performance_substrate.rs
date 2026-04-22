@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 mod support;
 
 use rushfind::birth::read_birth_time;

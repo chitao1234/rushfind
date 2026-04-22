@@ -2,6 +2,8 @@ mod support;
 
 use std::fs;
 use std::time::Duration;
+#[cfg(windows)]
+use support::windows::write_arg_echo_script;
 use support::{cargo_bin_output_with_timeout, path_arg};
 use tempfile::tempdir;
 
@@ -60,20 +62,44 @@ fn ordered_exec_plus_flushes_before_quit() {
         fs::write(root.path().join(name), format!("{name}\n")).unwrap();
     }
 
+    #[cfg(unix)]
+    let args = vec![
+        path_arg(root.path()),
+        "-mindepth".into(),
+        "1".into(),
+        "-type".into(),
+        "f".into(),
+        "-exec".into(),
+        "printf".into(),
+        "Q:%s\\n".into(),
+        "{}".into(),
+        "+".into(),
+        "-quit".into(),
+    ];
+    #[cfg(windows)]
+    let (_script_dir, args) = {
+        let (script_dir, script) = write_arg_echo_script("Q:");
+        (
+            script_dir,
+            vec![
+                path_arg(root.path()),
+                "-mindepth".into(),
+                "1".into(),
+                "-type".into(),
+                "f".into(),
+                "-exec".into(),
+                "cmd".into(),
+                "/C".into(),
+                path_arg(&script),
+                "{}".into(),
+                "+".into(),
+                "-quit".into(),
+            ],
+        )
+    };
+
     let output = cargo_bin_output_with_timeout(
-        &[
-            path_arg(root.path()),
-            "-mindepth".into(),
-            "1".into(),
-            "-type".into(),
-            "f".into(),
-            "-exec".into(),
-            "printf".into(),
-            "Q:%s\\n".into(),
-            "{}".into(),
-            "+".into(),
-            "-quit".into(),
-        ],
+        &args,
         1,
         Duration::from_secs(5),
     );
@@ -118,20 +144,44 @@ fn parallel_exec_plus_quit_flushes_buffered_batches_before_exit() {
         fs::write(root.path().join(format!("file-{index:03}.txt")), "x\n").unwrap();
     }
 
+    #[cfg(unix)]
+    let args = vec![
+        path_arg(root.path()),
+        "-mindepth".into(),
+        "1".into(),
+        "-type".into(),
+        "f".into(),
+        "-exec".into(),
+        "printf".into(),
+        "P:%s\\n".into(),
+        "{}".into(),
+        "+".into(),
+        "-quit".into(),
+    ];
+    #[cfg(windows)]
+    let (_script_dir, args) = {
+        let (script_dir, script) = write_arg_echo_script("P:");
+        (
+            script_dir,
+            vec![
+                path_arg(root.path()),
+                "-mindepth".into(),
+                "1".into(),
+                "-type".into(),
+                "f".into(),
+                "-exec".into(),
+                "cmd".into(),
+                "/C".into(),
+                path_arg(&script),
+                "{}".into(),
+                "+".into(),
+                "-quit".into(),
+            ],
+        )
+    };
+
     let output = cargo_bin_output_with_timeout(
-        &[
-            path_arg(root.path()),
-            "-mindepth".into(),
-            "1".into(),
-            "-type".into(),
-            "f".into(),
-            "-exec".into(),
-            "printf".into(),
-            "P:%s\\n".into(),
-            "{}".into(),
-            "+".into(),
-            "-quit".into(),
-        ],
+        &args,
         4,
         Duration::from_secs(5),
     );

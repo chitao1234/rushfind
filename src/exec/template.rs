@@ -168,6 +168,22 @@ fn rendered_path(path: &Path, semantics: ExecSemantics) -> OsString {
     }
 }
 
+fn prompt_rendered_path(path: &Path, semantics: ExecSemantics) -> OsString {
+    match semantics {
+        ExecSemantics::Normal => path.as_os_str().to_os_string(),
+        ExecSemantics::DirLocal => {
+            #[cfg(windows)]
+            {
+                crate::platform::path::execdir_placeholder(path)
+            }
+            #[cfg(not(windows))]
+            {
+                path.as_os_str().to_os_string()
+            }
+        }
+    }
+}
+
 fn render_segments(argv: &[Vec<ExecTemplateSegment>], rendered_path: &OsStr) -> Vec<OsString> {
     let path_bytes = crate::platform::path::encoded_bytes(rendered_path);
 
@@ -190,7 +206,7 @@ fn render_segments(argv: &[Vec<ExecTemplateSegment>], rendered_path: &OsStr) -> 
 }
 
 pub fn render_prompt_argv(spec: &ImmediateExecAction, path: &Path) -> Vec<OsString> {
-    let rendered_path = rendered_path(path, spec.semantics);
+    let rendered_path = prompt_rendered_path(path, spec.semantics);
     render_segments(&spec.argv, rendered_path.as_os_str())
 }
 

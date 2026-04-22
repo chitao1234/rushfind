@@ -2,6 +2,8 @@ mod support;
 
 use std::fs;
 use std::time::Duration;
+#[cfg(windows)]
+use support::windows::normalize_stdout_path;
 use support::{cargo_bin_output_with_timeout, path_arg};
 use tempfile::tempdir;
 
@@ -50,7 +52,7 @@ fn parallel_v2_depth_prune_stays_truthy_but_does_not_block_descendants() {
     assert!(
         String::from_utf8(output.stdout)
             .unwrap()
-            .contains("keep/file.txt")
+            .contains(&normalized_fragment("keep/file.txt"))
     );
 }
 
@@ -80,4 +82,16 @@ fn parallel_v2_delete_keeps_descendant_before_parent_when_children_are_chunked()
 
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
+}
+
+fn normalized_fragment(raw: &str) -> String {
+    #[cfg(windows)]
+    {
+        normalize_stdout_path(raw)
+    }
+
+    #[cfg(unix)]
+    {
+        raw.to_string()
+    }
 }

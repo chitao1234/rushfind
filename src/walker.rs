@@ -590,8 +590,8 @@ mod tests {
         assert_eq!(
             seen,
             vec![
-                "entry:dir/file.txt".to_string(),
-                "done:dir".to_string(),
+                format!("entry:{}", Path::new("dir").join("file.txt").display()),
+                format!("done:{}", Path::new("dir").display()),
                 "done:".to_string(),
             ]
         );

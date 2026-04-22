@@ -2,8 +2,18 @@ use crate::diagnostics::Diagnostic;
 use crate::time::Timestamp;
 use std::ffi::OsStr;
 use std::str;
+#[cfg(windows)]
+use std::ptr::null;
+#[cfg(windows)]
+use windows_sys::Win32::Foundation::{FILETIME, SYSTEMTIME};
+#[cfg(windows)]
+use windows_sys::Win32::System::Time::{SystemTimeToFileTime, TzSpecificLocalTimeToSystemTime};
 
 const NANOS_PER_SECOND: i32 = 1_000_000_000;
+#[cfg(windows)]
+const WINDOWS_TICKS_PER_SECOND: i64 = 10_000_000;
+#[cfg(windows)]
+const WINDOWS_TO_UNIX_EPOCH_SECONDS: i64 = 11_644_473_600;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum DateShape {
@@ -324,29 +334,38 @@ fn local_timestamp(
     ensure_valid_date(year, month, day, original)?;
     ensure_valid_time(hour, minute, second, original)?;
 
-    let mut tm = empty_tm();
-    tm.tm_sec = second as i32;
-    tm.tm_min = minute as i32;
-    tm.tm_hour = hour as i32;
-    tm.tm_mday = day as i32;
-    tm.tm_mon = month as i32 - 1;
-    tm.tm_year = year - 1900;
-    tm.tm_isdst = -1;
-
-    let seconds = local_mktime(&mut tm)?;
-    if tm.tm_sec != second as i32
-        || tm.tm_min != minute as i32
-        || tm.tm_hour != hour as i32
-        || tm.tm_mday != day as i32
-        || tm.tm_mon != month as i32 - 1
-        || tm.tm_year != year - 1900
+    #[cfg(windows)]
     {
-        return Err(unsupported_literal_time(original));
+        return local_timestamp_windows(year, month, day, hour, minute, second, nanos, original);
     }
 
-    Ok(Timestamp::new(seconds as i64, nanos))
+    #[cfg(unix)]
+    {
+        let mut tm = empty_tm();
+        tm.tm_sec = second as i32;
+        tm.tm_min = minute as i32;
+        tm.tm_hour = hour as i32;
+        tm.tm_mday = day as i32;
+        tm.tm_mon = month as i32 - 1;
+        tm.tm_year = year - 1900;
+        tm.tm_isdst = -1;
+
+        let seconds = local_mktime(&mut tm)?;
+        if tm.tm_sec != second as i32
+            || tm.tm_min != minute as i32
+            || tm.tm_hour != hour as i32
+            || tm.tm_mday != day as i32
+            || tm.tm_mon != month as i32 - 1
+            || tm.tm_year != year - 1900
+        {
+            return Err(unsupported_literal_time(original));
+        }
+
+        Ok(Timestamp::new(seconds as i64, nanos))
+    }
 }
 
+#[cfg(unix)]
 fn empty_tm() -> libc::tm {
     unsafe { std::mem::zeroed() }
 }
@@ -357,11 +376,44 @@ fn local_mktime(tm: &mut libc::tm) -> Result<libc::time_t, Diagnostic> {
 }
 
 #[cfg(windows)]
-fn local_mktime(_tm: &mut libc::tm) -> Result<libc::time_t, Diagnostic> {
-    Err(Diagnostic::new(
-        "local literal times are not implemented on Windows yet",
-        1,
-    ))
+#[allow(clippy::too_many_arguments)]
+fn local_timestamp_windows(
+    year: i32,
+    month: u32,
+    day: u32,
+    hour: u32,
+    minute: u32,
+    second: u32,
+    nanos: i32,
+    original: &str,
+) -> Result<Timestamp, Diagnostic> {
+    let local = SYSTEMTIME {
+        wYear: year as u16,
+        wMonth: month as u16,
+        wDayOfWeek: 0,
+        wDay: day as u16,
+        wHour: hour as u16,
+        wMinute: minute as u16,
+        wSecond: second as u16,
+        wMilliseconds: (nanos / 1_000_000) as u16,
+    };
+    let mut utc = SYSTEMTIME::default();
+    if unsafe { TzSpecificLocalTimeToSystemTime(null(), &local, &mut utc) } == 0 {
+        return Err(unsupported_literal_time(original));
+    }
+
+    let mut filetime = FILETIME::default();
+    if unsafe { SystemTimeToFileTime(&utc, &mut filetime) } == 0 {
+        return Err(unsupported_literal_time(original));
+    }
+
+    let ticks = ((filetime.dwHighDateTime as i64) << 32) | filetime.dwLowDateTime as i64;
+    let ticks_since_epoch = ticks
+        .checked_sub(WINDOWS_TO_UNIX_EPOCH_SECONDS * WINDOWS_TICKS_PER_SECOND)
+        .ok_or_else(|| unsupported_literal_time(original))?;
+    let seconds = ticks_since_epoch.div_euclid(WINDOWS_TICKS_PER_SECOND);
+
+    Ok(Timestamp::new(seconds, nanos))
 }
 
 fn fixed_offset_timestamp(

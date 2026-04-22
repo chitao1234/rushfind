@@ -93,7 +93,16 @@ mod tests {
 
         assert_eq!(
             render_prompt_argv(&spec, Path::new("dir/file.txt")),
-            vec!["printf", "X./file.txtY"]
+            {
+                #[cfg(windows)]
+                {
+                    vec!["printf", "X./file.txtY"]
+                }
+                #[cfg(not(windows))]
+                {
+                    vec!["printf", "Xdir/file.txtY"]
+                }
+            }
         );
     }
 

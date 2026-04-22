@@ -32,7 +32,7 @@ fn matching_name_predicate_prints_the_entry_path() {
     let matched = evaluate(&expr, &entry, FollowMode::Physical, &mut sink).unwrap();
 
     assert!(matched);
-    assert_eq!(sink.into_utf8(), format!("{}\n", path.display()));
+    assert_eq!(sink.into_utf8(), format!("{}\n", normalized_display(&path)));
 }
 
 #[test]
@@ -62,13 +62,12 @@ fn path_predicate_matches_across_slashes_like_gnu_find() {
     fs::create_dir(root.path().join("src/nested")).unwrap();
     let path = root.path().join("src/nested/lib.rs");
     fs::write(&path, "pub fn lib() {}\n").unwrap();
-    let mut pattern = root.path().join("src").into_os_string();
-    pattern.push("/*");
+    let pattern = format!("{}/src/*", root.path().display()).replace('\\', "/");
     let entry = entry_for(&path, 2);
     let expr = RuntimeExpr::Predicate(RuntimePredicate::Path(
         CompiledGlob::compile(
             "-path",
-            pattern.as_os_str(),
+            std::ffi::OsStr::new(&pattern),
             GlobCaseMode::Sensitive,
             GlobSlashMode::Literal,
         )
@@ -95,4 +94,16 @@ fn type_predicate_filters_by_entry_kind() {
 
 fn entry_for(path: &Path, depth: usize) -> EntryContext {
     EntryContext::new(PathBuf::from(path), depth, true)
+}
+
+fn normalized_display(path: &Path) -> String {
+    #[cfg(windows)]
+    {
+        path.display().to_string().replace('/', "\\")
+    }
+
+    #[cfg(unix)]
+    {
+        path.display().to_string()
+    }
 }

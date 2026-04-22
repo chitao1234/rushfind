@@ -87,7 +87,10 @@ fn ordered_fls_shared_destination_appends_without_retruncating() {
 fn parallel_fls_keeps_each_record_atomic_per_destination() {
     let root = tempdir().unwrap();
     fs::write(root.path().join("alpha file.txt"), "a\n").unwrap();
+    #[cfg(unix)]
     fs::write(root.path().join("beta\tfile.txt"), "b\n").unwrap();
+    #[cfg(windows)]
+    fs::write(root.path().join("beta file 2.txt"), "b\n").unwrap();
     let (_out_dir, out) = temp_output_path("parallel.ls");
 
     let output = cargo_bin_output_with_timeout(

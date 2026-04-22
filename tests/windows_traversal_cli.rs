@@ -4,13 +4,13 @@ mod support;
 
 use std::fs;
 use std::time::Duration;
-use support::windows::{normalize_stdout_path, symlink_creation_available};
+use support::windows::{directory_symlink_creation_available, normalize_stdout_path};
 use support::{cargo_bin_output_with_timeout, path_arg};
 use tempfile::tempdir;
 
 #[test]
 fn logical_follow_on_directory_symlink_keeps_windows_path_spelling() {
-    if !symlink_creation_available() {
+    if !directory_symlink_creation_available() {
         return;
     }
 

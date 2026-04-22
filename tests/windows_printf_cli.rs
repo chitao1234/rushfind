@@ -4,7 +4,7 @@ mod support;
 
 use std::fs;
 use std::time::Duration;
-use support::windows::normalize_stdout_path;
+use support::windows::escape_ls_rendered_path;
 use support::{cargo_bin_output_with_timeout, path_arg};
 use tempfile::tempdir;
 
@@ -92,7 +92,7 @@ fn ls_renders_native_records_with_backslash_paths() {
     assert_eq!(output.status.code(), Some(0));
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(
-        stdout.contains(&normalize_stdout_path(&file.display().to_string())),
+        stdout.contains(&escape_ls_rendered_path(&file.display().to_string())),
         "{stdout:?}"
     );
 }

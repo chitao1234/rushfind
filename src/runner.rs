@@ -255,12 +255,32 @@ mod tests {
 
     #[test]
     fn execdir_path_validation_rejects_relative_and_empty_entries() {
-        assert!(validate_execdir_path_value(OsStr::new("/usr/bin:/bin")).is_ok());
-        assert!(validate_execdir_path_value(OsStr::new("")).is_err());
-        assert!(validate_execdir_path_value(OsStr::new(".:/usr/bin")).is_err());
-        assert!(validate_execdir_path_value(OsStr::new("bin:/usr/bin")).is_err());
-        assert!(validate_execdir_path_value(OsStr::new(":/usr/bin")).is_err());
-        assert!(validate_execdir_path_value(OsStr::new("/usr/bin:")).is_err());
-        assert!(validate_execdir_path_value(OsStr::new("/usr/bin::/bin")).is_err());
+        #[cfg(unix)]
+        {
+            assert!(validate_execdir_path_value(OsStr::new("/usr/bin:/bin")).is_ok());
+            assert!(validate_execdir_path_value(OsStr::new("")).is_err());
+            assert!(validate_execdir_path_value(OsStr::new(".:/usr/bin")).is_err());
+            assert!(validate_execdir_path_value(OsStr::new("bin:/usr/bin")).is_err());
+            assert!(validate_execdir_path_value(OsStr::new(":/usr/bin")).is_err());
+            assert!(validate_execdir_path_value(OsStr::new("/usr/bin:")).is_err());
+            assert!(validate_execdir_path_value(OsStr::new("/usr/bin::/bin")).is_err());
+        }
+
+        #[cfg(windows)]
+        {
+            assert!(validate_execdir_path_value(OsStr::new(
+                r"C:\Windows\System32;C:\Windows"
+            ))
+            .is_ok());
+            assert!(validate_execdir_path_value(OsStr::new("")).is_err());
+            assert!(validate_execdir_path_value(OsStr::new(r".;C:\Windows\System32")).is_err());
+            assert!(validate_execdir_path_value(OsStr::new(r"bin;C:\Windows\System32")).is_err());
+            assert!(validate_execdir_path_value(OsStr::new(r";C:\Windows\System32")).is_err());
+            assert!(validate_execdir_path_value(OsStr::new(r"C:\Windows\System32;")).is_err());
+            assert!(validate_execdir_path_value(OsStr::new(
+                r"C:\Windows\System32;;C:\Windows"
+            ))
+            .is_err());
+        }
     }
 }
