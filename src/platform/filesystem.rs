@@ -30,7 +30,7 @@ impl FilesystemKey {
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) enum PlatformPrincipalId {
+pub enum PlatformPrincipalId {
     Numeric(u32),
     Sid(String),
 }
@@ -41,6 +41,12 @@ impl PlatformPrincipalId {
             Self::Numeric(value) => Some(*value),
             Self::Sid(_) => None,
         }
+    }
+}
+
+impl From<u32> for PlatformPrincipalId {
+    fn from(value: u32) -> Self {
+        Self::Numeric(value)
     }
 }
 

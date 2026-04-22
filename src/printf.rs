@@ -1,4 +1,4 @@
-use crate::account::{group_name, user_name};
+use crate::account::{PrincipalId, group_name, user_name};
 use crate::diagnostics::Diagnostic;
 use crate::entry::{EntryContext, EntryKind, PrintfTargetKind};
 use crate::eval::EvalContext;
@@ -516,10 +516,10 @@ fn render_directive_bytes(
             format_string_like(blocks.div_ceil(2).to_string().as_bytes(), directive.format)
         }
         PrintfDirectiveKind::UserName => {
-            let uid = entry.active_uid(follow_mode)?;
-            let name = user_name(uid)?;
+            let owner = entry.active_owner(follow_mode)?;
+            let name = user_name(owner.clone())?;
             format_string_like(
-                name_or_id_bytes(name.as_deref(), uid).as_slice(),
+                name_or_id_bytes(name.as_deref(), &owner).as_slice(),
                 directive.format,
             )
         }
@@ -528,10 +528,10 @@ fn render_directive_bytes(
             directive.format,
         ),
         PrintfDirectiveKind::GroupName => {
-            let gid = entry.active_gid(follow_mode)?;
-            let name = group_name(gid)?;
+            let group = entry.active_group(follow_mode)?;
+            let name = group_name(group.clone())?;
             format_string_like(
-                name_or_id_bytes(name.as_deref(), gid).as_slice(),
+                name_or_id_bytes(name.as_deref(), &group).as_slice(),
                 directive.format,
             )
         }
@@ -606,10 +606,13 @@ fn resolve_cached_time_parts<'a>(
     Ok(slot.as_ref().and_then(|value| value.as_ref()))
 }
 
-fn name_or_id_bytes(name: Option<&OsStr>, id: u32) -> Vec<u8> {
+fn name_or_id_bytes(name: Option<&OsStr>, id: &PrincipalId) -> Vec<u8> {
     match name {
         Some(name) => encoded_bytes(name).to_vec(),
-        None => id.to_string().into_bytes(),
+        None => match id {
+            PrincipalId::Numeric(value) => value.to_string().into_bytes(),
+            PrincipalId::Sid(value) => value.as_bytes().to_vec(),
+        },
     }
 }
 

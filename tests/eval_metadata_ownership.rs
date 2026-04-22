@@ -1,5 +1,6 @@
 #![cfg(unix)]
 
+use rushfind::account::PrincipalId;
 use rushfind::entry::EntryContext;
 use rushfind::eval::evaluate;
 use rushfind::follow::FollowMode;
@@ -54,7 +55,9 @@ fn user_and_group_match_exact_ids() {
 
     assert!(
         evaluate(
-            &RuntimeExpr::Predicate(RuntimePredicate::User(metadata.uid())),
+            &RuntimeExpr::Predicate(RuntimePredicate::User(
+                PrincipalId::Numeric(metadata.uid(),)
+            )),
             &entry,
             FollowMode::Physical,
             &mut sink,
@@ -64,7 +67,9 @@ fn user_and_group_match_exact_ids() {
 
     assert!(
         evaluate(
-            &RuntimeExpr::Predicate(RuntimePredicate::Group(metadata.gid())),
+            &RuntimeExpr::Predicate(RuntimePredicate::Group(PrincipalId::Numeric(
+                metadata.gid(),
+            ))),
             &entry,
             FollowMode::Physical,
             &mut sink,

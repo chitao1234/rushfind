@@ -1,4 +1,6 @@
+pub(crate) mod accounts;
 pub(crate) mod filesystem;
+pub(crate) mod locale;
 
 use crate::platform::{PlatformCapabilities, SupportLevel};
 
@@ -6,9 +8,9 @@ pub(crate) static CAPABILITIES: PlatformCapabilities = PlatformCapabilities::new
     SupportLevel::Exact,
     SupportLevel::Exact,
     SupportLevel::Exact,
-    SupportLevel::Unsupported("named ownership predicates are not implemented on Windows yet"),
+    SupportLevel::Exact,
     SupportLevel::Unsupported("numeric ownership is not supported on Windows"),
-    SupportLevel::Unsupported("access predicates are not implemented on Windows yet"),
+    SupportLevel::Exact,
     SupportLevel::Approximate("interactive locale behavior is approximate on Windows"),
     SupportLevel::Approximate(
         "case-insensitive glob matching may differ outside the C locale on Windows",

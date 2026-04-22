@@ -1,13 +1,14 @@
 use crate::diagnostics::Diagnostic;
+use crate::platform::filesystem::PlatformPrincipalId;
 use std::ffi::{OsStr, OsString};
 
 pub(crate) trait AccountBackend: Send + Sync {
-    fn resolve_user_id(&self, raw: &OsStr) -> Result<u32, Diagnostic>;
-    fn resolve_group_id(&self, raw: &OsStr) -> Result<u32, Diagnostic>;
-    fn user_exists(&self, uid: u32) -> Result<bool, Diagnostic>;
-    fn group_exists(&self, gid: u32) -> Result<bool, Diagnostic>;
-    fn user_name(&self, uid: u32) -> Result<Option<OsString>, Diagnostic>;
-    fn group_name(&self, gid: u32) -> Result<Option<OsString>, Diagnostic>;
+    fn resolve_user_principal(&self, raw: &OsStr) -> Result<PlatformPrincipalId, Diagnostic>;
+    fn resolve_group_principal(&self, raw: &OsStr) -> Result<PlatformPrincipalId, Diagnostic>;
+    fn user_exists(&self, principal: &PlatformPrincipalId) -> Result<bool, Diagnostic>;
+    fn group_exists(&self, principal: &PlatformPrincipalId) -> Result<bool, Diagnostic>;
+    fn user_name(&self, principal: &PlatformPrincipalId) -> Result<Option<OsString>, Diagnostic>;
+    fn group_name(&self, principal: &PlatformPrincipalId) -> Result<Option<OsString>, Diagnostic>;
 }
 
 pub(crate) fn backend() -> &'static dyn AccountBackend {
@@ -17,6 +18,7 @@ pub(crate) fn backend() -> &'static dyn AccountBackend {
 #[cfg(unix)]
 mod imp {
     use super::{AccountBackend, Diagnostic};
+    use crate::platform::filesystem::PlatformPrincipalId;
     use crate::platform::path::os_string_from_encoded_bytes;
     use std::collections::HashMap;
     use std::ffi::{CString, OsStr, OsString};
@@ -36,14 +38,14 @@ mod imp {
     struct PosixAccountBackend;
 
     impl AccountBackend for PosixAccountBackend {
-        fn resolve_user_id(&self, raw: &OsStr) -> Result<u32, Diagnostic> {
+        fn resolve_user_principal(&self, raw: &OsStr) -> Result<PlatformPrincipalId, Diagnostic> {
             if let Some(uid) = parse_decimal_id(raw) {
-                return Ok(uid);
+                return Ok(PlatformPrincipalId::Numeric(uid));
             }
 
             let name = raw.to_string_lossy().into_owned();
             match lookup_user_by_name(raw)? {
-                Some(uid) => Ok(uid),
+                Some(uid) => Ok(PlatformPrincipalId::Numeric(uid)),
                 None => Err(Diagnostic::new(
                     format!("`{name}` is not the name of a known user"),
                     1,
@@ -51,14 +53,14 @@ mod imp {
             }
         }
 
-        fn resolve_group_id(&self, raw: &OsStr) -> Result<u32, Diagnostic> {
+        fn resolve_group_principal(&self, raw: &OsStr) -> Result<PlatformPrincipalId, Diagnostic> {
             if let Some(gid) = parse_decimal_id(raw) {
-                return Ok(gid);
+                return Ok(PlatformPrincipalId::Numeric(gid));
             }
 
             let name = raw.to_string_lossy().into_owned();
             match lookup_group_by_name(raw)? {
-                Some(gid) => Ok(gid),
+                Some(gid) => Ok(PlatformPrincipalId::Numeric(gid)),
                 None => Err(Diagnostic::new(
                     format!("`{name}` is not the name of an existing group"),
                     1,
@@ -66,19 +68,37 @@ mod imp {
             }
         }
 
-        fn user_exists(&self, uid: u32) -> Result<bool, Diagnostic> {
+        fn user_exists(&self, principal: &PlatformPrincipalId) -> Result<bool, Diagnostic> {
+            let Some(uid) = principal.numeric() else {
+                return Ok(false);
+            };
             cached_exists(&USER_EXISTS_CACHE, uid, lookup_user_by_id)
         }
 
-        fn group_exists(&self, gid: u32) -> Result<bool, Diagnostic> {
+        fn group_exists(&self, principal: &PlatformPrincipalId) -> Result<bool, Diagnostic> {
+            let Some(gid) = principal.numeric() else {
+                return Ok(false);
+            };
             cached_exists(&GROUP_EXISTS_CACHE, gid, lookup_group_by_id)
         }
 
-        fn user_name(&self, uid: u32) -> Result<Option<OsString>, Diagnostic> {
+        fn user_name(
+            &self,
+            principal: &PlatformPrincipalId,
+        ) -> Result<Option<OsString>, Diagnostic> {
+            let Some(uid) = principal.numeric() else {
+                return Ok(None);
+            };
             cached_value(&USER_NAME_CACHE, uid, lookup_user_name_by_id)
         }
 
-        fn group_name(&self, gid: u32) -> Result<Option<OsString>, Diagnostic> {
+        fn group_name(
+            &self,
+            principal: &PlatformPrincipalId,
+        ) -> Result<Option<OsString>, Diagnostic> {
+            let Some(gid) = principal.numeric() else {
+                return Ok(None);
+            };
             cached_value(&GROUP_NAME_CACHE, gid, lookup_group_name_by_id)
         }
     }
@@ -342,46 +362,9 @@ mod imp {
 
 #[cfg(windows)]
 mod imp {
-    use super::{AccountBackend, Diagnostic};
-    use std::ffi::{OsStr, OsString};
+    use super::AccountBackend;
 
     pub(crate) fn backend() -> &'static dyn AccountBackend {
-        &WINDOWS_ACCOUNT_BACKEND
-    }
-
-    static WINDOWS_ACCOUNT_BACKEND: WindowsAccountBackend = WindowsAccountBackend;
-
-    struct WindowsAccountBackend;
-
-    impl AccountBackend for WindowsAccountBackend {
-        fn resolve_user_id(&self, _raw: &OsStr) -> Result<u32, Diagnostic> {
-            Err(Diagnostic::new(
-                "named ownership predicates are not implemented on Windows yet",
-                1,
-            ))
-        }
-
-        fn resolve_group_id(&self, _raw: &OsStr) -> Result<u32, Diagnostic> {
-            Err(Diagnostic::new(
-                "named ownership predicates are not implemented on Windows yet",
-                1,
-            ))
-        }
-
-        fn user_exists(&self, _uid: u32) -> Result<bool, Diagnostic> {
-            Ok(false)
-        }
-
-        fn group_exists(&self, _gid: u32) -> Result<bool, Diagnostic> {
-            Ok(false)
-        }
-
-        fn user_name(&self, _uid: u32) -> Result<Option<OsString>, Diagnostic> {
-            Ok(None)
-        }
-
-        fn group_name(&self, _gid: u32) -> Result<Option<OsString>, Diagnostic> {
-            Ok(None)
-        }
+        crate::platform::windows::accounts::backend()
     }
 }

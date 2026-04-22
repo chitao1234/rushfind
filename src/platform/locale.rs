@@ -1,7 +1,9 @@
 #![cfg_attr(windows, allow(dead_code))]
 
 use crate::diagnostics::Diagnostic;
-use crate::messages_locale::{MessagesLocale, prompt_locale_for};
+use crate::messages_locale::MessagesLocale;
+#[cfg(not(windows))]
+use crate::messages_locale::prompt_locale_for;
 #[cfg(not(windows))]
 use std::ffi::CStr;
 use std::ffi::CString;
@@ -21,7 +23,7 @@ pub(crate) trait LocaleBackend: Send + Sync {
 
 #[cfg(windows)]
 pub(crate) fn backend() -> &'static dyn LocaleBackend {
-    &WINDOWS_LOCALE_BACKEND
+    crate::platform::windows::locale::backend()
 }
 
 #[cfg(not(windows))]
@@ -40,12 +42,6 @@ static POSIX_LOCALE_BACKEND: PosixLocaleBackend = PosixLocaleBackend;
 
 struct PosixLocaleBackend;
 
-#[cfg(windows)]
-static WINDOWS_LOCALE_BACKEND: WindowsLocaleBackend = WindowsLocaleBackend;
-
-#[cfg(windows)]
-struct WindowsLocaleBackend;
-
 #[cfg(any(
     all(target_os = "linux", target_env = "gnu"),
     target_os = "freebsd",
@@ -53,24 +49,6 @@ struct WindowsLocaleBackend;
 ))]
 unsafe extern "C" {
     fn rpmatch(response: *const libc::c_char) -> libc::c_int;
-}
-
-#[cfg(windows)]
-impl LocaleBackend for WindowsLocaleBackend {
-    fn resolve_messages_locale(&self) -> Result<MessagesLocale, Diagnostic> {
-        let resolved_name = std::env::var("LC_ALL")
-            .or_else(|_| std::env::var("LC_MESSAGES"))
-            .or_else(|_| std::env::var("LANG"))
-            .unwrap_or_else(|_| "C".to_string());
-        Ok(MessagesLocale {
-            prompt_locale: prompt_locale_for(&resolved_name),
-            resolved_name,
-        })
-    }
-
-    fn affirmative_parser(&self) -> fn(&[u8]) -> bool {
-        default_ascii_yes_is_affirmative
-    }
 }
 
 #[cfg(not(windows))]

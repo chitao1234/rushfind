@@ -274,19 +274,29 @@ impl EntryContext {
         Ok(self.active_view(follow_mode)?.device_number)
     }
 
-    pub fn active_uid(&self, follow_mode: FollowMode) -> Result<u32, Diagnostic> {
+    pub fn active_owner(&self, follow_mode: FollowMode) -> Result<PlatformPrincipalId, Diagnostic> {
         self.active_view(follow_mode)?
             .owner
-            .as_ref()
-            .and_then(PlatformPrincipalId::numeric)
+            .clone()
+            .ok_or_else(|| missing_field("owner id", &self.path))
+    }
+
+    pub fn active_group(&self, follow_mode: FollowMode) -> Result<PlatformPrincipalId, Diagnostic> {
+        self.active_view(follow_mode)?
+            .group
+            .clone()
+            .ok_or_else(|| missing_field("group id", &self.path))
+    }
+
+    pub fn active_uid(&self, follow_mode: FollowMode) -> Result<u32, Diagnostic> {
+        self.active_owner(follow_mode)?
+            .numeric()
             .ok_or_else(|| missing_field("owner id", &self.path))
     }
 
     pub fn active_gid(&self, follow_mode: FollowMode) -> Result<u32, Diagnostic> {
-        self.active_view(follow_mode)?
-            .group
-            .as_ref()
-            .and_then(PlatformPrincipalId::numeric)
+        self.active_group(follow_mode)?
+            .numeric()
             .ok_or_else(|| missing_field("group id", &self.path))
     }
 

@@ -1,4 +1,4 @@
-use crate::account::{resolve_group_id, resolve_user_id};
+use crate::account::{PrincipalId, resolve_group_principal, resolve_user_principal};
 use crate::ast::{Action, CommandAst, Expr, FileTypeFilter, GlobalOption, Predicate};
 use crate::diagnostics::Diagnostic;
 use crate::exec::{
@@ -13,7 +13,7 @@ use crate::optimizer::optimize_read_only_and_chains;
 use crate::pattern::{CompiledGlob, GlobCaseMode, GlobSlashMode};
 use crate::perm::{PermMatcher, parse_perm_argument};
 use crate::platform::{PlatformCapabilities, PlatformFeature, SupportLevel, active_capabilities};
-use crate::printf::{PrintfProgram, compile_printf_program};
+use crate::printf::{PrintfAtom, PrintfDirectiveKind, PrintfProgram, compile_printf_program};
 use crate::regex_match::{RegexDialect, RegexMatcher};
 use crate::runtime_policy::{RuntimePolicy, build_traversal_control_plan};
 use crate::size::{SizeMatcher, parse_size_argument};
@@ -128,8 +128,8 @@ pub enum RuntimePredicate {
     LName(CompiledGlob),
     Uid(NumericComparison),
     Gid(NumericComparison),
-    User(u32),
-    Group(u32),
+    User(PrincipalId),
+    Group(PrincipalId),
     NoUser,
     NoGroup,
     Perm(PermMatcher),
@@ -366,6 +366,29 @@ fn require_platform_feature(
     }
 }
 
+fn validate_platform_printf_program(
+    program: &PrintfProgram,
+    capabilities: &PlatformCapabilities,
+    state: &mut PlanningState,
+) -> Result<(), Diagnostic> {
+    for atom in &program.atoms {
+        let PrintfAtom::Directive(directive) = atom else {
+            continue;
+        };
+        match directive.kind {
+            PrintfDirectiveKind::UserId | PrintfDirectiveKind::GroupId => {
+                require_platform_feature(capabilities, PlatformFeature::NumericOwnership, state)?;
+            }
+            PrintfDirectiveKind::ModeOctal | PrintfDirectiveKind::ModeSymbolic => {
+                require_platform_feature(capabilities, PlatformFeature::ModeBits, state)?;
+            }
+            _ => {}
+        }
+    }
+
+    Ok(())
+}
+
 fn lower_expr(
     expr: Expr,
     traversal: &mut TraversalOptions,
@@ -566,13 +589,13 @@ fn lower_predicate(
         Predicate::User(raw) => {
             require_platform_feature(capabilities, PlatformFeature::NamedOwnership, state)?;
             Ok(RuntimeExpr::Predicate(RuntimePredicate::User(
-                resolve_user_id(raw.as_os_str())?,
+                resolve_user_principal(raw.as_os_str())?,
             )))
         }
         Predicate::Group(raw) => {
             require_platform_feature(capabilities, PlatformFeature::NamedOwnership, state)?;
             Ok(RuntimeExpr::Predicate(RuntimePredicate::Group(
-                resolve_group_id(raw.as_os_str())?,
+                resolve_group_principal(raw.as_os_str())?,
             )))
         }
         Predicate::NoUser => {
@@ -792,6 +815,7 @@ fn lower_action(
                 require_platform_feature(capabilities, PlatformFeature::FsType, state)?;
                 runtime.mount_snapshot = true;
             }
+            validate_platform_printf_program(&compiled.program, capabilities, state)?;
             state.startup_warnings.extend(compiled.warnings);
             Ok(RuntimeExpr::Action(RuntimeAction::Printf(compiled.program)))
         }
@@ -809,15 +833,22 @@ fn lower_action(
                 require_platform_feature(capabilities, PlatformFeature::FsType, state)?;
                 runtime.mount_snapshot = true;
             }
+            validate_platform_printf_program(&compiled.program, capabilities, state)?;
             state.startup_warnings.extend(compiled.warnings);
             Ok(RuntimeExpr::Action(RuntimeAction::FilePrintf {
                 destination: register_file_output(state, path),
                 program: compiled.program,
             }))
         }
-        Action::Ls => Ok(RuntimeExpr::Action(RuntimeAction::Ls)),
+        Action::Ls => {
+            require_platform_feature(capabilities, PlatformFeature::ModeBits, state)?;
+            Ok(RuntimeExpr::Action(RuntimeAction::Ls))
+        }
         Action::Fls { path } => Ok(RuntimeExpr::Action(RuntimeAction::FileLs {
-            destination: register_file_output(state, path),
+            destination: {
+                require_platform_feature(capabilities, PlatformFeature::ModeBits, state)?;
+                register_file_output(state, path)
+            },
         })),
         Action::Quit => Ok(RuntimeExpr::Action(RuntimeAction::Quit)),
         Action::Exec { argv, batch: false } => Ok(RuntimeExpr::Action(
@@ -895,6 +926,28 @@ mod tests {
             .with(PlatformFeature::ModeBits, SupportLevel::Exact)
     }
 
+    fn windows_like_caps() -> PlatformCapabilities {
+        PlatformCapabilities::for_tests()
+            .with(PlatformFeature::FsType, SupportLevel::Exact)
+            .with(PlatformFeature::SameFileSystem, SupportLevel::Exact)
+            .with(PlatformFeature::BirthTime, SupportLevel::Exact)
+            .with(PlatformFeature::NamedOwnership, SupportLevel::Exact)
+            .with(
+                PlatformFeature::NumericOwnership,
+                SupportLevel::Unsupported("numeric ownership is not supported on Windows"),
+            )
+            .with(PlatformFeature::AccessPredicates, SupportLevel::Exact)
+            .with(
+                PlatformFeature::MessagesLocale,
+                SupportLevel::Approximate("interactive locale behavior is approximate on Windows"),
+            )
+            .with(PlatformFeature::CaseInsensitiveGlob, SupportLevel::Exact)
+            .with(
+                PlatformFeature::ModeBits,
+                SupportLevel::Unsupported("Unix mode bits are not supported on Windows"),
+            )
+    }
+
     #[test]
     fn unsupported_platform_features_fail_during_planning() {
         let ast = parse_command(&argv(&[".", "-fstype", "tmpfs"])).unwrap();
@@ -946,6 +999,71 @@ mod tests {
         assert!(plan.runtime.mount_snapshot);
         assert!(plan.traversal.same_file_system);
         assert!(matches!(plan.expr, RuntimeExpr::And(_)));
+    }
+
+    #[test]
+    fn windows_rejects_numeric_ownership_and_mode_printf_directives() {
+        for (args, needle) in [
+            (
+                argv(&[".", "-printf", "%U\\n"]),
+                "numeric ownership is not supported on Windows",
+            ),
+            (
+                argv(&[".", "-printf", "%G\\n"]),
+                "numeric ownership is not supported on Windows",
+            ),
+            (
+                argv(&[".", "-printf", "%m\\n"]),
+                "Unix mode bits are not supported on Windows",
+            ),
+            (
+                argv(&[".", "-printf", "%M\\n"]),
+                "Unix mode bits are not supported on Windows",
+            ),
+            (
+                argv(&[".", "-fprintf", "out.txt", "%U\\n"]),
+                "numeric ownership is not supported on Windows",
+            ),
+            (
+                argv(&[".", "-fprintf", "out.txt", "%M\\n"]),
+                "Unix mode bits are not supported on Windows",
+            ),
+        ] {
+            let ast = parse_command(&args).unwrap();
+            let error = plan_command_with_now_and_capabilities(
+                ast,
+                1,
+                Timestamp::new(0, 0),
+                &windows_like_caps(),
+            )
+            .unwrap_err();
+            assert!(
+                error.message.contains(needle),
+                "{args:?} -> {}",
+                error.message
+            );
+        }
+    }
+
+    #[test]
+    fn windows_rejects_ls_until_a_windows_renderer_is_available() {
+        for args in [argv(&[".", "-ls"]), argv(&[".", "-fls", "out.txt"])] {
+            let ast = parse_command(&args).unwrap();
+            let error = plan_command_with_now_and_capabilities(
+                ast,
+                1,
+                Timestamp::new(0, 0),
+                &windows_like_caps(),
+            )
+            .unwrap_err();
+            assert!(
+                error
+                    .message
+                    .contains("Unix mode bits are not supported on Windows"),
+                "{args:?} -> {}",
+                error.message
+            );
+        }
     }
 
     #[test]

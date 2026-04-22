@@ -1,4 +1,4 @@
-use crate::account::{group_name, user_name};
+use crate::account::{PrincipalId, group_name, user_name};
 use crate::diagnostics::Diagnostic;
 use crate::entry::{EntryContext, EntryKind};
 use crate::eval::EvalContext;
@@ -26,10 +26,10 @@ pub(crate) fn render_ls_record(
     let blocks_1k = entry.active_blocks(follow_mode)?.div_ceil(2);
     let mode = symbolic_mode_string(kind, entry.active_mode_bits(follow_mode)?);
     let links = entry.active_link_count(follow_mode)?;
-    let uid = entry.active_uid(follow_mode)?;
-    let gid = entry.active_gid(follow_mode)?;
-    let owner = format_name_or_id(user_name(uid)?.as_deref(), uid);
-    let group = format_name_or_id(group_name(gid)?.as_deref(), gid);
+    let owner_id = entry.active_owner(follow_mode)?;
+    let group_id = entry.active_group(follow_mode)?;
+    let owner = format_name_or_id(user_name(owner_id.clone())?.as_deref(), &owner_id);
+    let group = format_name_or_id(group_name(group_id.clone())?.as_deref(), &group_id);
     let size = render_size_field(entry, follow_mode, kind)?;
     let timestamp = render_entry_timestamp(entry, follow_mode, context.evaluation_now()?)?;
     let path = escape_ls_bytes(&display_bytes(&entry.path));
@@ -184,10 +184,13 @@ fn render_ls_time_column(parts: &ResolvedTimeParts, now: Timestamp) -> Result<Ve
     }
 }
 
-fn format_name_or_id(name: Option<&OsStr>, id: u32) -> Vec<u8> {
+fn format_name_or_id(name: Option<&OsStr>, id: &PrincipalId) -> Vec<u8> {
     match name {
         Some(name) => encoded_bytes(name).to_vec(),
-        None => id.to_string().into_bytes(),
+        None => match id {
+            PrincipalId::Numeric(value) => value.to_string().into_bytes(),
+            PrincipalId::Sid(value) => value.as_bytes().to_vec(),
+        },
     }
 }
 
@@ -218,6 +221,7 @@ mod tests {
         escape_ls_bytes, format_device_field, format_name_or_id, recent_window_contains,
         render_ls_time_column,
     };
+    use crate::account::PrincipalId;
     use crate::printf_time::ResolvedTimeParts;
     use crate::time::Timestamp;
 
@@ -257,7 +261,10 @@ mod tests {
 
     #[test]
     fn owner_group_fallback_uses_decimal_ids() {
-        assert_eq!(format_name_or_id(None, 1234), b"1234");
+        assert_eq!(
+            format_name_or_id(None, &PrincipalId::Numeric(1234)),
+            b"1234"
+        );
     }
 
     #[test]

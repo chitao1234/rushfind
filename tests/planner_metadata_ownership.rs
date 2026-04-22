@@ -2,7 +2,7 @@
 
 mod support;
 
-use rushfind::account::{group_name, user_name};
+use rushfind::account::{PrincipalId, group_name, user_name};
 use rushfind::numeric::NumericComparison;
 use rushfind::parser::parse_command;
 use rushfind::planner::{RuntimeExpr, RuntimePredicate, plan_command};
@@ -63,11 +63,11 @@ fn lowers_named_and_numeric_user_group_into_exact_ids() {
 
         assert!(predicates.iter().any(|predicate| matches!(
             predicate,
-            RuntimePredicate::User(expected) if *expected == uid
+            RuntimePredicate::User(expected) if *expected == PrincipalId::Numeric(uid)
         )));
         assert!(predicates.iter().any(|predicate| matches!(
             predicate,
-            RuntimePredicate::Group(expected) if *expected == gid
+            RuntimePredicate::Group(expected) if *expected == PrincipalId::Numeric(gid)
         )));
     }
 }
