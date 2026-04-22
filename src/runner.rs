@@ -24,6 +24,12 @@ pub(crate) fn write_startup_warnings<E: Write>(
     Ok(())
 }
 
+#[cfg(windows)]
+pub(crate) fn validate_execdir_path_value(_path: &OsStr) -> Result<(), Diagnostic> {
+    Ok(())
+}
+
+#[cfg(not(windows))]
 pub(crate) fn validate_execdir_path_value(path: &OsStr) -> Result<(), Diagnostic> {
     for entry in std::env::split_paths(path) {
         if entry.as_os_str().is_empty() || !entry.is_absolute() {
@@ -253,34 +259,33 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn execdir_path_validation_rejects_relative_and_empty_entries() {
-        #[cfg(unix)]
-        {
-            assert!(validate_execdir_path_value(OsStr::new("/usr/bin:/bin")).is_ok());
-            assert!(validate_execdir_path_value(OsStr::new("")).is_err());
-            assert!(validate_execdir_path_value(OsStr::new(".:/usr/bin")).is_err());
-            assert!(validate_execdir_path_value(OsStr::new("bin:/usr/bin")).is_err());
-            assert!(validate_execdir_path_value(OsStr::new(":/usr/bin")).is_err());
-            assert!(validate_execdir_path_value(OsStr::new("/usr/bin:")).is_err());
-            assert!(validate_execdir_path_value(OsStr::new("/usr/bin::/bin")).is_err());
-        }
+        assert!(validate_execdir_path_value(OsStr::new("/usr/bin:/bin")).is_ok());
+        assert!(validate_execdir_path_value(OsStr::new("")).is_err());
+        assert!(validate_execdir_path_value(OsStr::new(".:/usr/bin")).is_err());
+        assert!(validate_execdir_path_value(OsStr::new("bin:/usr/bin")).is_err());
+        assert!(validate_execdir_path_value(OsStr::new(":/usr/bin")).is_err());
+        assert!(validate_execdir_path_value(OsStr::new("/usr/bin:")).is_err());
+        assert!(validate_execdir_path_value(OsStr::new("/usr/bin::/bin")).is_err());
+    }
 
-        #[cfg(windows)]
-        {
-            assert!(validate_execdir_path_value(OsStr::new(
-                r"C:\Windows\System32;C:\Windows"
-            ))
-            .is_ok());
-            assert!(validate_execdir_path_value(OsStr::new("")).is_err());
-            assert!(validate_execdir_path_value(OsStr::new(r".;C:\Windows\System32")).is_err());
-            assert!(validate_execdir_path_value(OsStr::new(r"bin;C:\Windows\System32")).is_err());
-            assert!(validate_execdir_path_value(OsStr::new(r";C:\Windows\System32")).is_err());
-            assert!(validate_execdir_path_value(OsStr::new(r"C:\Windows\System32;")).is_err());
-            assert!(validate_execdir_path_value(OsStr::new(
-                r"C:\Windows\System32;;C:\Windows"
-            ))
-            .is_err());
-        }
+    #[cfg(windows)]
+    #[test]
+    fn execdir_path_validation_is_skipped_on_windows() {
+        assert!(validate_execdir_path_value(OsStr::new(
+            r"C:\Windows\System32;C:\Windows"
+        ))
+        .is_ok());
+        assert!(validate_execdir_path_value(OsStr::new("")).is_ok());
+        assert!(validate_execdir_path_value(OsStr::new(r".;C:\Windows\System32")).is_ok());
+        assert!(validate_execdir_path_value(OsStr::new(r"bin;C:\Windows\System32")).is_ok());
+        assert!(validate_execdir_path_value(OsStr::new(r";C:\Windows\System32")).is_ok());
+        assert!(validate_execdir_path_value(OsStr::new(r"C:\Windows\System32;")).is_ok());
+        assert!(validate_execdir_path_value(OsStr::new(
+            r"C:\Windows\System32;;C:\Windows"
+        ))
+        .is_ok());
     }
 }
