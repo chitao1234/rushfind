@@ -10,6 +10,16 @@ use std::fs;
 use std::io;
 #[cfg(target_os = "openbsd")]
 use std::mem::MaybeUninit;
+#[cfg(target_os = "dragonfly")]
+use std::os::dragonfly::fs::MetadataExt as BsdFlagsMetadataExt;
+#[cfg(target_os = "freebsd")]
+use std::os::freebsd::fs::MetadataExt as BsdFlagsMetadataExt;
+#[cfg(target_os = "macos")]
+use std::os::macos::fs::MetadataExt as BsdFlagsMetadataExt;
+#[cfg(target_os = "netbsd")]
+use std::os::netbsd::fs::MetadataExt as BsdFlagsMetadataExt;
+#[cfg(target_os = "openbsd")]
+use std::os::openbsd::fs::MetadataExt as BsdFlagsMetadataExt;
 #[cfg(target_os = "openbsd")]
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::ffi::OsStringExt;

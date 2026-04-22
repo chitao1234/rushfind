@@ -6,7 +6,7 @@ use crate::time::Timestamp;
 use std::io;
 use std::path::Path;
 
-#[cfg(any(target_os = "linux", doc))]
+#[cfg(target_os = "linux")]
 pub(crate) mod linux;
 
 #[cfg(any(
@@ -14,8 +14,7 @@ pub(crate) mod linux;
     target_os = "freebsd",
     target_os = "netbsd",
     target_os = "openbsd",
-    target_os = "dragonfly",
-    doc
+    target_os = "dragonfly"
 ))]
 pub(crate) mod bsd;
 

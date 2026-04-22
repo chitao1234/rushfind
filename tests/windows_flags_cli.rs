@@ -9,7 +9,7 @@ use support::{cargo_bin_output_with_timeout, path_arg};
 use tempfile::tempdir;
 
 #[test]
-fn flags_readonly_matches_files_with_the_readonly_attribute() {
+fn flags_all_mode_matches_files_with_the_readonly_attribute() {
     let root = tempdir().unwrap();
     let file = root.path().join("alpha.txt");
     fs::write(&file, b"alpha").unwrap();
@@ -21,7 +21,7 @@ fn flags_readonly_matches_files_with_the_readonly_attribute() {
         &[
             path_arg(root.path()),
             "-flags".into(),
-            "readonly".into(),
+            "-readonly".into(),
             "-print".into(),
         ],
         1,
