@@ -44,8 +44,9 @@ Find for the occupātus.
   `%B*` output
 - Ordered single-worker mode stays GNU-oriented and remains a separate engine for supported
   structural traversal controls
-- Ordered single-worker mode renders GNU-shaped `-ls` / `-fls` records with a frozen evaluation
-  timestamp so recent-time classification stays deterministic within a run
+- Ordered single-worker mode renders GNU-shaped `-ls` / `-fls` records on Unix-family hosts and
+  native Windows attribute records on Windows, with a frozen evaluation timestamp so recent-time
+  classification stays deterministic within a run
 - Ordered single-worker mode matches GNU `-quit` behavior for the supported action set
 - File-backed print actions eagerly create or truncate their destinations at startup, even when
   the action is never reached dynamically or no entry matches
@@ -62,17 +63,17 @@ Find for the occupātus.
 - Ordered single-worker mode inherits child stdio for `-exec` and `-execdir`
 - Relaxed-order parallel mode buffers child stdout/stderr for atomic replay for `-exec` and
   `-execdir`
-- `-execdir` uses GNU-style `./basename` substitution and rejects unsafe `PATH` entries eagerly
-  before traversal begins
+- `-execdir` uses `./basename` on Unix-family hosts and `.\basename` on Windows, and rejects
+  unsafe `PATH` entries eagerly before traversal begins
 - `-delete` implies depth-mode traversal, so directories are evaluated and removed after their
   scheduled descendants
 - In depth mode, `-prune` remains boolean-true in expression flow but does not block descendant
   traversal
 - Relaxed-order parallel mode preserves descendant-before-parent completion for depth-mode actions
-- `-fstype` uses the active Unix-family mount snapshot backend and stays exact on Linux, macOS,
-  and the supported BSD targets
-- `-fstype` type names come from `/proc/self/mountinfo` on Linux and `getmntinfo` snapshots on
-  macOS and BSD
+- `-fstype` uses the active platform mount snapshot backend and stays exact on Linux, macOS, the
+  supported BSD targets, and Windows
+- `-fstype` type names come from `/proc/self/mountinfo` on Linux, `getmntinfo` snapshots on
+  macOS and BSD, and volume metadata on Windows
 - Requested filesystem types are resolved against the set known at command startup
 - Commands that do not use `-fstype` do not read mount-table state
 - Access predicates use kernel access checks and intentionally can differ from `-perm`
@@ -93,19 +94,31 @@ Find for the occupātus.
 - Linux remains the reference platform and keeps the strongest GNU compatibility coverage.
 - macOS, FreeBSD, NetBSD, OpenBSD, and DragonFly BSD are supported through alternate Unix-family
   backends for filesystem, account, and locale behavior.
+- Native Windows is supported through a Windows backend for filesystem, account, locale, path,
+  and access behavior.
 - macOS CI uses a cached source build of pinned GNU findutils revisions so GNU differential
   coverage does not depend on the runner image or Homebrew's package freshness.
+- Native Windows CI exercises both `x86_64-pc-windows-gnu` and `x86_64-pc-windows-msvc`.
 - `rushfind` prefers exact GNU-compatible behavior on non-Linux Unix when the host exposes the
   needed primitive through another code path.
 - Interactive locale handling for `-ok` and `-okdir` remains approximate on non-Linux Unix and
   emits a startup warning when planned.
 - During the initial macOS port, case-insensitive glob matching may still differ outside the C
   locale and emits a startup warning when planned.
-- Windows support is intentionally deferred to a later plan built on the same platform substrate.
+- On Windows, name and path matching accept both `/` and `\` as separators, and displayed paths
+  render with backslashes.
+- On Windows, `-user`, `-group`, `-nouser`, `-nogroup`, `%u`, `%g`, `-readable`, `-writable`,
+  `-executable`, `-fstype`, `-xdev`, `-mount`, `-ls`, `-fls`, and the `-exec*` / `-ok*` family
+  use native Windows contracts.
+- On Windows, `-uid`, `-gid`, `-perm`, `%U`, `%G`, `%m`, `%M`, `%D`, `%b`, and `%k` fail during
+  planning with explicit diagnostics.
+- On Windows, interactive locale handling and case-insensitive glob matching remain approximate
+  and emit startup warnings when planned.
 
-## Manual Unix verification
+## Manual verification
 
-Build the binary and run the portability smoke harness locally, then repeat it on target hosts:
+Build the binary and run the Unix-family portability smoke harness locally, then repeat it on
+target hosts:
 
 The minimum supported Rust version is 1.85.0.
 
@@ -117,6 +130,19 @@ bash scripts/check_unix_portability_surface.sh target/debug/rfd
 The script exercises `-print`, `-print0`, `-fstype`, birth-time reads, `-xdev`, ownership/access
 rendering, `-ls`, and `-execdir`. It also prints the locale-sensitive `-ok` commands to run
 manually on the target host.
+
+For a non-Windows preflight of the Windows code path, use:
+
+```bash
+cargo +1.85.0 check --tests --target x86_64-pc-windows-gnu
+```
+
+On native Windows hosts, the CI matrix covers:
+
+```powershell
+cargo test --target x86_64-pc-windows-msvc
+cargo test --target x86_64-pc-windows-gnu
+```
 
 ## Worker selection
 

@@ -1,0 +1,51 @@
+name: windows
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  windows-msvc:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust 1.85.0
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+          targets: x86_64-pc-windows-msvc
+
+      - name: Run Rust test suite
+        run: cargo test --target x86_64-pc-windows-msvc
+
+  windows-gnu:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    env:
+      CC_x86_64_pc_windows_gnu: gcc
+      CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: gcc
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install MinGW toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          path-type: inherit
+          install: >-
+            mingw-w64-x86_64-gcc
+
+      - name: Install Rust 1.85.0
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+          targets: x86_64-pc-windows-gnu
+
+      - name: Run Rust test suite
+        run: cargo test --target x86_64-pc-windows-gnu
