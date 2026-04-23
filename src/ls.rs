@@ -148,6 +148,7 @@ fn render_size_field(
     }
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 fn allocation_kib_bytes(allocation_size: u64) -> Vec<u8> {
     allocation_size.div_ceil(1024).to_string().into_bytes()
 }

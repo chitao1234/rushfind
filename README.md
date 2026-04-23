@@ -31,8 +31,8 @@ Find for the occupātus.
   `-fprintf`, `-ls`, `-fls`, `-exec ... ;`, `-exec ... +`, `-execdir ... ;`,
   `-execdir ... +`, `-ok ... ;`, `-okdir ... ;`, `-delete`, `-quit`
 - `-printf` currently supports `%p`, `%P`, `%H`, `%f`, `%h`, `%d`, `%y`, `%s`, `%m`, `%M`,
-  `%l`, `%i`, `%n`, `%D`, `%b`, `%k`, `%u`, `%U`, `%g`, `%G`, `%F`, `%a`, `%c`, `%t`, `%B`,
-  `%A*`, `%C*`, `%T*`, `%B*`, `%%`, `\\`, `\n`, `\t`, and `\0`
+  `%l`, `%i`, `%n`, `%D`, `%b`, `%k`, `%u`, `%U`, `%US`, `%g`, `%G`, `%GS`, `%F`, `%a`, `%c`,
+  `%t`, `%B`, `%A*`, `%C*`, `%T*`, `%B*`, `%%`, `\\`, `\n`, `\t`, and `\0`
 - Supported `-printf` directives accept GNU-style field formatting with
   `%[flags][width][.precision]directive`
 - Time-oriented `-printf` directives render in the process local timezone while freezing textual
@@ -108,12 +108,16 @@ Find for the occupātus.
   locale and emits a startup warning when planned.
 - On Windows, name and path matching accept both `/` and `\` as separators, and displayed paths
   render with backslashes.
-- On Windows, `-user`, `-group`, `-nouser`, `-nogroup`, `%u`, `%g`, `-readable`, `-writable`,
-  `-executable`, `-fstype`, `-xdev`, `-mount`, `-ls`, `-fls`, and the `-exec*` / `-ok*` family
-  use native Windows contracts.
+- On Windows, `-user`, `-group`, `-nouser`, `-nogroup`, `%u`, `%g`, `%US`, `%GS`, `-readable`,
+  `-writable`, `-executable`, `-fstype`, `-xdev`, `-mount`, `-ls`, `-fls`, and the `-exec*` /
+  `-ok*` family use native Windows contracts.
 - On Windows, `-owner NAME`, `-owner-sid SID`, and `-group-sid SID` provide native ownership
   matching. `-owner` matches the file owner by account name, while `-owner-sid` and
-  `-group-sid` match raw owner and group SIDs exactly.
+  `-group-sid` match raw owner and group SIDs exactly. `%u` and `%g` render names first and
+  fall back to SID text when lookup fails, while `%US` and `%GS` render canonical owner and
+  group SID text explicitly.
+- On Windows, `-ls` and `-fls` render the native record shape
+  `fileid alloc-kib type+attrs links owner size mtime pathname`.
 - `-flags` is cross-platform, symbolic-only, and accepts only the host-native flag names that
   the active build supports.
 - On Windows, `-reparse-type` classifies reparse points by semantic class such as `symbolic` and
