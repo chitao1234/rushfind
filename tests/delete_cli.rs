@@ -5,18 +5,6 @@ use std::time::Duration;
 use support::{cargo_bin_output_with_timeout, path_arg};
 use tempfile::tempdir;
 
-fn directory_not_empty_fragment() -> &'static str {
-    #[cfg(windows)]
-    {
-        "directory is not empty"
-    }
-
-    #[cfg(unix)]
-    {
-        "Directory not empty"
-    }
-}
-
 #[test]
 fn ordered_delete_removes_entries_reached_by_the_expression() {
     let root = tempdir().unwrap();
@@ -73,9 +61,11 @@ fn ordered_print_then_delete_emits_paths_before_removal() {
 fn ordered_delete_failure_falls_through_or_branch_and_sets_exit_one() {
     let root = tempdir().unwrap();
     let tree = root.path().join("tree");
+    let dir = tree.join("dir");
     fs::create_dir(&tree).unwrap();
-    fs::create_dir(tree.join("dir")).unwrap();
-    fs::write(tree.join("dir/child.txt"), "child\n").unwrap();
+    fs::create_dir(&dir).unwrap();
+    fs::write(dir.join("child.txt"), "child\n").unwrap();
+    let directory_not_empty_error = fs::remove_dir(&dir).unwrap_err().to_string();
 
     let output = cargo_bin_output_with_timeout(
         &[
@@ -96,11 +86,13 @@ fn ordered_delete_failure_falls_through_or_branch_and_sets_exit_one() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("dir"));
     assert!(stdout.contains("child.txt"));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains(&dir.display().to_string()), "{stderr:?}");
     assert!(
-        String::from_utf8(output.stderr)
-            .unwrap()
+        stderr
             .to_ascii_lowercase()
-            .contains(&directory_not_empty_fragment().to_ascii_lowercase())
+            .contains(&directory_not_empty_error.to_ascii_lowercase()),
+        "stderr {stderr:?} did not contain localized remove_dir error {directory_not_empty_error:?}"
     );
 }
 

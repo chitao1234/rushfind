@@ -11,18 +11,18 @@ use support::windows::{
 use support::{cargo_bin_output_with_timeout, path_arg};
 use tempfile::tempdir;
 
-fn skip_without_powershell() -> bool {
+fn skip_without_ownership_probe() -> bool {
     if ownership_probe_available() {
         return false;
     }
 
-    eprintln!("skipping Windows ownership CLI test: PowerShell unavailable");
+    eprintln!("skipping Windows ownership CLI test: ownership probe unavailable");
     true
 }
 
 #[test]
 fn owner_matches_current_file_owner_name() {
-    if skip_without_powershell() {
+    if skip_without_ownership_probe() {
         return;
     }
 
@@ -53,7 +53,7 @@ fn owner_matches_current_file_owner_name() {
 
 #[test]
 fn owner_sid_and_group_sid_match_current_file_security_descriptor() {
-    if skip_without_powershell() {
+    if skip_without_ownership_probe() {
         return;
     }
 
