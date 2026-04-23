@@ -14,7 +14,7 @@ Find for the occupātus.
 ## Current scope
 
 - GNU-style argv parsing
-- Global follow-mode options: `-P`, `-H`, `-L`
+- Global follow-mode and metadata options: `-P`, `-H`, `-L`, `-version`, `--version`
 - Read-only predicates: `-name`, `-iname`, `-path`, `-ipath`, `-type`, `-xtype`, `-true`,
   `-false`, `-fstype`
 - Identity/link predicates: `-samefile`, `-inum`, `-links`
