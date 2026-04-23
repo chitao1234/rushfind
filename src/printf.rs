@@ -84,8 +84,10 @@ pub enum PrintfDirectiveKind {
     Blocks1024,
     UserName,
     UserId,
+    UserSid,
     GroupName,
     GroupId,
+    GroupSid,
     FileSystemType,
     FullTimestamp(PrintfTimeFamily),
     TimestampPart {
@@ -272,8 +274,16 @@ fn parse_directive(
         b'b' => PrintfDirectiveKind::Blocks512,
         b'k' => PrintfDirectiveKind::Blocks1024,
         b'u' => PrintfDirectiveKind::UserName,
+        b'U' if bytes.get(*index + 1) == Some(&b'S') => {
+            *index += 1;
+            PrintfDirectiveKind::UserSid
+        }
         b'U' => PrintfDirectiveKind::UserId,
         b'g' => PrintfDirectiveKind::GroupName,
+        b'G' if bytes.get(*index + 1) == Some(&b'S') => {
+            *index += 1;
+            PrintfDirectiveKind::GroupSid
+        }
         b'G' => PrintfDirectiveKind::GroupId,
         b'F' => PrintfDirectiveKind::FileSystemType,
         other => {
@@ -523,6 +533,10 @@ fn render_directive_bytes(
                 directive.format,
             )
         }
+        PrintfDirectiveKind::UserSid => {
+            let owner = entry.active_owner(follow_mode)?;
+            format_string_like(principal_id_bytes(&owner).as_slice(), directive.format)
+        }
         PrintfDirectiveKind::UserId => format_string_like(
             entry.active_uid(follow_mode)?.to_string().as_bytes(),
             directive.format,
@@ -534,6 +548,10 @@ fn render_directive_bytes(
                 name_or_id_bytes(name.as_deref(), &group).as_slice(),
                 directive.format,
             )
+        }
+        PrintfDirectiveKind::GroupSid => {
+            let group = entry.active_group(follow_mode)?;
+            format_string_like(principal_id_bytes(&group).as_slice(), directive.format)
         }
         PrintfDirectiveKind::GroupId => format_string_like(
             entry.active_gid(follow_mode)?.to_string().as_bytes(),
@@ -606,13 +624,17 @@ fn resolve_cached_time_parts<'a>(
     Ok(slot.as_ref().and_then(|value| value.as_ref()))
 }
 
+fn principal_id_bytes(id: &PrincipalId) -> Vec<u8> {
+    match id {
+        PrincipalId::Numeric(value) => value.to_string().into_bytes(),
+        PrincipalId::Sid(value) => value.as_bytes().to_vec(),
+    }
+}
+
 fn name_or_id_bytes(name: Option<&OsStr>, id: &PrincipalId) -> Vec<u8> {
     match name {
         Some(name) => encoded_bytes(name).to_vec(),
-        None => match id {
-            PrincipalId::Numeric(value) => value.to_string().into_bytes(),
-            PrincipalId::Sid(value) => value.as_bytes().to_vec(),
-        },
+        None => principal_id_bytes(id),
     }
 }
 

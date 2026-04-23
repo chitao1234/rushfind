@@ -401,6 +401,16 @@ fn validate_platform_printf_program(
             continue;
         };
         match directive.kind {
+            PrintfDirectiveKind::UserSid => {
+                if !capabilities.uses_windows_native_output_contract() {
+                    return Err(Diagnostic::unsupported("%US is only supported on Windows"));
+                }
+            }
+            PrintfDirectiveKind::GroupSid => {
+                if !capabilities.uses_windows_native_output_contract() {
+                    return Err(Diagnostic::unsupported("%GS is only supported on Windows"));
+                }
+            }
             PrintfDirectiveKind::UserId | PrintfDirectiveKind::GroupId => {
                 require_platform_feature(capabilities, PlatformFeature::NumericOwnership, state)?;
             }
