@@ -44,14 +44,14 @@ mod tests {
     fn format_version_line_renders_the_expected_shape() {
         let rendered = format_version_line(BuildVersion {
             name: "rushfind",
-            version: "0.1.0",
+            version: "0.1.1-dev",
             commit: "abc1234",
             target: "x86_64-unknown-linux-gnu",
         });
 
         assert_eq!(
             rendered,
-            "rushfind 0.1.0 (commit abc1234, target x86_64-unknown-linux-gnu)"
+            "rushfind 0.1.1-dev (commit abc1234, target x86_64-unknown-linux-gnu)"
         );
     }
 
@@ -59,14 +59,14 @@ mod tests {
     fn format_version_line_falls_back_to_unknown_for_empty_commit() {
         let rendered = format_version_line(BuildVersion {
             name: "rushfind",
-            version: "0.1.0",
+            version: "0.1.1-dev",
             commit: "",
             target: "x86_64-pc-windows-gnu",
         });
 
         assert_eq!(
             rendered,
-            "rushfind 0.1.0 (commit unknown, target x86_64-pc-windows-gnu)"
+            "rushfind 0.1.1-dev (commit unknown, target x86_64-pc-windows-gnu)"
         );
     }
 }
