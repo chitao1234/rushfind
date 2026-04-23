@@ -24,6 +24,7 @@ pub(crate) enum PlatformFeature {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum OutputContract {
+    #[cfg(any(unix, test))]
     Posix,
     #[cfg(any(windows, test))]
     WindowsNative,
@@ -64,7 +65,7 @@ impl PlatformCapabilities {
         }
     }
 
-    #[cfg(any(windows, test))]
+    #[cfg(test)]
     pub(crate) const fn with_windows_native_output_contract(mut self) -> Self {
         self.output_contract = OutputContract::WindowsNative;
         self
