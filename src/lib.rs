@@ -36,6 +36,7 @@ pub(crate) mod runtime_policy;
 pub mod size;
 pub mod time;
 pub(crate) mod traversal_control;
+pub(crate) mod version;
 pub mod walker;
 
 pub use crate::runner::{RunSummary, run_plan};

@@ -1,0 +1,66 @@
+mod support;
+
+use std::fs;
+use std::time::Duration;
+use support::{cargo_bin_output_with_timeout, path_arg};
+use tempfile::tempdir;
+
+fn expected_version_stdout() -> String {
+    format!(
+        "rushfind {} (commit {}, target {})\n",
+        env!("RUSHFIND_BUILD_VERSION"),
+        env!("RUSHFIND_BUILD_GIT_HASH"),
+        env!("RUSHFIND_BUILD_TARGET"),
+    )
+}
+
+#[test]
+fn version_aliases_print_build_metadata_and_exit_successfully() {
+    for raw in ["-version", "--version"] {
+        let output = cargo_bin_output_with_timeout(&[raw.into()], 1, Duration::from_secs(5));
+
+        assert_eq!(output.status.code(), Some(0), "{raw}");
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            expected_version_stdout(),
+            "{raw}"
+        );
+        assert!(
+            output.stderr.is_empty(),
+            "{raw}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
+fn version_short_circuits_traversal_and_actions() {
+    let root = tempdir().unwrap();
+    let file = root.path().join("alpha.txt");
+    fs::write(&file, b"alpha").unwrap();
+
+    let output = cargo_bin_output_with_timeout(
+        &[
+            "--version".into(),
+            path_arg(file.as_path()),
+            "-delete".into(),
+        ],
+        1,
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        expected_version_stdout()
+    );
+    assert!(
+        output.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        file.exists(),
+        "version flags must bypass traversal and -delete"
+    );
+}
