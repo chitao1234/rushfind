@@ -2,6 +2,7 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 use tempfile::TempDir;
 
 pub(crate) fn normalize_stdout_path(text: &str) -> String {
@@ -54,4 +55,58 @@ pub(crate) fn write_arg_echo_script(prefix: &str) -> (TempDir, PathBuf) {
     )
     .unwrap();
     (dir, script)
+}
+
+pub(crate) fn ownership_probe_available() -> bool {
+    Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            "Write-Output RUSHFIND-POWERSHELL-READY",
+        ])
+        .output()
+        .map(|output| {
+            output.status.success()
+                && String::from_utf8_lossy(&output.stdout).contains("RUSHFIND-POWERSHELL-READY")
+        })
+        .unwrap_or(false)
+}
+
+pub(crate) fn file_owner_name(path: &std::path::Path) -> String {
+    powershell_path_query(
+        path,
+        "$acl = Get-Acl -LiteralPath $env:RUSHFIND_TEST_PATH; \
+         $acl.GetOwner([System.Security.Principal.NTAccount]).Value",
+    )
+}
+
+pub(crate) fn file_owner_sid(path: &std::path::Path) -> String {
+    powershell_path_query(
+        path,
+        "$acl = Get-Acl -LiteralPath $env:RUSHFIND_TEST_PATH; \
+         $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value",
+    )
+}
+
+pub(crate) fn file_group_sid(path: &std::path::Path) -> String {
+    powershell_path_query(
+        path,
+        "$acl = Get-Acl -LiteralPath $env:RUSHFIND_TEST_PATH; \
+         $acl.GetGroup([System.Security.Principal.SecurityIdentifier]).Value",
+    )
+}
+
+fn powershell_path_query(path: &std::path::Path, script: &str) -> String {
+    let output = Command::new("powershell")
+        .args(["-NoProfile", "-Command", script])
+        .env("RUSHFIND_TEST_PATH", path)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "{output:?}");
+    String::from_utf8(output.stdout)
+        .unwrap()
+        .trim()
+        .trim_end_matches('\r')
+        .to_owned()
 }
