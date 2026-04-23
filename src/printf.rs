@@ -1,8 +1,9 @@
-use crate::account::{PrincipalId, group_name, user_name};
+use crate::account::{group_name, user_name};
 use crate::diagnostics::Diagnostic;
 use crate::entry::{EntryContext, EntryKind, PrintfTargetKind};
 use crate::eval::EvalContext;
 use crate::follow::FollowMode;
+use crate::metadata_format::{name_or_id_bytes, principal_id_bytes, symbolic_mode_string};
 use crate::platform;
 use crate::platform::path::{
     display_bytes, display_os_bytes, encoded_bytes, relative_dir_for_printf,
@@ -624,20 +625,6 @@ fn resolve_cached_time_parts<'a>(
     Ok(slot.as_ref().and_then(|value| value.as_ref()))
 }
 
-fn principal_id_bytes(id: &PrincipalId) -> Vec<u8> {
-    match id {
-        PrincipalId::Numeric(value) => value.to_string().into_bytes(),
-        PrincipalId::Sid(value) => value.as_bytes().to_vec(),
-    }
-}
-
-fn name_or_id_bytes(name: Option<&OsStr>, id: &PrincipalId) -> Vec<u8> {
-    match name {
-        Some(name) => encoded_bytes(name).to_vec(),
-        None => principal_id_bytes(id),
-    }
-}
-
 fn pad_field(value: &[u8], width: Option<usize>, left_align: bool, pad: u8) -> Vec<u8> {
     let Some(width) = width else {
         return value.to_vec();
@@ -788,45 +775,6 @@ fn file_type_letter(kind: EntryKind) -> u8 {
         EntryKind::Fifo => b'p',
         EntryKind::Socket => b's',
         EntryKind::Unknown => b'U',
-    }
-}
-
-fn symbolic_mode_string(kind: EntryKind, mode: u32) -> String {
-    let mut value = String::with_capacity(10);
-    value.push(match kind {
-        EntryKind::File => '-',
-        EntryKind::Directory => 'd',
-        EntryKind::Symlink => 'l',
-        EntryKind::Block => 'b',
-        EntryKind::Character => 'c',
-        EntryKind::Fifo => 'p',
-        EntryKind::Socket => 's',
-        EntryKind::Unknown => 'U',
-    });
-    value.push(if mode & 0o400 != 0 { 'r' } else { '-' });
-    value.push(if mode & 0o200 != 0 { 'w' } else { '-' });
-    value.push(execute_char(mode, 0o100, 0o4000, 's', 'S'));
-    value.push(if mode & 0o040 != 0 { 'r' } else { '-' });
-    value.push(if mode & 0o020 != 0 { 'w' } else { '-' });
-    value.push(execute_char(mode, 0o010, 0o2000, 's', 'S'));
-    value.push(if mode & 0o004 != 0 { 'r' } else { '-' });
-    value.push(if mode & 0o002 != 0 { 'w' } else { '-' });
-    value.push(execute_char(mode, 0o001, 0o1000, 't', 'T'));
-    value
-}
-
-fn execute_char(
-    mode: u32,
-    exec_bit: u32,
-    special_bit: u32,
-    when_set: char,
-    when_unset: char,
-) -> char {
-    match (mode & exec_bit != 0, mode & special_bit != 0) {
-        (true, true) => when_set,
-        (false, true) => when_unset,
-        (true, false) => 'x',
-        (false, false) => '-',
     }
 }
 

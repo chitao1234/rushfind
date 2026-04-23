@@ -1,14 +1,16 @@
 #[cfg(not(windows))]
 use crate::account::group_name;
-use crate::account::{PrincipalId, user_name};
+use crate::account::user_name;
 use crate::diagnostics::Diagnostic;
 use crate::entry::{EntryContext, EntryKind};
 use crate::eval::EvalContext;
 use crate::follow::FollowMode;
-use crate::platform::path::{display_bytes, display_os_bytes, encoded_bytes};
+use crate::metadata_format::name_or_id_bytes;
+#[cfg(not(windows))]
+use crate::metadata_format::symbolic_mode_string;
+use crate::platform::path::{display_bytes, display_os_bytes};
 use crate::printf_time::{ResolvedTimeParts, resolve_local_time_parts};
 use crate::time::Timestamp;
-use std::ffi::OsStr;
 #[cfg(windows)]
 use windows_sys::Win32::Storage::FileSystem::{
     FILE_ATTRIBUTE_ARCHIVE, FILE_ATTRIBUTE_COMPRESSED, FILE_ATTRIBUTE_ENCRYPTED,
@@ -58,8 +60,8 @@ fn render_unix_ls_record(
     let links = entry.active_link_count(follow_mode)?;
     let owner_id = entry.active_owner(follow_mode)?;
     let group_id = entry.active_group(follow_mode)?;
-    let owner = format_name_or_id(user_name(owner_id.clone())?.as_deref(), &owner_id);
-    let group = format_name_or_id(group_name(group_id.clone())?.as_deref(), &group_id);
+    let owner = name_or_id_bytes(user_name(owner_id.clone())?.as_deref(), &owner_id);
+    let group = name_or_id_bytes(group_name(group_id.clone())?.as_deref(), &group_id);
     let size = render_size_field(entry, follow_mode, kind)?;
     let timestamp = render_entry_timestamp(entry, follow_mode, context.evaluation_now()?)?;
     let path = escape_ls_bytes(&display_bytes(&entry.path));
@@ -95,7 +97,7 @@ fn render_windows_ls_record(
         .to_string()
         .into_bytes();
     let owner_id = entry.active_owner(follow_mode)?;
-    let owner = format_name_or_id(user_name(owner_id.clone())?.as_deref(), &owner_id);
+    let owner = name_or_id_bytes(user_name(owner_id.clone())?.as_deref(), &owner_id);
     let size = entry.active_size(follow_mode)?.to_string().into_bytes();
     let timestamp = render_entry_timestamp(entry, follow_mode, context.evaluation_now()?)?;
     let path = escape_ls_bytes(&display_bytes(&entry.path));
@@ -148,7 +150,7 @@ fn render_size_field(
     }
 }
 
-#[cfg_attr(not(windows), allow(dead_code))]
+#[cfg(windows)]
 fn allocation_kib_bytes(allocation_size: u64) -> Vec<u8> {
     allocation_size.div_ceil(1024).to_string().into_bytes()
 }
@@ -236,47 +238,6 @@ fn windows_attribute_string(kind: EntryKind, attributes: u32) -> String {
     value
 }
 
-#[cfg(not(windows))]
-fn symbolic_mode_string(kind: EntryKind, mode: u32) -> String {
-    let mut value = String::with_capacity(10);
-    value.push(match kind {
-        EntryKind::File => '-',
-        EntryKind::Directory => 'd',
-        EntryKind::Symlink => 'l',
-        EntryKind::Block => 'b',
-        EntryKind::Character => 'c',
-        EntryKind::Fifo => 'p',
-        EntryKind::Socket => 's',
-        EntryKind::Unknown => 'U',
-    });
-    value.push(if mode & 0o400 != 0 { 'r' } else { '-' });
-    value.push(if mode & 0o200 != 0 { 'w' } else { '-' });
-    value.push(execute_char(mode, 0o100, 0o4000, 's', 'S'));
-    value.push(if mode & 0o040 != 0 { 'r' } else { '-' });
-    value.push(if mode & 0o020 != 0 { 'w' } else { '-' });
-    value.push(execute_char(mode, 0o010, 0o2000, 's', 'S'));
-    value.push(if mode & 0o004 != 0 { 'r' } else { '-' });
-    value.push(if mode & 0o002 != 0 { 'w' } else { '-' });
-    value.push(execute_char(mode, 0o001, 0o1000, 't', 'T'));
-    value
-}
-
-#[cfg(not(windows))]
-fn execute_char(
-    mode: u32,
-    exec_bit: u32,
-    special_bit: u32,
-    when_set: char,
-    when_unset: char,
-) -> char {
-    match (mode & exec_bit != 0, mode & special_bit != 0) {
-        (true, true) => when_set,
-        (false, true) => when_unset,
-        (true, false) => 'x',
-        (false, false) => '-',
-    }
-}
-
 fn recent_window_contains(now: Timestamp, timestamp: Timestamp) -> bool {
     let not_too_old = match now.seconds.checked_sub(RECENT_PAST_WINDOW_SECONDS) {
         Some(seconds) => timestamp >= Timestamp::new(seconds, now.nanos),
@@ -314,17 +275,7 @@ fn render_ls_time_column(parts: &ResolvedTimeParts, now: Timestamp) -> Result<Ve
     }
 }
 
-fn format_name_or_id(name: Option<&OsStr>, id: &PrincipalId) -> Vec<u8> {
-    match name {
-        Some(name) => encoded_bytes(name).to_vec(),
-        None => match id {
-            PrincipalId::Numeric(value) => value.to_string().into_bytes(),
-            PrincipalId::Sid(value) => value.as_bytes().to_vec(),
-        },
-    }
-}
-
-#[cfg_attr(windows, allow(dead_code))]
+#[cfg(not(windows))]
 fn format_device_field(major: u64, minor: u64) -> Vec<u8> {
     format!("{major}, {minor:>3}").into_bytes()
 }
@@ -347,11 +298,15 @@ fn escape_ls_bytes(bytes: &[u8]) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        allocation_kib_bytes, escape_ls_bytes, format_device_field, format_name_or_id,
-        recent_window_contains, render_ls_time_column,
-    };
+    #[cfg(windows)]
+    use super::allocation_kib_bytes;
+    #[cfg(not(windows))]
+    use super::format_device_field;
+    use super::{escape_ls_bytes, recent_window_contains, render_ls_time_column};
+    #[cfg(not(windows))]
     use crate::account::PrincipalId;
+    #[cfg(not(windows))]
+    use crate::metadata_format::name_or_id_bytes;
     use crate::printf_time::ResolvedTimeParts;
     use crate::time::Timestamp;
 
@@ -389,19 +344,19 @@ mod tests {
         );
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn owner_group_fallback_uses_decimal_ids() {
-        assert_eq!(
-            format_name_or_id(None, &PrincipalId::Numeric(1234)),
-            b"1234"
-        );
+        assert_eq!(name_or_id_bytes(None, &PrincipalId::Numeric(1234)), b"1234");
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn device_size_slot_renders_major_and_minor() {
         assert_eq!(format_device_field(1, 3), b"1,   3");
     }
 
+    #[cfg(windows)]
     #[test]
     fn allocation_kib_rounds_up_to_whole_kib() {
         assert_eq!(allocation_kib_bytes(0), b"0");
