@@ -28,9 +28,10 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_BASIC_INFO,
     FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_EXECUTE,
     FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_ID_INFO, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE,
-    FILE_SHARE_READ, FILE_SHARE_WRITE, FileAttributeTagInfo, FileBasicInfo, FileIdInfo,
-    FindFirstVolumeW, FindNextVolumeW, FindVolumeClose, GetFileInformationByHandle,
-    GetFileInformationByHandleEx, GetVolumeInformationW, OPEN_EXISTING, READ_CONTROL,
+    FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_STANDARD_INFO, FileAttributeTagInfo, FileBasicInfo,
+    FileIdInfo, FileStandardInfo, FindFirstVolumeW, FindNextVolumeW, FindVolumeClose,
+    GetFileInformationByHandle, GetFileInformationByHandleEx, GetVolumeInformationW, OPEN_EXISTING,
+    READ_CONTROL,
 };
 use windows_sys::Win32::System::Threading::{
     GetCurrentProcess, GetCurrentThread, OpenProcessToken, OpenThreadToken,
@@ -55,6 +56,7 @@ const SECURITY_QUERY_ACCESS: u32 = FILE_READ_ATTRIBUTES | READ_CONTROL;
 pub(crate) fn metadata_view(path: &Path, follow: bool) -> io::Result<PlatformMetadataView> {
     let handle = MetadataHandle::open(path, follow)?;
     let basic = query_basic_info(handle.raw())?;
+    let standard = query_standard_info(handle.raw())?;
     let attributes = query_attribute_tag_info(handle.raw())?;
     let handle_info = query_handle_info(handle.raw())?;
     let (volume_serial, file_id) = query_identity(handle.raw(), &handle_info)?;
@@ -67,6 +69,11 @@ pub(crate) fn metadata_view(path: &Path, follow: bool) -> io::Result<PlatformMet
             file_id,
         }),
         size: combine_u32(handle_info.nFileSizeHigh, handle_info.nFileSizeLow),
+        allocation_size: Some(
+            u64::try_from(standard.AllocationSize).map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidData, "negative allocation size")
+            })?,
+        ),
         owner,
         group,
         mode_bits: None,
@@ -470,6 +477,23 @@ fn query_basic_info(handle: HANDLE) -> io::Result<FILE_BASIC_INFO> {
             FileBasicInfo,
             (&mut info as *mut FILE_BASIC_INFO).cast(),
             size_of::<FILE_BASIC_INFO>() as u32,
+        )
+    };
+    if ok == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(info)
+    }
+}
+
+fn query_standard_info(handle: HANDLE) -> io::Result<FILE_STANDARD_INFO> {
+    let mut info = FILE_STANDARD_INFO::default();
+    let ok = unsafe {
+        GetFileInformationByHandleEx(
+            handle,
+            FileStandardInfo,
+            (&mut info as *mut FILE_STANDARD_INFO).cast(),
+            size_of::<FILE_STANDARD_INFO>() as u32,
         )
     };
     if ok == 0 {

@@ -324,6 +324,12 @@ impl EntryContext {
         Ok(self.active_view(follow_mode)?.size)
     }
 
+    pub fn active_allocation_size(&self, follow_mode: FollowMode) -> Result<u64, Diagnostic> {
+        self.active_view(follow_mode)?
+            .allocation_size
+            .ok_or_else(|| missing_field("allocation size", &self.path))
+    }
+
     pub fn active_atime(&self, follow_mode: FollowMode) -> Result<Timestamp, Diagnostic> {
         Ok(self.active_view(follow_mode)?.atime)
     }
@@ -783,6 +789,7 @@ mod tests {
                     kind: EntryKind::File,
                     identity: Some(crate::identity::FileIdentity::Unix { dev: 11, ino: 22 }),
                     size: 99,
+                    allocation_size: Some(4097),
                     owner: Some(PlatformPrincipalId::Numeric(501)),
                     group: Some(PlatformPrincipalId::Numeric(20)),
                     mode_bits: Some(0o640),
@@ -803,6 +810,10 @@ mod tests {
 
         assert_eq!(entry.active_uid(FollowMode::Physical).unwrap(), 501);
         assert_eq!(entry.active_gid(FollowMode::Physical).unwrap(), 20);
+        assert_eq!(
+            entry.active_allocation_size(FollowMode::Physical).unwrap(),
+            4097
+        );
         assert_eq!(entry.active_blocks(FollowMode::Physical).unwrap(), 8);
         assert_eq!(entry.active_mount_id(FollowMode::Physical).unwrap(), 7);
         assert_eq!(
@@ -822,6 +833,7 @@ mod tests {
                     kind: EntryKind::File,
                     identity: Some(crate::identity::FileIdentity::Unix { dev: 11, ino: 22 }),
                     size: 99,
+                    allocation_size: None,
                     owner: None,
                     group: None,
                     mode_bits: Some(0o640),
@@ -969,6 +981,7 @@ mod tests {
                 file_id: 22,
             }),
             size: 0,
+            allocation_size: None,
             owner: None,
             group: None,
             mode_bits: None,
@@ -991,6 +1004,7 @@ mod tests {
                 file_id: 44,
             }),
             size: 0,
+            allocation_size: None,
             owner: None,
             group: None,
             mode_bits: None,

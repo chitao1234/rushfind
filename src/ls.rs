@@ -1,4 +1,6 @@
-use crate::account::{PrincipalId, group_name, user_name};
+#[cfg(not(windows))]
+use crate::account::group_name;
+use crate::account::{PrincipalId, user_name};
 use crate::diagnostics::Diagnostic;
 use crate::entry::{EntryContext, EntryKind};
 use crate::eval::EvalContext;
@@ -22,7 +24,9 @@ const RECENT_FUTURE_WINDOW_SECONDS: i64 = 60 * 60;
 #[cfg(not(windows))]
 const OWNER_GROUP_FIELD_WIDTH: usize = 8;
 #[cfg(windows)]
-const OWNER_GROUP_FIELD_WIDTH: usize = 16;
+const WINDOWS_FILE_ID_FIELD_WIDTH: usize = 18;
+#[cfg(windows)]
+const WINDOWS_OWNER_FIELD_WIDTH: usize = 20;
 const SIZE_FIELD_WIDTH: usize = 8;
 
 pub(crate) fn render_ls_record(
@@ -83,22 +87,29 @@ fn render_windows_ls_record(
     context: &EvalContext,
 ) -> Result<Vec<u8>, Diagnostic> {
     let kind = entry.active_kind(follow_mode)?;
-    let inode = entry.active_inode(follow_mode)?;
+    let fileid = entry.active_inode(follow_mode)?.to_string().into_bytes();
+    let alloc_kib = allocation_kib_bytes(entry.active_allocation_size(follow_mode)?);
     let attrs = windows_attribute_string(kind, entry.active_native_attributes(follow_mode)?);
-    let links = entry.active_link_count(follow_mode)?;
+    let links = entry
+        .active_link_count(follow_mode)?
+        .to_string()
+        .into_bytes();
     let owner_id = entry.active_owner(follow_mode)?;
-    let group_id = entry.active_group(follow_mode)?;
     let owner = format_name_or_id(user_name(owner_id.clone())?.as_deref(), &owner_id);
-    let group = format_name_or_id(group_name(group_id.clone())?.as_deref(), &group_id);
     let size = entry.active_size(follow_mode)?.to_string().into_bytes();
     let timestamp = render_entry_timestamp(entry, follow_mode, context.evaluation_now()?)?;
     let path = escape_ls_bytes(&display_bytes(&entry.path));
     let suffix = render_symlink_suffix(entry, follow_mode)?;
 
-    let mut out = format!("{inode:>9} {} {links:>3} ", attrs).into_bytes();
-    append_padded_field(&mut out, &owner, OWNER_GROUP_FIELD_WIDTH);
+    let mut out = pad_left(&fileid, WINDOWS_FILE_ID_FIELD_WIDTH);
     out.push(b' ');
-    append_padded_field(&mut out, &group, OWNER_GROUP_FIELD_WIDTH);
+    out.extend_from_slice(&pad_left(&alloc_kib, SIZE_FIELD_WIDTH));
+    out.push(b' ');
+    out.extend_from_slice(attrs.as_bytes());
+    out.push(b' ');
+    out.extend_from_slice(&pad_left(&links, 3));
+    out.push(b' ');
+    append_padded_field(&mut out, &owner, WINDOWS_OWNER_FIELD_WIDTH);
     out.push(b' ');
     out.extend_from_slice(&pad_left(&size, SIZE_FIELD_WIDTH));
     out.push(b' ');
@@ -135,6 +146,10 @@ fn render_size_field(
         }
         _ => Ok(entry.active_size(follow_mode)?.to_string().into_bytes()),
     }
+}
+
+fn allocation_kib_bytes(allocation_size: u64) -> Vec<u8> {
+    allocation_size.div_ceil(1024).to_string().into_bytes()
 }
 
 fn render_symlink_suffix(
@@ -332,8 +347,8 @@ fn escape_ls_bytes(bytes: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::{
-        escape_ls_bytes, format_device_field, format_name_or_id, recent_window_contains,
-        render_ls_time_column,
+        allocation_kib_bytes, escape_ls_bytes, format_device_field, format_name_or_id,
+        recent_window_contains, render_ls_time_column,
     };
     use crate::account::PrincipalId;
     use crate::printf_time::ResolvedTimeParts;
@@ -384,6 +399,14 @@ mod tests {
     #[test]
     fn device_size_slot_renders_major_and_minor() {
         assert_eq!(format_device_field(1, 3), b"1,   3");
+    }
+
+    #[test]
+    fn allocation_kib_rounds_up_to_whole_kib() {
+        assert_eq!(allocation_kib_bytes(0), b"0");
+        assert_eq!(allocation_kib_bytes(1), b"1");
+        assert_eq!(allocation_kib_bytes(1024), b"1");
+        assert_eq!(allocation_kib_bytes(1025), b"2");
     }
 
     #[test]
