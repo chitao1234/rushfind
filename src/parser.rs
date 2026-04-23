@@ -252,13 +252,9 @@ impl<'a> Parser<'a> {
         } else if token.matches("-owner") {
             Expr::Predicate(Predicate::Owner(self.take_os_string("-owner")?))
         } else if token.matches("-owner-sid") {
-            Expr::Predicate(Predicate::OwnerSid(
-                self.take_os_string("-owner-sid")?,
-            ))
+            Expr::Predicate(Predicate::OwnerSid(self.take_os_string("-owner-sid")?))
         } else if token.matches("-group-sid") {
-            Expr::Predicate(Predicate::GroupSid(
-                self.take_os_string("-group-sid")?,
-            ))
+            Expr::Predicate(Predicate::GroupSid(self.take_os_string("-group-sid")?))
         } else if token.matches("-nouser") {
             Expr::Predicate(Predicate::NoUser)
         } else if token.matches("-nogroup") {

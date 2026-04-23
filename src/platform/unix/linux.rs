@@ -24,6 +24,9 @@ pub(crate) static CAPABILITIES: PlatformCapabilities = PlatformCapabilities {
     reparse_type: SupportLevel::Unsupported("reparse type is only supported on Windows"),
     named_ownership: SupportLevel::Exact,
     numeric_ownership: SupportLevel::Exact,
+    windows_ownership_predicates: SupportLevel::Unsupported(
+        "Windows ownership predicates are only supported on Windows",
+    ),
     access_predicates: SupportLevel::Exact,
     messages_locale: SupportLevel::Exact,
     case_insensitive_glob: SupportLevel::Exact,

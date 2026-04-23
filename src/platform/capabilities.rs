@@ -15,6 +15,7 @@ pub(crate) enum PlatformFeature {
     ReparseType,
     NamedOwnership,
     NumericOwnership,
+    WindowsOwnershipPredicates,
     AccessPredicates,
     MessagesLocale,
     CaseInsensitiveGlob,
@@ -37,6 +38,7 @@ pub(crate) struct PlatformCapabilities {
     pub(crate) reparse_type: SupportLevel,
     pub(crate) named_ownership: SupportLevel,
     pub(crate) numeric_ownership: SupportLevel,
+    pub(crate) windows_ownership_predicates: SupportLevel,
     pub(crate) access_predicates: SupportLevel,
     pub(crate) messages_locale: SupportLevel,
     pub(crate) case_insensitive_glob: SupportLevel,
@@ -54,6 +56,7 @@ impl PlatformCapabilities {
             PlatformFeature::ReparseType => self.reparse_type,
             PlatformFeature::NamedOwnership => self.named_ownership,
             PlatformFeature::NumericOwnership => self.numeric_ownership,
+            PlatformFeature::WindowsOwnershipPredicates => self.windows_ownership_predicates,
             PlatformFeature::AccessPredicates => self.access_predicates,
             PlatformFeature::MessagesLocale => self.messages_locale,
             PlatformFeature::CaseInsensitiveGlob => self.case_insensitive_glob,
@@ -89,6 +92,7 @@ impl PlatformCapabilities {
             reparse_type: SupportLevel::Unsupported("unset"),
             named_ownership: SupportLevel::Unsupported("unset"),
             numeric_ownership: SupportLevel::Unsupported("unset"),
+            windows_ownership_predicates: SupportLevel::Unsupported("unset"),
             access_predicates: SupportLevel::Unsupported("unset"),
             messages_locale: SupportLevel::Unsupported("unset"),
             case_insensitive_glob: SupportLevel::Unsupported("unset"),
@@ -107,6 +111,9 @@ impl PlatformCapabilities {
             PlatformFeature::ReparseType => self.reparse_type = support,
             PlatformFeature::NamedOwnership => self.named_ownership = support,
             PlatformFeature::NumericOwnership => self.numeric_ownership = support,
+            PlatformFeature::WindowsOwnershipPredicates => {
+                self.windows_ownership_predicates = support
+            }
             PlatformFeature::AccessPredicates => self.access_predicates = support,
             PlatformFeature::MessagesLocale => self.messages_locale = support,
             PlatformFeature::CaseInsensitiveGlob => self.case_insensitive_glob = support,

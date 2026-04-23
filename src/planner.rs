@@ -1,4 +1,6 @@
-use crate::account::{PrincipalId, resolve_group_principal, resolve_user_principal};
+use crate::account::{
+    PrincipalId, canonicalize_sid_principal, resolve_group_principal, resolve_user_principal,
+};
 use crate::ast::{Action, CommandAst, Expr, FileTypeFilter, GlobalOption, Predicate};
 use crate::diagnostics::Diagnostic;
 use crate::exec::{
@@ -422,6 +424,52 @@ fn validate_platform_printf_program(
     Ok(())
 }
 
+fn windows_ownership_predicates_supported(capabilities: &PlatformCapabilities) -> bool {
+    matches!(
+        capabilities.support(PlatformFeature::WindowsOwnershipPredicates),
+        SupportLevel::Exact
+    )
+}
+
+fn unsupported_windows_numeric_ownership(
+    flag: &'static str,
+    capabilities: &PlatformCapabilities,
+) -> Option<Diagnostic> {
+    if !matches!(
+        capabilities.support(PlatformFeature::NumericOwnership),
+        SupportLevel::Unsupported(_)
+    ) {
+        return None;
+    }
+
+    if !windows_ownership_predicates_supported(capabilities) {
+        return None;
+    }
+
+    match flag {
+        "-uid" => Some(Diagnostic::unsupported(
+            "-uid is not supported on Windows; use -owner-sid for SID matching",
+        )),
+        "-gid" => Some(Diagnostic::unsupported(
+            "-gid is not supported on Windows; use -group-sid for SID matching",
+        )),
+        _ => None,
+    }
+}
+
+fn require_windows_ownership_predicate(
+    flag: &'static str,
+    capabilities: &PlatformCapabilities,
+) -> Result<(), Diagnostic> {
+    if windows_ownership_predicates_supported(capabilities) {
+        return Ok(());
+    }
+
+    Err(Diagnostic::unsupported(format!(
+        "{flag} is only supported on Windows"
+    )))
+}
+
 fn lower_expr(
     expr: Expr,
     traversal: &mut TraversalOptions,
@@ -608,12 +656,18 @@ fn lower_predicate(
             )))
         }
         Predicate::Uid(raw) => {
+            if let Some(error) = unsupported_windows_numeric_ownership("-uid", capabilities) {
+                return Err(error);
+            }
             require_platform_feature(capabilities, PlatformFeature::NumericOwnership, state)?;
             Ok(RuntimeExpr::Predicate(RuntimePredicate::Uid(
                 parse_numeric_argument("-uid", raw.as_os_str())?,
             )))
         }
         Predicate::Gid(raw) => {
+            if let Some(error) = unsupported_windows_numeric_ownership("-gid", capabilities) {
+                return Err(error);
+            }
             require_platform_feature(capabilities, PlatformFeature::NumericOwnership, state)?;
             Ok(RuntimeExpr::Predicate(RuntimePredicate::Gid(
                 parse_numeric_argument("-gid", raw.as_os_str())?,
@@ -631,15 +685,24 @@ fn lower_predicate(
                 resolve_group_principal(raw.as_os_str())?,
             )))
         }
-        Predicate::Owner(_) => Err(Diagnostic::unsupported(
-            "-owner is only supported on Windows",
-        )),
-        Predicate::OwnerSid(_) => Err(Diagnostic::unsupported(
-            "-owner-sid is only supported on Windows",
-        )),
-        Predicate::GroupSid(_) => Err(Diagnostic::unsupported(
-            "-group-sid is only supported on Windows",
-        )),
+        Predicate::Owner(raw) => {
+            require_windows_ownership_predicate("-owner", capabilities)?;
+            Ok(RuntimeExpr::Predicate(RuntimePredicate::User(
+                resolve_user_principal(raw.as_os_str())?,
+            )))
+        }
+        Predicate::OwnerSid(raw) => {
+            require_windows_ownership_predicate("-owner-sid", capabilities)?;
+            Ok(RuntimeExpr::Predicate(RuntimePredicate::User(
+                canonicalize_sid_principal(raw.as_os_str())?,
+            )))
+        }
+        Predicate::GroupSid(raw) => {
+            require_windows_ownership_predicate("-group-sid", capabilities)?;
+            Ok(RuntimeExpr::Predicate(RuntimePredicate::Group(
+                canonicalize_sid_principal(raw.as_os_str())?,
+            )))
+        }
         Predicate::NoUser => {
             require_platform_feature(capabilities, PlatformFeature::NamedOwnership, state)?;
             Ok(RuntimeExpr::Predicate(RuntimePredicate::NoUser))
@@ -964,6 +1027,8 @@ fn lower_action(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
+    use crate::account::PrincipalId;
     use crate::parser::parse_command;
     use crate::platform::{PlatformCapabilities, PlatformFeature, SupportLevel};
 
@@ -978,6 +1043,12 @@ mod tests {
             .with(PlatformFeature::BirthTime, SupportLevel::Exact)
             .with(PlatformFeature::NamedOwnership, SupportLevel::Exact)
             .with(PlatformFeature::NumericOwnership, SupportLevel::Exact)
+            .with(
+                PlatformFeature::WindowsOwnershipPredicates,
+                SupportLevel::Unsupported(
+                    "Windows ownership predicates are only supported on Windows",
+                ),
+            )
             .with(PlatformFeature::AccessPredicates, SupportLevel::Exact)
             .with(PlatformFeature::MessagesLocale, SupportLevel::Exact)
             .with(PlatformFeature::CaseInsensitiveGlob, SupportLevel::Exact)
@@ -994,6 +1065,10 @@ mod tests {
             .with(
                 PlatformFeature::NumericOwnership,
                 SupportLevel::Unsupported("numeric ownership is not supported on Windows"),
+            )
+            .with(
+                PlatformFeature::WindowsOwnershipPredicates,
+                SupportLevel::Exact,
             )
             .with(PlatformFeature::AccessPredicates, SupportLevel::Exact)
             .with(
@@ -1121,6 +1196,93 @@ mod tests {
     }
 
     #[test]
+    fn windows_uid_and_gid_diagnostics_suggest_sid_predicates() {
+        for (args, needle) in [
+            (
+                argv(&[".", "-uid", "0"]),
+                "-uid is not supported on Windows; use -owner-sid for SID matching",
+            ),
+            (
+                argv(&[".", "-gid", "0"]),
+                "-gid is not supported on Windows; use -group-sid for SID matching",
+            ),
+        ] {
+            let error = plan_command_with_now_and_capabilities(
+                parse_command(&args).unwrap(),
+                1,
+                Timestamp::new(0, 0),
+                &windows_like_caps(),
+            )
+            .unwrap_err();
+            assert!(
+                error.message.contains(needle),
+                "{args:?} -> {}",
+                error.message
+            );
+        }
+    }
+
+    #[test]
+    fn non_windows_rejects_windows_owner_predicates() {
+        for (args, needle) in [
+            (
+                argv(&[".", "-owner", "alice"]),
+                "-owner is only supported on Windows",
+            ),
+            (
+                argv(&[".", "-owner-sid", "S-1-5-18"]),
+                "-owner-sid is only supported on Windows",
+            ),
+            (
+                argv(&[".", "-group-sid", "S-1-5-32-544"]),
+                "-group-sid is only supported on Windows",
+            ),
+        ] {
+            let error = plan_command_with_now_and_capabilities(
+                parse_command(&args).unwrap(),
+                1,
+                Timestamp::new(0, 0),
+                &linux_like_caps(),
+            )
+            .unwrap_err();
+            assert!(
+                error.message.contains(needle),
+                "{args:?} -> {}",
+                error.message
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_owner_sid_predicates_lower_to_runtime_principals() {
+        let plan = plan_command_with_now_and_capabilities(
+            parse_command(&argv(&[
+                ".",
+                "-owner-sid",
+                "S-1-5-18",
+                "-group-sid",
+                "S-1-5-32-544",
+            ]))
+            .unwrap(),
+            1,
+            Timestamp::new(0, 0),
+            &windows_like_caps(),
+        )
+        .unwrap();
+
+        let predicates = predicate_items(&plan.expr);
+        assert!(predicates.iter().any(|predicate| matches!(
+            predicate,
+            RuntimePredicate::User(PrincipalId::Sid(value)) if value == "S-1-5-18"
+        )));
+        assert!(predicates.iter().any(|predicate| matches!(
+            predicate,
+            RuntimePredicate::Group(PrincipalId::Sid(value)) if value == "S-1-5-32-544"
+        )));
+    }
+
+    #[test]
     fn windows_accepts_ls_actions_with_the_native_renderer() {
         for (args, expected_file_outputs) in [
             (argv(&[".", "-ls"]), 0usize),
@@ -1188,5 +1350,20 @@ mod tests {
             crate::runtime_policy::CommitPolicy::RelaxedWithSubtreeBarriers
         );
         assert!(plan.traversal_control.is_none());
+    }
+
+    #[cfg(windows)]
+    fn predicate_items(expr: &RuntimeExpr) -> Vec<&RuntimePredicate> {
+        match expr {
+            RuntimeExpr::And(items) => items.iter().flat_map(predicate_items).collect(),
+            RuntimeExpr::Predicate(predicate) => vec![predicate],
+            RuntimeExpr::Or(left, right) => {
+                let mut items = predicate_items(left);
+                items.extend(predicate_items(right));
+                items
+            }
+            RuntimeExpr::Not(inner) => predicate_items(inner),
+            RuntimeExpr::Action(_) | RuntimeExpr::Barrier => Vec::new(),
+        }
     }
 }

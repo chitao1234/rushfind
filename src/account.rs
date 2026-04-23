@@ -18,6 +18,10 @@ pub fn resolve_group_id(raw: &OsStr) -> Result<PrincipalId, Diagnostic> {
     resolve_group_principal(raw)
 }
 
+pub fn canonicalize_sid_principal(raw: &OsStr) -> Result<PrincipalId, Diagnostic> {
+    crate::platform::accounts::backend().canonicalize_sid_principal(raw)
+}
+
 pub fn user_exists(principal: impl Into<PrincipalId>) -> Result<bool, Diagnostic> {
     let principal = principal.into();
     crate::platform::accounts::backend().user_exists(&principal)

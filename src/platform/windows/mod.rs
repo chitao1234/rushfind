@@ -22,6 +22,7 @@ pub(crate) static CAPABILITIES: PlatformCapabilities = PlatformCapabilities {
     reparse_type: SupportLevel::Exact,
     named_ownership: SupportLevel::Exact,
     numeric_ownership: SupportLevel::Unsupported("numeric ownership is not supported on Windows"),
+    windows_ownership_predicates: SupportLevel::Exact,
     access_predicates: SupportLevel::Exact,
     messages_locale: SupportLevel::Approximate(
         "interactive locale behavior is approximate on Windows",

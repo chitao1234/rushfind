@@ -5,6 +5,7 @@ use std::ffi::{OsStr, OsString};
 pub(crate) trait AccountBackend: Send + Sync {
     fn resolve_user_principal(&self, raw: &OsStr) -> Result<PlatformPrincipalId, Diagnostic>;
     fn resolve_group_principal(&self, raw: &OsStr) -> Result<PlatformPrincipalId, Diagnostic>;
+    fn canonicalize_sid_principal(&self, raw: &OsStr) -> Result<PlatformPrincipalId, Diagnostic>;
     fn user_exists(&self, principal: &PlatformPrincipalId) -> Result<bool, Diagnostic>;
     fn group_exists(&self, principal: &PlatformPrincipalId) -> Result<bool, Diagnostic>;
     fn user_name(&self, principal: &PlatformPrincipalId) -> Result<Option<OsString>, Diagnostic>;
@@ -66,6 +67,15 @@ mod imp {
                     1,
                 )),
             }
+        }
+
+        fn canonicalize_sid_principal(
+            &self,
+            _raw: &OsStr,
+        ) -> Result<PlatformPrincipalId, Diagnostic> {
+            Err(Diagnostic::unsupported(
+                "SID predicates are only supported on Windows",
+            ))
         }
 
         fn user_exists(&self, principal: &PlatformPrincipalId) -> Result<bool, Diagnostic> {

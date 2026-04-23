@@ -44,6 +44,10 @@ impl AccountBackend for WindowsAccountBackend {
         }
     }
 
+    fn canonicalize_sid_principal(&self, raw: &OsStr) -> Result<PlatformPrincipalId, Diagnostic> {
+        canonicalize_sid_principal(raw)
+    }
+
     fn user_exists(&self, principal: &PlatformPrincipalId) -> Result<bool, Diagnostic> {
         cached_name_for_principal(principal).map(|name| name.is_some())
     }
@@ -90,6 +94,15 @@ fn cached_name_for_principal(
     let value = lookup_name_for_sid(sid)?;
     cache.lock().unwrap().insert(sid.clone(), value.clone());
     Ok(value)
+}
+
+fn canonicalize_sid_principal(raw: &OsStr) -> Result<PlatformPrincipalId, Diagnostic> {
+    let sid_text = raw.to_string_lossy().into_owned();
+    let sid = OwnedLocalPointer::from_sid_string(&sid_text)
+        .map_err(|error| Diagnostic::new(format!("invalid SID `{sid_text}`: {error}"), 1))?;
+    let canonical = sid_to_string(sid.as_ptr())
+        .map_err(|error| Diagnostic::new(format!("invalid SID `{sid_text}`: {error}"), 1))?;
+    Ok(PlatformPrincipalId::Sid(canonical))
 }
 
 fn lookup_sid_for_name(raw: &OsStr) -> Result<Option<String>, Diagnostic> {
@@ -315,5 +328,24 @@ impl<T> Drop for OwnedLocalPointer<T> {
                 let _ = LocalFree(self.0.cast());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::canonicalize_sid_principal;
+    use crate::platform::filesystem::PlatformPrincipalId;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn canonicalize_sid_accepts_builtin_sid_text() {
+        let sid = canonicalize_sid_principal(OsStr::new("S-1-5-18")).unwrap();
+        assert_eq!(sid, PlatformPrincipalId::Sid("S-1-5-18".into()));
+    }
+
+    #[test]
+    fn canonicalize_sid_rejects_malformed_input() {
+        let error = canonicalize_sid_principal(OsStr::new("not-a-sid")).unwrap_err();
+        assert!(error.message.contains("invalid SID"));
     }
 }
