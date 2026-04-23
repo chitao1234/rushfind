@@ -12,6 +12,7 @@ pub struct CommandAst {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GlobalOption {
     Follow(FollowMode),
+    Version,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

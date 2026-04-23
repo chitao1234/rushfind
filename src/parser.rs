@@ -66,6 +66,8 @@ fn parse_global_option(arg: Arg<'_>) -> Option<GlobalOption> {
         Some(GlobalOption::Follow(FollowMode::CommandLineOnly))
     } else if arg.matches("-L") {
         Some(GlobalOption::Follow(FollowMode::Logical))
+    } else if arg.matches("-version") || arg.matches("--version") {
+        Some(GlobalOption::Version)
     } else {
         None
     }

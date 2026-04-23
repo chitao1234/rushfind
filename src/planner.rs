@@ -370,6 +370,7 @@ fn resolve_follow_mode(global_options: &[GlobalOption]) -> FollowMode {
         .iter()
         .fold(FollowMode::Physical, |_, option| match option {
             GlobalOption::Follow(next) => *next,
+            GlobalOption::Version => FollowMode::Physical,
         })
 }
 
