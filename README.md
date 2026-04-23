@@ -18,7 +18,8 @@ Find for the occupātus.
 - Read-only predicates: `-name`, `-iname`, `-path`, `-ipath`, `-type`, `-xtype`, `-true`,
   `-false`, `-fstype`
 - Identity/link predicates: `-samefile`, `-inum`, `-links`
-- Ownership/account predicates: `-uid`, `-gid`, `-user`, `-group`, `-nouser`, `-nogroup`
+- Ownership/account predicates: `-uid`, `-gid`, `-user`, `-group`, `-nouser`, `-nogroup`,
+  plus Windows-specific `-owner`, `-owner-sid`, and `-group-sid`
 - Permission/access predicates: `-perm`, `-readable`, `-writable`, `-executable`
 - Size/time predicates: `-size`, `-empty`, `-used`, `-mtime`, `-atime`, `-ctime`, `-mmin`,
   `-amin`, `-cmin`, `-newer`, `-anewer`, `-cnewer`, full read-only `-newerXY`, `-daystart`
@@ -110,12 +111,16 @@ Find for the occupātus.
 - On Windows, `-user`, `-group`, `-nouser`, `-nogroup`, `%u`, `%g`, `-readable`, `-writable`,
   `-executable`, `-fstype`, `-xdev`, `-mount`, `-ls`, `-fls`, and the `-exec*` / `-ok*` family
   use native Windows contracts.
+- On Windows, `-owner NAME`, `-owner-sid SID`, and `-group-sid SID` provide native ownership
+  matching. `-owner` matches the file owner by account name, while `-owner-sid` and
+  `-group-sid` match raw owner and group SIDs exactly.
 - `-flags` is cross-platform, symbolic-only, and accepts only the host-native flag names that
   the active build supports.
 - On Windows, `-reparse-type` classifies reparse points by semantic class such as `symbolic` and
   `mount-point`.
 - On Windows, `-uid`, `-gid`, `-perm`, `%U`, `%G`, `%m`, `%M`, `%D`, `%b`, and `%k` fail during
-  planning with explicit diagnostics.
+  planning with explicit diagnostics. When raw Windows principal matching is needed, use
+  `-owner-sid` or `-group-sid`.
 - On Windows, interactive locale handling and case-insensitive glob matching remain approximate
   and emit startup warnings when planned.
 
