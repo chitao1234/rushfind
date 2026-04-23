@@ -631,6 +631,15 @@ fn lower_predicate(
                 resolve_group_principal(raw.as_os_str())?,
             )))
         }
+        Predicate::Owner(_) => Err(Diagnostic::unsupported(
+            "-owner is only supported on Windows",
+        )),
+        Predicate::OwnerSid(_) => Err(Diagnostic::unsupported(
+            "-owner-sid is only supported on Windows",
+        )),
+        Predicate::GroupSid(_) => Err(Diagnostic::unsupported(
+            "-group-sid is only supported on Windows",
+        )),
         Predicate::NoUser => {
             require_platform_feature(capabilities, PlatformFeature::NamedOwnership, state)?;
             Ok(RuntimeExpr::Predicate(RuntimePredicate::NoUser))

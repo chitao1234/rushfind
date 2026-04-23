@@ -8,7 +8,22 @@ use support::argv;
 #[test]
 fn parses_metadata_ownership_predicates() {
     let ast = parse_command(&argv(&[
-        ".", "-uid", "+42", "-gid", "-2", "-user", "alice", "-group", "staff", "-nouser",
+        ".",
+        "-uid",
+        "+42",
+        "-gid",
+        "-2",
+        "-user",
+        "alice",
+        "-group",
+        "staff",
+        "-owner",
+        "alice",
+        "-owner-sid",
+        "S-1-5-18",
+        "-group-sid",
+        "S-1-5-32-544",
+        "-nouser",
         "-nogroup",
     ]))
     .unwrap();
@@ -23,6 +38,9 @@ fn parses_metadata_ownership_predicates() {
                 Expr::Predicate(Predicate::Gid("-2".into())),
                 Expr::Predicate(Predicate::User("alice".into())),
                 Expr::Predicate(Predicate::Group("staff".into())),
+                Expr::Predicate(Predicate::Owner("alice".into())),
+                Expr::Predicate(Predicate::OwnerSid("S-1-5-18".into())),
+                Expr::Predicate(Predicate::GroupSid("S-1-5-32-544".into())),
                 Expr::Predicate(Predicate::NoUser),
                 Expr::Predicate(Predicate::NoGroup),
             ]),
@@ -32,7 +50,15 @@ fn parses_metadata_ownership_predicates() {
 
 #[test]
 fn reports_missing_argument_for_metadata_ownership_predicates() {
-    for flag in ["-uid", "-gid", "-user", "-group"] {
+    for flag in [
+        "-uid",
+        "-gid",
+        "-user",
+        "-group",
+        "-owner",
+        "-owner-sid",
+        "-group-sid",
+    ] {
         let error = parse_command(&argv(&[".", flag])).unwrap_err();
         assert!(
             error
