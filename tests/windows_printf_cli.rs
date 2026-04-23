@@ -4,7 +4,9 @@ mod support;
 
 use std::fs;
 use std::time::Duration;
-use support::windows::escape_ls_rendered_path;
+use support::windows::{
+    escape_ls_rendered_path, file_group_sid, file_owner_sid, ownership_probe_available,
+};
 use support::{cargo_bin_output_with_timeout, path_arg};
 use tempfile::tempdir;
 
@@ -70,6 +72,38 @@ fn unix_shaped_printf_directives_are_rejected_on_windows() {
         let stderr = String::from_utf8(output.stderr).unwrap();
         assert!(stderr.contains(needle), "{format}: {stderr}");
     }
+}
+
+#[test]
+fn sid_printf_directives_render_explicit_owner_and_group_sids() {
+    if !ownership_probe_available() {
+        eprintln!("skipping Windows printf SID test: security descriptor query unavailable");
+        return;
+    }
+
+    let root = tempdir().unwrap();
+    let file = root.path().join("alpha.txt");
+    fs::write(&file, b"alpha").unwrap();
+    let owner_sid = file_owner_sid(&file);
+    let group_sid = file_group_sid(&file);
+
+    let output = cargo_bin_output_with_timeout(
+        &[
+            path_arg(file.as_path()),
+            "-maxdepth".into(),
+            "0".into(),
+            "-printf".into(),
+            "[%US][%GS]\\n".into(),
+        ],
+        1,
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        format!("[{owner_sid}][{group_sid}]\n"),
+    );
 }
 
 #[test]
