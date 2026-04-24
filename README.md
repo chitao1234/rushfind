@@ -95,6 +95,7 @@ Find for the occupātus.
 - Linux remains the reference platform and keeps the strongest GNU compatibility coverage.
 - macOS, FreeBSD, NetBSD, OpenBSD, and DragonFly BSD are supported through alternate Unix-family
   backends for filesystem, account, and locale behavior.
+- illumos, Solaris, and Haiku are supported in the first generic Unix fallback tier.
 - Native Windows is supported through a Windows backend for filesystem, account, locale, path,
   and access behavior.
 - macOS CI uses a cached source build of pinned GNU findutils revisions so GNU differential
@@ -106,6 +107,13 @@ Find for the occupātus.
   emits a startup warning when planned.
 - During the initial macOS port, case-insensitive glob matching may still differ outside the C
   locale and emits a startup warning when planned.
+- The generic Unix tier keeps `-xdev` / `-mount`, ownership predicates, access predicates, mode
+  bits, `-ls`, and the common print / exec surfaces working through shared Unix code.
+- The generic Unix tier does not claim GNU differential parity.
+- On the generic Unix tier, `-fstype`, `%F`, `-flags`, and birth-time predicates / `%B*` fail
+  during planning with explicit diagnostics instead of panicking.
+- On the generic Unix tier, interactive locale handling and case-insensitive glob matching remain
+  approximate and emit startup warnings when planned.
 - On Windows, name and path matching accept both `/` and `\` as separators, and displayed paths
   render with backslashes.
 - On Windows, `-user`, `-group`, `-nouser`, `-nogroup`, `%u`, `%g`, `%US`, `%GS`, `-readable`,
@@ -138,11 +146,12 @@ The minimum supported Rust version is 1.85.0.
 ```bash
 cargo build
 bash scripts/check_unix_portability_surface.sh target/debug/rfd
+bash scripts/check_generic_unix_target_builds.sh
 ```
 
-The script exercises `-print`, `-print0`, `-fstype`, birth-time reads, `-xdev`, ownership/access
-rendering, `-ls`, and `-execdir`. It also prints the locale-sensitive `-ok` commands to run
-manually on the target host.
+The Unix-family smoke harness exercises `-version`, `-print`, `-print0`, optional `-fstype`
+and birth-time probes, `-xdev`, ownership/access rendering, `-ls`, and `-execdir`. It also prints
+the locale-sensitive `-ok` commands to run manually on the target host.
 
 For a non-Windows preflight of the Windows code path, use:
 
