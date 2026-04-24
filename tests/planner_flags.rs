@@ -19,14 +19,20 @@ fn lowers_supported_flags_operand_on_this_host() {
     )) {
         "+uchg,noarch"
     } else {
-        let error = plan_command(parse_command(&argv(&[".", "-flags", "+uchg,noarch"])).unwrap(), 1)
-            .unwrap_err();
+        let error = plan_command(
+            parse_command(&argv(&[".", "-flags", "+uchg,noarch"])).unwrap(),
+            1,
+        )
+        .unwrap_err();
         assert!(error.message.contains("not supported"));
         return;
     };
 
-    let plan = plan_command(parse_command(&argv(&[".", "-flags", supported_raw])).unwrap(), 1)
-        .unwrap();
+    let plan = plan_command(
+        parse_command(&argv(&[".", "-flags", supported_raw])).unwrap(),
+        1,
+    )
+    .unwrap();
     assert!(contains_flags_predicate(&plan.expr));
 }
 
@@ -45,15 +51,20 @@ fn rejects_contradictory_flags_conditions() {
     )) {
         "uchg,nouchg"
     } else {
-        let error = plan_command(parse_command(&argv(&[".", "-flags", "uchg,nouchg"])).unwrap(), 1)
-            .unwrap_err();
+        let error = plan_command(
+            parse_command(&argv(&[".", "-flags", "uchg,nouchg"])).unwrap(),
+            1,
+        )
+        .unwrap_err();
         assert!(error.message.contains("not supported"));
         return;
     };
 
-    let error =
-        plan_command(parse_command(&argv(&[".", "-flags", contradictory_raw])).unwrap(), 1)
-            .unwrap_err();
+    let error = plan_command(
+        parse_command(&argv(&[".", "-flags", contradictory_raw])).unwrap(),
+        1,
+    )
+    .unwrap_err();
     assert!(error.message.contains("contradict"));
 }
 
