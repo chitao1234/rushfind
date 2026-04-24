@@ -299,8 +299,13 @@ fn lowers_expanded_literal_t_references_for_non_birth_newerxy() {
 
 #[test]
 fn stage9_supports_birth_and_literal_reference_forms() {
+    let literal_flag = if cfg!(any(target_os = "solaris", target_os = "illumos")) {
+        "-newermt"
+    } else {
+        "-newerBt"
+    };
     let literal = plan_command(
-        parse_command(&argv(&[".", "-newerBt", "@1700000000.5"])).unwrap(),
+        parse_command(&argv(&[".", literal_flag, "@1700000000.5"])).unwrap(),
         1,
     )
     .unwrap();
@@ -310,9 +315,13 @@ fn stage9_supports_birth_and_literal_reference_forms() {
             .any(|predicate| matches!(
                 predicate,
                 RuntimePredicate::Newer(NewerMatcher {
-                    current: TimestampKind::Birth,
+                    current,
                     reference,
-                }) if reference == Timestamp::new(1_700_000_000, 500_000_000)
+                }) if current == if cfg!(any(target_os = "solaris", target_os = "illumos")) {
+                    TimestampKind::Modification
+                } else {
+                    TimestampKind::Birth
+                } && reference == Timestamp::new(1_700_000_000, 500_000_000)
             ))
     );
 
@@ -362,10 +371,16 @@ fn stage9_supports_birth_and_literal_reference_forms() {
 
 #[test]
 fn rejects_invalid_current_t_and_unsupported_literal_forms() {
+    let literal_flag = if cfg!(any(target_os = "solaris", target_os = "illumos")) {
+        "-newermt"
+    } else {
+        "-newerBt"
+    };
+
     for (flag, arg) in [
         ("-newertm", "ref"),
-        ("-newerBt", "yesterday"),
-        ("-newerBt", "2026-04"),
+        (literal_flag, "yesterday"),
+        (literal_flag, "2026-04"),
     ] {
         let error = plan_command(parse_command(&argv(&[".", flag, arg])).unwrap(), 1).unwrap_err();
         assert!(

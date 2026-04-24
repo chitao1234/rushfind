@@ -126,7 +126,7 @@ fn ordered_printf_unknown_escapes_warn_per_occurrence_and_render_literally() {
     let root = tempdir().unwrap();
     fs::write(root.path().join("file.txt"), "x").unwrap();
 
-    let output = cargo_bin_output_with_timeout(
+    let output = cargo_bin_output_with_env_timeout(
         &[
             path_arg(root.path().join("file.txt").as_path()),
             "-maxdepth".into(),
@@ -135,6 +135,7 @@ fn ordered_printf_unknown_escapes_warn_per_occurrence_and_render_literally() {
             "X\\qY\\xZ".into(),
         ],
         1,
+        &[("RUSHFIND_WARNINGS", "on")],
         Duration::from_secs(5),
     );
 
@@ -149,7 +150,7 @@ fn ordered_printf_unknown_escape_warnings_are_emitted_even_when_no_entries_match
     let root = tempdir().unwrap();
     fs::write(root.path().join("file.txt"), "x").unwrap();
 
-    let output = cargo_bin_output_with_timeout(
+    let output = cargo_bin_output_with_env_timeout(
         &[
             path_arg(root.path()),
             "-maxdepth".into(),
@@ -160,6 +161,7 @@ fn ordered_printf_unknown_escape_warnings_are_emitted_even_when_no_entries_match
             "X\\q".into(),
         ],
         1,
+        &[("RUSHFIND_WARNINGS", "on")],
         Duration::from_secs(5),
     );
 

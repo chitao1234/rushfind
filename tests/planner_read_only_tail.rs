@@ -33,6 +33,12 @@ fn lowers_empty_and_used_predicates() {
 
 #[test]
 fn lowers_supported_birth_and_literal_newerxy_forms() {
+    let literal_flag = if cfg!(any(target_os = "solaris", target_os = "illumos")) {
+        "-newermt"
+    } else {
+        "-newerBt"
+    };
+
     for raw in [
         "@1700000000.25",
         "2026-04-15",
@@ -46,8 +52,8 @@ fn lowers_supported_birth_and_literal_newerxy_forms() {
         "2026-04-15T12:34:56+08:00",
     ] {
         let expected = parse_literal_time(OsStr::new(raw)).unwrap();
-        let literal =
-            plan_command(parse_command(&argv(&[".", "-newerBt", raw])).unwrap(), 1).unwrap();
+        let literal = plan_command(parse_command(&argv(&[".", literal_flag, raw])).unwrap(), 1)
+            .unwrap();
 
         assert!(
             predicate_items(&literal.expr)
@@ -55,12 +61,20 @@ fn lowers_supported_birth_and_literal_newerxy_forms() {
                 .any(|predicate| matches!(
                     predicate,
                     RuntimePredicate::Newer(NewerMatcher {
-                        current: TimestampKind::Birth,
+                        current,
                         reference,
-                    }) if *reference == expected
+                    }) if *current == if literal_flag == "-newerBt" {
+                        TimestampKind::Birth
+                    } else {
+                        TimestampKind::Modification
+                    } && *reference == expected
                 )),
             "{raw}"
         );
+    }
+
+    if cfg!(any(target_os = "solaris", target_os = "illumos")) {
+        return;
     }
 
     let root = tempdir().unwrap();
@@ -91,16 +105,22 @@ fn lowers_supported_birth_and_literal_newerxy_forms() {
 
 #[test]
 fn rejects_invalid_current_t_and_unsupported_literal_forms() {
+    let literal_flag = if cfg!(any(target_os = "solaris", target_os = "illumos")) {
+        "-newermt"
+    } else {
+        "-newerBt"
+    };
+
     for (flag, arg) in [
         ("-newertm", "ref"),
-        ("-newerBt", "yesterday"),
-        ("-newerBt", "2026-04"),
-        ("-newerBt", "2026-04-15T12:34.5"),
-        ("-newerBt", "2026-04-15T1234"),
-        ("-newerBt", "202604151234"),
-        ("-newerBt", "20260415 123456"),
-        ("-newerBt", "20260415T12:34Z"),
-        ("-newerBt", "20260415T12:34:56+08:00"),
+        (literal_flag, "yesterday"),
+        (literal_flag, "2026-04"),
+        (literal_flag, "2026-04-15T12:34.5"),
+        (literal_flag, "2026-04-15T1234"),
+        (literal_flag, "202604151234"),
+        (literal_flag, "20260415 123456"),
+        (literal_flag, "20260415T12:34Z"),
+        (literal_flag, "20260415T12:34:56+08:00"),
     ] {
         let error = plan_command(parse_command(&argv(&[".", flag, arg])).unwrap(), 1).unwrap_err();
         assert!(

@@ -6,29 +6,54 @@ use support::argv;
 
 #[test]
 fn lowers_supported_flags_operand_on_this_host() {
-    let raw = if cfg!(windows) {
+    let supported_raw = if cfg!(windows) {
         "+readonly,nosystem"
     } else if cfg!(target_os = "linux") {
         "+immutable,noappend"
-    } else {
+    } else if cfg!(any(
+        target_os = "macos",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "dragonfly"
+    )) {
         "+uchg,noarch"
+    } else {
+        let error = plan_command(parse_command(&argv(&[".", "-flags", "+uchg,noarch"])).unwrap(), 1)
+            .unwrap_err();
+        assert!(error.message.contains("not supported"));
+        return;
     };
 
-    let plan = plan_command(parse_command(&argv(&[".", "-flags", raw])).unwrap(), 1).unwrap();
+    let plan = plan_command(parse_command(&argv(&[".", "-flags", supported_raw])).unwrap(), 1)
+        .unwrap();
     assert!(contains_flags_predicate(&plan.expr));
 }
 
 #[test]
 fn rejects_contradictory_flags_conditions() {
-    let raw = if cfg!(windows) {
+    let contradictory_raw = if cfg!(windows) {
         "readonly,noreadonly"
     } else if cfg!(target_os = "linux") {
         "immutable,noimmutable"
-    } else {
+    } else if cfg!(any(
+        target_os = "macos",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "dragonfly"
+    )) {
         "uchg,nouchg"
+    } else {
+        let error = plan_command(parse_command(&argv(&[".", "-flags", "uchg,nouchg"])).unwrap(), 1)
+            .unwrap_err();
+        assert!(error.message.contains("not supported"));
+        return;
     };
 
-    let error = plan_command(parse_command(&argv(&[".", "-flags", raw])).unwrap(), 1).unwrap_err();
+    let error =
+        plan_command(parse_command(&argv(&[".", "-flags", contradictory_raw])).unwrap(), 1)
+            .unwrap_err();
     assert!(error.message.contains("contradict"));
 }
 
