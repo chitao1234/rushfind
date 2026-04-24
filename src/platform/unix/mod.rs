@@ -6,6 +6,19 @@ use crate::time::Timestamp;
 use std::io;
 use std::path::Path;
 
+#[cfg(any(
+    test,
+    not(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "dragonfly"
+    ))
+))]
+pub(crate) mod generic;
+
 #[cfg(target_os = "linux")]
 pub(crate) mod linux;
 #[cfg(target_os = "linux")]
@@ -36,48 +49,7 @@ use self::bsd as backend;
     target_os = "openbsd",
     target_os = "dragonfly"
 )))]
-mod backend {
-    use super::*;
-
-    fn unsupported() -> ! {
-        panic!("unix-family phase 1 only supports Linux, macOS, and BSD backends")
-    }
-
-    pub(crate) fn active_capabilities() -> &'static PlatformCapabilities {
-        unsupported()
-    }
-
-    pub(crate) fn active_flag_specs() -> &'static [FlagSpec] {
-        unsupported()
-    }
-
-    pub(crate) fn printf_zero_pads_string_fields() -> bool {
-        unsupported()
-    }
-
-    pub(crate) fn used_requires_strict_atime_after_ctime() -> bool {
-        unsupported()
-    }
-
-    pub(crate) fn filesystem_snapshot() -> Result<FilesystemSnapshot, Diagnostic> {
-        unsupported()
-    }
-
-    pub(crate) fn filesystem_key(_path: &Path, _follow: bool) -> io::Result<FilesystemKey> {
-        unsupported()
-    }
-
-    pub(crate) fn read_file_flags(_path: &Path, _follow: bool) -> io::Result<Option<u64>> {
-        unsupported()
-    }
-
-    pub(crate) fn read_birth_time(
-        _path: &Path,
-        _follow: bool,
-    ) -> Result<Option<Timestamp>, Diagnostic> {
-        unsupported()
-    }
-}
+use self::generic as backend;
 
 pub(crate) fn active_capabilities() -> &'static PlatformCapabilities {
     backend::active_capabilities()
