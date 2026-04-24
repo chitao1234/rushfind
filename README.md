@@ -153,6 +153,24 @@ The Unix-family smoke harness exercises `-version`, `-print`, `-print0`, optiona
 and birth-time probes, `-xdev`, ownership/access rendering, `-ls`, and `-execdir`. It also prints
 the locale-sensitive `-ok` commands to run manually on the target host.
 
+For a compile-only generic Unix preflight from a development host, use:
+
+```bash
+bash scripts/check_generic_unix_target_builds.sh
+```
+
+The default target list is:
+
+- `x86_64-unknown-illumos`
+- `x86_64-pc-solaris`
+- `x86_64-unknown-haiku`
+
+The helper skips targets whose `rust-std` component is not shipped by the selected toolchain, or
+whose target C toolchain is not configured for `pcre2-sys`. On this Linux-host cross-preflight
+path, that currently means Haiku may need native-host validation because Rust 1.85 does not ship
+its `rust-std`, while illumos and Solaris may need explicit cross-compiler setup before the helper
+can exercise them from Linux.
+
 For a non-Windows preflight of the Windows code path, use:
 
 ```bash
