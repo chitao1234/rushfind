@@ -425,6 +425,7 @@ name = "rushfind"
 version = "0.1.1-dev"
 dependencies = [
  "assert_cmd",
+ "cc",
  "crossbeam-channel",
  "crossbeam-deque",
  "libc",

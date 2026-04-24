@@ -3,8 +3,6 @@
 use crate::diagnostics::Diagnostic;
 use crate::printf::PrintfTimeSelector;
 use crate::time::Timestamp;
-#[cfg(unix)]
-use std::ffi::CStr;
 use std::mem::MaybeUninit;
 
 const WEEKDAYS_ABBR: [&[u8]; 7] = [b"Sun", b"Mon", b"Tue", b"Wed", b"Thu", b"Fri", b"Sat"];
@@ -116,11 +114,7 @@ fn tm_from_parts(
     local.tm_wday = weekday;
     local.tm_yday = yearday - 1;
     local.tm_isdst = is_dst;
-    #[cfg(unix)]
-    {
-        local.tm_gmtoff = _utc_offset_seconds as libc::c_long;
-        local.tm_zone = std::ptr::null_mut::<libc::c_char>() as _;
-    }
+    let _ = _utc_offset_seconds;
     local
 }
 
@@ -156,7 +150,9 @@ fn local_time(seconds: i64) -> Result<libc::tm, Diagnostic> {
 
 #[cfg(unix)]
 fn utc_offset_seconds(local: &libc::tm) -> i32 {
-    local.tm_gmtoff as i32
+    strftime_bytes(local, b"%z\0")
+        .and_then(|bytes| parse_numeric_utc_offset(&bytes))
+        .unwrap_or(0)
 }
 
 #[cfg(windows)]
@@ -270,6 +266,59 @@ fn render_numeric_offset(offset_seconds: i32) -> Vec<u8> {
     let hours = absolute / 3600;
     let minutes = (absolute % 3600) / 60;
     format!("{sign}{hours:02}{minutes:02}").into_bytes()
+}
+
+#[cfg(unix)]
+fn strftime_bytes(local: &libc::tm, format: &[u8]) -> Option<Vec<u8>> {
+    debug_assert_eq!(format.last(), Some(&0));
+
+    let mut capacity = 32usize;
+    while capacity <= 1024 {
+        let mut buffer = vec![0u8; capacity];
+        let written = unsafe {
+            libc::strftime(
+                buffer.as_mut_ptr().cast(),
+                buffer.len(),
+                format.as_ptr().cast(),
+                local,
+            )
+        };
+        if written != 0 {
+            buffer.truncate(written);
+            return Some(buffer);
+        }
+        capacity *= 2;
+    }
+
+    None
+}
+
+#[cfg(unix)]
+fn parse_numeric_utc_offset(bytes: &[u8]) -> Option<i32> {
+    let (sign, digits) = match bytes.split_first()? {
+        (b'+', digits) => (1, digits),
+        (b'-', digits) => (-1, digits),
+        _ => return None,
+    };
+
+    let (hours, minutes) = match digits {
+        [h1, h2, m1, m2] => ([*h1, *h2], [*m1, *m2]),
+        [h1, h2, b':', m1, m2] => ([*h1, *h2], [*m1, *m2]),
+        _ => return None,
+    };
+
+    let hours = parse_two_ascii_digits(hours)?;
+    let minutes = parse_two_ascii_digits(minutes)?;
+    Some(sign * (hours * 3600 + minutes * 60))
+}
+
+#[cfg(unix)]
+fn parse_two_ascii_digits(bytes: [u8; 2]) -> Option<i32> {
+    if !bytes.into_iter().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+
+    Some(((bytes[0] - b'0') as i32 * 10) + (bytes[1] - b'0') as i32)
 }
 
 fn render_c_locale_datetime(parts: &ResolvedTimeParts) -> Vec<u8> {
@@ -388,17 +437,15 @@ fn timezone_name_bytes(local: &libc::tm) -> Vec<u8> {
 
     #[cfg(unix)]
     {
-        if local.tm_zone.is_null() {
-            return Vec::new();
-        }
-
-        unsafe { CStr::from_ptr(local.tm_zone) }.to_bytes().to_vec()
+        strftime_bytes(local, b"%Z\0").unwrap_or_default()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ResolvedTimeParts, render_full_time_bytes, render_selector_bytes};
+    use super::{
+        ResolvedTimeParts, parse_numeric_utc_offset, render_full_time_bytes, render_selector_bytes,
+    };
     use crate::printf::PrintfTimeSelector;
     use crate::time::Timestamp;
 
@@ -465,5 +512,14 @@ mod tests {
             render_full_time_bytes(&parts).unwrap(),
             b"Mon Mar  4 13:06:07.1234567890 2024"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn parses_numeric_utc_offsets_from_strftime_forms() {
+        assert_eq!(parse_numeric_utc_offset(b"+0800"), Some(8 * 3600));
+        assert_eq!(parse_numeric_utc_offset(b"-0130"), Some(-(3600 + 30 * 60)));
+        assert_eq!(parse_numeric_utc_offset(b"+08:00"), Some(8 * 3600));
+        assert_eq!(parse_numeric_utc_offset(b"UTC"), None);
     }
 }

@@ -2,11 +2,9 @@
 
 mod support;
 
-use assert_cmd::cargo::CommandCargoExt;
 use std::fs;
 use std::os::unix::fs as unix_fs;
-use std::process::Command;
-use support::{gnu_find_output, path_arg};
+use support::{gnu_find_output, path_arg, rushfind_command};
 use tempfile::tempdir;
 
 #[test]
@@ -26,8 +24,7 @@ fn logical_mode_descends_through_symlinked_directories() {
     let Some(expected) = gnu_find_output(&args, false) else {
         return;
     };
-    let actual = Command::cargo_bin("rfd")
-        .unwrap()
+    let actual = rushfind_command()
         .env("RUSHFIND_WORKERS", "1")
         .args(&args)
         .output()
@@ -55,8 +52,7 @@ fn command_line_only_mode_follows_symlinked_start_paths() {
     let Some(expected) = gnu_find_output(&args, false) else {
         return;
     };
-    let actual = Command::cargo_bin("rfd")
-        .unwrap()
+    let actual = rushfind_command()
         .env("RUSHFIND_WORKERS", "1")
         .args(&args)
         .output()

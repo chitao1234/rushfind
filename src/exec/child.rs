@@ -40,9 +40,7 @@ pub(crate) fn run_prepared_inherited<E: Write>(
 
     let mut command = Command::new(program);
     command.args(&command_spec.argv[1..]);
-    if let Some(cwd) = command_spec.cwd.as_ref() {
-        command.current_dir(cwd);
-    }
+    apply_command_cwd(&mut command, command_spec.cwd.as_deref());
     command.stdin(Stdio::inherit());
     command.stdout(Stdio::inherit());
     command.stderr(Stdio::inherit());
@@ -93,9 +91,7 @@ fn run_parallel_command(
 
     let mut command = Command::new(program);
     command.args(&command_spec.argv[1..]);
-    if let Some(cwd) = command_spec.cwd.as_ref() {
-        command.current_dir(cwd);
-    }
+    apply_command_cwd(&mut command, command_spec.cwd.as_deref());
     command.stdin(Stdio::null());
     command.stdout(Stdio::piped());
     command.stderr(Stdio::piped());
@@ -139,6 +135,14 @@ fn run_parallel_command(
     }
 
     Ok(status.success())
+}
+
+fn apply_command_cwd(command: &mut Command, cwd: Option<&Path>) {
+    let Some(cwd) = cwd else {
+        return;
+    };
+
+    command.current_dir(cwd);
 }
 
 fn read_child_pipe<R: Read>(mut reader: R, threshold: usize) -> io::Result<Vec<u8>> {

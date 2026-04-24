@@ -424,9 +424,7 @@ fn validate_platform_printf_program(
             | PrintfDirectiveKind::TimestampPart {
                 family: PrintfTimeFamily::Birth,
                 ..
-            } => {
-                require_platform_feature(capabilities, PlatformFeature::BirthTime, state)?;
-            }
+            } => {}
             PrintfDirectiveKind::Device
             | PrintfDirectiveKind::Blocks512
             | PrintfDirectiveKind::Blocks1024 => {
@@ -1186,14 +1184,7 @@ mod tests {
     fn generic_unix_warns_for_iname_and_ok() {
         let plan = plan_command_with_now_and_capabilities(
             parse_command(&argv(&[
-                ".",
-                "-iname",
-                "*.rs",
-                "-ok",
-                "printf",
-                "%s\\n",
-                "{}",
-                ";",
+                ".", "-iname", "*.rs", "-ok", "printf", "%s\\n", "{}", ";",
             ]))
             .unwrap(),
             1,
@@ -1203,12 +1194,16 @@ mod tests {
         .unwrap();
 
         assert!(plan.runtime.messages_locale_required);
-        assert!(plan.startup_warnings.iter().any(|warning| {
-            warning.contains("case-insensitive glob matching may differ")
-        }));
-        assert!(plan.startup_warnings.iter().any(|warning| {
-            warning.contains("interactive locale behavior is approximate")
-        }));
+        assert!(
+            plan.startup_warnings
+                .iter()
+                .any(|warning| { warning.contains("case-insensitive glob matching may differ") })
+        );
+        assert!(
+            plan.startup_warnings
+                .iter()
+                .any(|warning| { warning.contains("interactive locale behavior is approximate") })
+        );
     }
 
     #[test]
@@ -1218,7 +1213,6 @@ mod tests {
             argv(&[".", "-flags", "nodump"]),
             argv(&[".", "-newerBt", "2024-01-01"]),
             argv(&[".", "-printf", "%F\\n"]),
-            argv(&[".", "-printf", "%B@\\n"]),
         ] {
             let error = plan_command_with_now_and_capabilities(
                 parse_command(&args).unwrap(),
@@ -1234,6 +1228,22 @@ mod tests {
                 error.message
             );
         }
+    }
+
+    #[test]
+    fn generic_unix_allows_birth_time_printf_directives_to_render_empty() {
+        let plan = plan_command_with_now_and_capabilities(
+            parse_command(&argv(&[".", "-printf", "%B@\\n"])).unwrap(),
+            1,
+            Timestamp::new(0, 0),
+            &generic_unix_caps(),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            plan.expr,
+            RuntimeExpr::Action(RuntimeAction::Printf(_))
+        ));
     }
 
     #[test]

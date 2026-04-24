@@ -2,7 +2,6 @@
 
 mod support;
 
-use assert_cmd::cargo::CommandCargoExt;
 use rushfind::birth::read_birth_time;
 use rushfind::time::Timestamp;
 use std::collections::BTreeSet;
@@ -20,7 +19,7 @@ use support::{
     assert_matches_gnu_as_sets_with_env, assert_matches_gnu_exact,
     assert_matches_gnu_exact_with_env, assert_matches_gnu_exact_with_input,
     assert_matches_gnu_regex_outcome, assert_matches_gnu_regex_outcome_as_sets, gnu_find_command,
-    gnu_find_output, lines, normalize_warning_program, path_arg,
+    gnu_find_output, lines, normalize_warning_program, path_arg, rushfind_command,
 };
 use tempfile::tempdir;
 
@@ -445,8 +444,7 @@ fn assert_newermt_literal_rejection_matches_gnu(root: &Path, raw: &str) {
         return;
     };
 
-    let actual = Command::cargo_bin("rfd")
-        .unwrap()
+    let actual = rushfind_command()
         .env("RUSHFIND_WORKERS", "1")
         .env("LC_ALL", "C")
         .env("TZ", PRINTF_TIME_TZ)
@@ -655,8 +653,7 @@ fn gnu_ok_plus_is_rejected() {
     let Some(expected) = gnu_find_output(&args, true) else {
         return;
     };
-    let actual = Command::cargo_bin("rfd")
-        .unwrap()
+    let actual = rushfind_command()
         .env("RUSHFIND_WORKERS", "1")
         .env("LC_ALL", "C")
         .args(&args)
@@ -691,8 +688,7 @@ fn unsafe_execdir_path_rejection_matches_gnu_semantics() {
             .args(&args)
             .output()
             .unwrap();
-        let actual = Command::cargo_bin("rfd")
-            .unwrap()
+        let actual = rushfind_command()
             .env("RUSHFIND_WORKERS", "1")
             .env("PATH", ".:/usr/bin:/bin")
             .args(&args)
@@ -820,8 +816,7 @@ fn fprint0_matches_gnu_for_successful_ordered_runs() {
 
 #[test]
 fn reports_parse_errors_nonzero() {
-    let output = Command::cargo_bin("rfd")
-        .unwrap()
+    let output = rushfind_command()
         .args(["(", "-name", "*.rs"])
         .output()
         .unwrap();
@@ -848,8 +843,8 @@ fn ordered_mode_matches_gnu_find_exactly() {
     let Some(expected) = gnu_find_output(&args, false) else {
         return;
     };
-    let actual = Command::cargo_bin("rfd")
-        .unwrap()
+    let actual = rushfind_command()
+        .env("RUSHFIND_WARNINGS", "on")
         .env("RUSHFIND_WORKERS", "1")
         .args(&args)
         .output()
@@ -914,8 +909,7 @@ fn ordered_delete_matches_gnu_output_exit_and_resulting_state() {
     let Some(expected_output) = gnu_find_output(&args_expected, false) else {
         return;
     };
-    let actual_output = Command::cargo_bin("rfd")
-        .unwrap()
+    let actual_output = rushfind_command()
         .env("RUSHFIND_WORKERS", "1")
         .args(&args_actual)
         .output()
@@ -978,8 +972,7 @@ fn parallel_mode_matches_gnu_find_as_a_set() {
     let Some(expected) = gnu_find_output(&args, false) else {
         return;
     };
-    let actual = Command::cargo_bin("rfd")
-        .unwrap()
+    let actual = rushfind_command()
         .env("RUSHFIND_WORKERS", "4")
         .args(&args)
         .output()
@@ -1137,8 +1130,8 @@ fn ordered_printf_unknown_escape_warnings_match_gnu_with_normalized_program_name
     let Some(expected) = gnu_find_output(&args, false) else {
         return;
     };
-    let actual = Command::cargo_bin("rfd")
-        .unwrap()
+    let actual = rushfind_command()
+        .env("RUSHFIND_WARNINGS", "on")
         .env("RUSHFIND_WORKERS", "1")
         .args(&args)
         .output()
@@ -1166,8 +1159,8 @@ fn ordered_printf_unknown_escape_warnings_match_gnu_for_zero_match_runs() {
     let Some(expected) = gnu_find_output(&args, false) else {
         return;
     };
-    let actual = Command::cargo_bin("rfd")
-        .unwrap()
+    let actual = rushfind_command()
+        .env("RUSHFIND_WARNINGS", "on")
         .env("RUSHFIND_WORKERS", "1")
         .args(&args)
         .output()
@@ -1313,8 +1306,7 @@ fn ordered_printf_birth_time_renders_empty_fields_when_unavailable() {
         return;
     };
 
-    let output = Command::cargo_bin("rfd")
-        .unwrap()
+    let output = rushfind_command()
         .env("RUSHFIND_WORKERS", "1")
         .env("LC_ALL", "C")
         .env("TZ", PRINTF_TIME_TZ)
@@ -1340,8 +1332,7 @@ fn ordered_printf_birth_time_renders_linux_birth_data_when_available() {
         return;
     }
 
-    let output = Command::cargo_bin("rfd")
-        .unwrap()
+    let output = rushfind_command()
         .env("RUSHFIND_WORKERS", "1")
         .env("LC_ALL", "C")
         .env("TZ", PRINTF_TIME_TZ)
@@ -1489,9 +1480,9 @@ fn ordered_follow_modes_match_gnu_find_exactly() {
         let Some(expected) = gnu_find_output(&args, false) else {
             return;
         };
-        let actual = Command::cargo_bin("rfd")
-            .unwrap()
+        let actual = rushfind_command()
             .env("RUSHFIND_WORKERS", "1")
+            .env("RUSHFIND_WARNINGS", "off")
             .args(&args)
             .output()
             .unwrap();
@@ -1521,8 +1512,7 @@ fn ordered_alias_preservation_matches_gnu_find_exactly() {
     let Some(expected) = gnu_find_output(&args, false) else {
         return;
     };
-    let actual = Command::cargo_bin("rfd")
-        .unwrap()
+    let actual = rushfind_command()
         .env("RUSHFIND_WORKERS", "1")
         .args(&args)
         .output()
@@ -1582,8 +1572,7 @@ fn parallel_follow_modes_match_gnu_find_as_sets() {
     let Some(expected) = gnu_find_output(&args, false) else {
         return;
     };
-    let actual = Command::cargo_bin("rfd")
-        .unwrap()
+    let actual = rushfind_command()
         .env("RUSHFIND_WORKERS", "4")
         .args(&args)
         .output()
@@ -1612,8 +1601,7 @@ fn parallel_alias_preservation_matches_gnu_find_as_sets() {
     let Some(expected) = gnu_find_output(&args, false) else {
         return;
     };
-    let actual = Command::cargo_bin("rfd")
-        .unwrap()
+    let actual = rushfind_command()
         .env("RUSHFIND_WORKERS", "4")
         .args(&args)
         .output()
@@ -1662,8 +1650,7 @@ fn ordered_family_a_matches_gnu_find_exactly() {
         let Some(expected) = gnu_find_output(&args, false) else {
             return;
         };
-        let actual = Command::cargo_bin("rfd")
-            .unwrap()
+        let actual = rushfind_command()
             .env("RUSHFIND_WORKERS", "1")
             .args(&args)
             .output()
@@ -1707,9 +1694,9 @@ fn parallel_family_a_matches_gnu_find_as_sets() {
         let Some(expected) = gnu_find_output(&args, false) else {
             return;
         };
-        let actual = Command::cargo_bin("rfd")
-            .unwrap()
+        let actual = rushfind_command()
             .env("RUSHFIND_WORKERS", "4")
+            .env("RUSHFIND_WARNINGS", "off")
             .args(&args)
             .output()
             .unwrap();
@@ -1792,8 +1779,7 @@ fn ordered_metadata_ownership_matches_gnu_find_exactly() {
         let Some(expected) = gnu_find_output(&args, false) else {
             return;
         };
-        let actual = Command::cargo_bin("rfd")
-            .unwrap()
+        let actual = rushfind_command()
             .env("RUSHFIND_WORKERS", "1")
             .args(&args)
             .output()
@@ -1826,8 +1812,7 @@ fn parallel_metadata_ownership_matches_gnu_find_as_sets() {
         let Some(expected) = gnu_find_output(&args, false) else {
             return;
         };
-        let actual = Command::cargo_bin("rfd")
-            .unwrap()
+        let actual = rushfind_command()
             .env("RUSHFIND_WORKERS", "4")
             .args(&args)
             .output()
@@ -1858,8 +1843,7 @@ fn ordered_perm_matches_gnu_find_exactly() {
         let Some(expected) = gnu_find_output(&args, false) else {
             return;
         };
-        let actual = Command::cargo_bin("rfd")
-            .unwrap()
+        let actual = rushfind_command()
             .env("RUSHFIND_WORKERS", "1")
             .args(&args)
             .output()
@@ -1889,8 +1873,7 @@ fn parallel_perm_matches_gnu_find_as_sets() {
         let Some(expected) = gnu_find_output(&args, false) else {
             return;
         };
-        let actual = Command::cargo_bin("rfd")
-            .unwrap()
+        let actual = rushfind_command()
             .env("RUSHFIND_WORKERS", "4")
             .args(&args)
             .output()
@@ -1957,8 +1940,7 @@ fn ordered_symlink_content_matches_gnu_find_exactly() {
         let Some(expected) = gnu_find_output(&args, false) else {
             return;
         };
-        let actual = Command::cargo_bin("rfd")
-            .unwrap()
+        let actual = rushfind_command()
             .env("RUSHFIND_WORKERS", "1")
             .args(&args)
             .output()
@@ -2025,8 +2007,7 @@ fn parallel_symlink_content_matches_gnu_find_as_sets() {
         let Some(expected) = gnu_find_output(&args, false) else {
             return;
         };
-        let actual = Command::cargo_bin("rfd")
-            .unwrap()
+        let actual = rushfind_command()
             .env("RUSHFIND_WORKERS", "4")
             .args(&args)
             .output()
@@ -2897,8 +2878,7 @@ fn gnu_review_followup_backward_ranges_are_rejected_like_gnu_find() {
         let Some(expected) = gnu_find_output(&args, false) else {
             return;
         };
-        let actual = Command::cargo_bin("rfd")
-            .unwrap()
+        let actual = rushfind_command()
             .env("RUSHFIND_WORKERS", "1")
             .args(&args)
             .output()

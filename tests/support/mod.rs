@@ -13,6 +13,7 @@ use std::ffi::CString;
 use std::ffi::OsString;
 use std::fs;
 use std::io::Write;
+#[cfg(not(any(target_os = "solaris", target_os = "illumos")))]
 use std::mem::MaybeUninit;
 #[cfg(unix)]
 use std::os::unix::ffi::OsStringExt;
@@ -21,6 +22,14 @@ use std::process::{Command, Output, Stdio};
 use std::sync::{Once, OnceLock};
 use std::time::Duration;
 use wait_timeout::ChildExt;
+
+#[cfg(any(target_os = "solaris", target_os = "illumos"))]
+unsafe extern "C" {
+    fn rushfind_regexec_match(
+        pattern: *const libc::c_char,
+        reply: *const libc::c_char,
+    ) -> libc::c_int;
+}
 
 #[cfg(unix)]
 pub use gnu::{
@@ -44,6 +53,18 @@ pub fn temp_output_path(name: &str) -> (tempfile::TempDir, std::path::PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join(name);
     (dir, path)
+}
+
+pub fn rushfind_command() -> Command {
+    let mut command = Command::new(cargo_bin("rfd"));
+    command.env("RUSHFIND_WARNINGS", "off");
+    command
+}
+
+pub fn rushfind_command_with_workers(workers: usize) -> Command {
+    let mut command = rushfind_command();
+    command.env("RUSHFIND_WORKERS", workers.to_string());
+    command
 }
 
 #[cfg(unix)]
@@ -122,8 +143,7 @@ pub fn cargo_bin_output_with_env_timeout(
     envs: &[(&str, &str)],
     timeout: Duration,
 ) -> Output {
-    let mut command = Command::new(cargo_bin("rfd"));
-    command.env("RUSHFIND_WORKERS", workers.to_string());
+    let mut command = rushfind_command_with_workers(workers);
     for (key, value) in envs {
         command.env(key, value);
     }
@@ -151,9 +171,8 @@ pub fn cargo_bin_output_with_input_timeout(
     input: &[u8],
     timeout: Duration,
 ) -> Output {
-    let mut command = Command::new(cargo_bin("rfd"));
+    let mut command = rushfind_command_with_workers(workers);
     command
-        .env("RUSHFIND_WORKERS", workers.to_string())
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -182,8 +201,7 @@ pub fn cargo_bin_output_with_env_and_input_timeout(
     input: &[u8],
     timeout: Duration,
 ) -> Output {
-    let mut command = Command::new(cargo_bin("rfd"));
-    command.env("RUSHFIND_WORKERS", workers.to_string());
+    let mut command = rushfind_command_with_workers(workers);
     for (key, value) in envs {
         command.env(key, value);
     }
@@ -267,6 +285,21 @@ pub fn locale_affirmative_accepts(locale: &str, reply: &str) -> bool {
         return false;
     };
 
+    locale_yesexpr_matches(&pattern, &reply)
+}
+
+#[cfg(windows)]
+pub fn locale_affirmative_accepts(_locale: &str, _reply: &str) -> bool {
+    false
+}
+
+#[cfg(all(unix, any(target_os = "solaris", target_os = "illumos")))]
+fn locale_yesexpr_matches(pattern: &CString, reply: &CString) -> bool {
+    unsafe { rushfind_regexec_match(pattern.as_ptr(), reply.as_ptr()) == 1 }
+}
+
+#[cfg(all(unix, not(any(target_os = "solaris", target_os = "illumos"))))]
+fn locale_yesexpr_matches(pattern: &CString, reply: &CString) -> bool {
     let mut regex = MaybeUninit::<libc::regex_t>::zeroed();
     let compile_status = unsafe {
         libc::regcomp(
@@ -286,11 +319,6 @@ pub fn locale_affirmative_accepts(locale: &str, reply: &str) -> bool {
     }
 
     exec_status == 0
-}
-
-#[cfg(windows)]
-pub fn locale_affirmative_accepts(_locale: &str, _reply: &str) -> bool {
-    false
 }
 
 pub fn existing_path_without_birth_time() -> Option<std::path::PathBuf> {

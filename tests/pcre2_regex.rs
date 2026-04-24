@@ -2,15 +2,13 @@
 
 mod support;
 
-use assert_cmd::cargo::CommandCargoExt;
 use std::ffi::OsString;
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::ffi::OsStringExt;
-use std::process::Command;
-use support::path_arg;
 #[cfg(unix)]
 use support::supports_non_utf8_temp_paths;
+use support::{path_arg, rushfind_command};
 use tempfile::tempdir;
 
 #[test]
@@ -21,8 +19,7 @@ fn regex_foundation_matrix_pcre2_accepts_raw_syntax() {
     fs::write(root.path().join("src/lib.rs"), "lib\n").unwrap();
     fs::write(root.path().join("docs/Guide.txt"), "guide\n").unwrap();
 
-    let output = Command::cargo_bin("rfd")
-        .unwrap()
+    let output = rushfind_command()
         .env("RUSHFIND_WORKERS", "1")
         .args([
             path_arg(root.path()),
@@ -40,8 +37,7 @@ fn regex_foundation_matrix_pcre2_accepts_raw_syntax() {
 #[test]
 fn regex_foundation_matrix_pcre2_reports_invalid_patterns() {
     let root = tempdir().unwrap();
-    let output = Command::cargo_bin("rfd")
-        .unwrap()
+    let output = rushfind_command()
         .env("RUSHFIND_WORKERS", "1")
         .args([
             path_arg(root.path()),
@@ -76,8 +72,7 @@ fn regex_foundation_matrix_pcre2_matches_non_utf8_candidates_via_hex_escape() {
         ])));
     fs::write(&path, "target\n").unwrap();
 
-    let output = Command::cargo_bin("rfd")
-        .unwrap()
+    let output = rushfind_command()
         .env("RUSHFIND_WORKERS", "1")
         .args([
             path_arg(root.path()),

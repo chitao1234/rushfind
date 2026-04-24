@@ -10,11 +10,13 @@ use std::path::Path;
     test,
     not(any(
         target_os = "linux",
+        target_os = "illumos",
         target_os = "macos",
         target_os = "freebsd",
         target_os = "netbsd",
         target_os = "openbsd",
-        target_os = "dragonfly"
+        target_os = "dragonfly",
+        target_os = "solaris"
     ))
 ))]
 pub(crate) mod generic;
@@ -23,6 +25,11 @@ pub(crate) mod generic;
 pub(crate) mod linux;
 #[cfg(target_os = "linux")]
 use self::linux as backend;
+
+#[cfg(any(target_os = "illumos", target_os = "solaris"))]
+pub(crate) mod solarish;
+#[cfg(any(target_os = "illumos", target_os = "solaris"))]
+use self::solarish as backend;
 
 #[cfg(any(
     target_os = "macos",
@@ -43,11 +50,13 @@ use self::bsd as backend;
 
 #[cfg(not(any(
     target_os = "linux",
+    target_os = "illumos",
     target_os = "macos",
     target_os = "freebsd",
     target_os = "netbsd",
     target_os = "openbsd",
-    target_os = "dragonfly"
+    target_os = "dragonfly",
+    target_os = "solaris"
 )))]
 use self::generic as backend;
 

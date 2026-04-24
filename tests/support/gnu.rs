@@ -1,5 +1,4 @@
-use super::lines;
-use assert_cmd::cargo::CommandCargoExt;
+use super::{lines, rushfind_command_with_workers};
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
@@ -96,8 +95,7 @@ pub fn gnu_find_output(args: &[OsString], with_env: bool) -> Option<Output> {
 }
 
 fn rushfind_output(args: &[OsString], workers: usize, with_env: bool) -> Output {
-    let mut command = Command::cargo_bin("rfd").unwrap();
-    command.env("RUSHFIND_WORKERS", workers.to_string());
+    let mut command = rushfind_command_with_workers(workers);
     if with_env {
         apply_common_env(&mut command);
     }
@@ -160,9 +158,8 @@ pub fn assert_matches_gnu_exact_with_input(args: &[OsString], input: &[u8], with
     drop(expected.stdin.take());
     let expected = expected.wait_with_output().unwrap();
 
-    let mut actual = Command::cargo_bin("rfd").unwrap();
+    let mut actual = rushfind_command_with_workers(1);
     actual
-        .env("RUSHFIND_WORKERS", "1")
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -289,8 +286,7 @@ pub fn assert_file_output_matches_gnu_with_env(
         .output()
         .unwrap();
 
-    let mut actual_command = Command::cargo_bin("rfd").unwrap();
-    actual_command.env("RUSHFIND_WORKERS", workers.to_string());
+    let mut actual_command = rushfind_command_with_workers(workers);
     apply_common_env(&mut actual_command);
     let actual = actual_command
         .args(args)

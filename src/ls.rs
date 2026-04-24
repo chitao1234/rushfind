@@ -142,8 +142,8 @@ fn render_size_field(
     match (kind, entry.active_device_number(follow_mode)?) {
         #[cfg(unix)]
         (EntryKind::Block | EntryKind::Character, Some(device)) => {
-            let major = libc::major(device as libc::dev_t) as u64;
-            let minor = libc::minor(device as libc::dev_t) as u64;
+            let major = device_major(device as libc::dev_t);
+            let minor = device_minor(device as libc::dev_t);
             Ok(format_device_field(major, minor))
         }
         _ => Ok(entry.active_size(follow_mode)?.to_string().into_bytes()),
@@ -153,6 +153,26 @@ fn render_size_field(
 #[cfg(windows)]
 fn allocation_kib_bytes(allocation_size: u64) -> Vec<u8> {
     allocation_size.div_ceil(1024).to_string().into_bytes()
+}
+
+#[cfg(all(unix, any(target_os = "solaris", target_os = "illumos")))]
+fn device_major(device: libc::dev_t) -> u64 {
+    unsafe { libc::major(device) as u64 }
+}
+
+#[cfg(all(unix, not(any(target_os = "solaris", target_os = "illumos"))))]
+fn device_major(device: libc::dev_t) -> u64 {
+    libc::major(device) as u64
+}
+
+#[cfg(all(unix, any(target_os = "solaris", target_os = "illumos")))]
+fn device_minor(device: libc::dev_t) -> u64 {
+    unsafe { libc::minor(device) as u64 }
+}
+
+#[cfg(all(unix, not(any(target_os = "solaris", target_os = "illumos"))))]
+fn device_minor(device: libc::dev_t) -> u64 {
+    libc::minor(device) as u64
 }
 
 fn render_symlink_suffix(

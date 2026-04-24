@@ -11,13 +11,14 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use super::ExecBatchKey;
 use super::batch::{BatchLimit, PendingBatch, ReadyBatch, fixed_batch_cost};
 use super::child::{
     run_immediate_parallel, run_parallel_ready_batch, run_prepared_inherited, send_broker_message,
 };
 use super::delete::delete_path;
 use super::ordered::{action_failure, action_success};
-use super::template::{BatchedExecAction, ExecBatchId};
+use super::template::BatchedExecAction;
 use super::{ConfirmOutcome, PromptCoordinator, build_immediate_command, render_prompt_argv};
 
 const DEFAULT_SPILL_THRESHOLD: usize = 64 * 1024;
@@ -29,7 +30,7 @@ pub struct ParallelActionSink {
 }
 
 struct ParallelExecShared {
-    pending: Mutex<BTreeMap<ExecBatchId, PendingBatch>>,
+    pending: Mutex<BTreeMap<ExecBatchKey, PendingBatch>>,
     batch_limit: BatchLimit,
     had_action_failures: AtomicBool,
     spill_threshold: usize,
@@ -91,7 +92,11 @@ impl ParallelActionSink {
                 .pending
                 .lock()
                 .map_err(|_| internal_poisoned("parallel exec batch state"))?;
-            let batch = pending.entry(spec.id).or_insert_with(|| {
+            let key = ExecBatchKey {
+                id: spec.id,
+                cwd: spec.batch_cwd(path),
+            };
+            let batch = pending.entry(key).or_insert_with(|| {
                 PendingBatch::new(
                     spec.clone(),
                     self.shared.batch_limit,

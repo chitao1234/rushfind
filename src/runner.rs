@@ -13,15 +13,43 @@ pub struct RunSummary {
     pub had_action_failures: bool,
 }
 
-pub(crate) fn write_startup_warnings<E: Write>(
+fn startup_warnings_enabled_from(value: Option<&OsStr>) -> bool {
+    let Some(value) = value else {
+        return true;
+    };
+
+    let normalized = value.to_string_lossy();
+    !matches!(
+        normalized.trim().to_ascii_lowercase().as_str(),
+        "0" | "false" | "no" | "off"
+    )
+}
+
+pub(crate) fn startup_warnings_enabled() -> bool {
+    startup_warnings_enabled_from(std::env::var_os("RUSHFIND_WARNINGS").as_deref())
+}
+
+fn write_startup_warnings_with_policy<E: Write>(
     warnings: &[String],
     stderr: &mut E,
+    enabled: bool,
 ) -> Result<(), Diagnostic> {
+    if !enabled {
+        return Ok(());
+    }
+
     for warning in warnings {
         writeln!(stderr, "{warning}")
             .map_err(|error| Diagnostic::new(format!("failed to write stderr: {error}"), 1))?;
     }
     Ok(())
+}
+
+pub(crate) fn write_startup_warnings<E: Write>(
+    warnings: &[String],
+    stderr: &mut E,
+) -> Result<(), Diagnostic> {
+    write_startup_warnings_with_policy(warnings, stderr, startup_warnings_enabled())
 }
 
 #[cfg(windows)]
@@ -131,8 +159,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        build_eval_context_with_loader, build_messages_locale_with, validate_execdir_path_value,
-        write_startup_warnings,
+        build_eval_context_with_loader, build_messages_locale_with, startup_warnings_enabled_from,
+        validate_execdir_path_value, write_startup_warnings, write_startup_warnings_with_policy,
     };
     use crate::follow::FollowMode;
     use crate::ordered::engine::ordered_evaluator_workers;
@@ -257,6 +285,29 @@ mod tests {
             "rfd: warning: unrecognized escape `\\q'\n\
              rfd: warning: unrecognized escape `\\x'\n"
         );
+    }
+
+    #[test]
+    fn write_startup_warnings_can_be_silenced() {
+        let mut stderr = Vec::new();
+        write_startup_warnings_with_policy(
+            &["rfd: warning: interactive locale behavior is approximate on this platform".into()],
+            &mut stderr,
+            false,
+        )
+        .unwrap();
+
+        assert!(stderr.is_empty());
+    }
+
+    #[test]
+    fn startup_warnings_enabled_defaults_on_and_accepts_common_off_values() {
+        assert!(startup_warnings_enabled_from(None));
+        assert!(startup_warnings_enabled_from(Some(OsStr::new("true"))));
+        assert!(!startup_warnings_enabled_from(Some(OsStr::new("0"))));
+        assert!(!startup_warnings_enabled_from(Some(OsStr::new("false"))));
+        assert!(!startup_warnings_enabled_from(Some(OsStr::new("NO"))));
+        assert!(!startup_warnings_enabled_from(Some(OsStr::new("off"))));
     }
 
     #[cfg(unix)]

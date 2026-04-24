@@ -95,13 +95,28 @@ mod tests {
     fn generic_capabilities_are_conservative() {
         assert!(matches!(CAPABILITIES.fstype, SupportLevel::Unsupported(_)));
         assert!(matches!(CAPABILITIES.same_file_system, SupportLevel::Exact));
-        assert!(matches!(CAPABILITIES.birth_time, SupportLevel::Unsupported(_)));
-        assert!(matches!(CAPABILITIES.file_flags, SupportLevel::Unsupported(_)));
+        assert!(matches!(
+            CAPABILITIES.birth_time,
+            SupportLevel::Unsupported(_)
+        ));
+        assert!(matches!(
+            CAPABILITIES.file_flags,
+            SupportLevel::Unsupported(_)
+        ));
         assert!(matches!(CAPABILITIES.named_ownership, SupportLevel::Exact));
-        assert!(matches!(CAPABILITIES.numeric_ownership, SupportLevel::Exact));
-        assert!(matches!(CAPABILITIES.access_predicates, SupportLevel::Exact));
+        assert!(matches!(
+            CAPABILITIES.numeric_ownership,
+            SupportLevel::Exact
+        ));
+        assert!(matches!(
+            CAPABILITIES.access_predicates,
+            SupportLevel::Exact
+        ));
         assert!(matches!(CAPABILITIES.mode_bits, SupportLevel::Exact));
-        assert!(matches!(CAPABILITIES.messages_locale, SupportLevel::Approximate(_)));
+        assert!(matches!(
+            CAPABILITIES.messages_locale,
+            SupportLevel::Approximate(_)
+        ));
         assert!(matches!(
             CAPABILITIES.case_insensitive_glob,
             SupportLevel::Approximate(_)
@@ -115,7 +130,10 @@ mod tests {
         fs::write(&path, b"alpha").unwrap();
 
         let expected = fs::metadata(&path).unwrap().dev();
-        assert_eq!(filesystem_key(&path, true).unwrap(), FilesystemKey::Numeric(expected));
+        assert_eq!(
+            filesystem_key(&path, true).unwrap(),
+            FilesystemKey::Numeric(expected)
+        );
     }
 
     #[test]

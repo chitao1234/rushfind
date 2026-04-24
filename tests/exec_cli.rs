@@ -2,14 +2,12 @@
 
 mod support;
 
-use assert_cmd::cargo::CommandCargoExt;
 use std::fs;
-use std::process::Command;
 use std::time::Duration;
 use support::{
     cargo_bin_output_with_env_and_input_timeout, cargo_bin_output_with_input_timeout,
     cargo_bin_output_with_timeout, first_available_locale, locale_affirmative_accepts, path_arg,
-    resolved_messages_locale,
+    resolved_messages_locale, rushfind_command,
 };
 use tempfile::tempdir;
 
@@ -196,8 +194,7 @@ fn ordered_exec_false_still_blocks_later_print_under_the_pipeline() {
     let Some(expected) = support::gnu_find_output(&args, false) else {
         return;
     };
-    let actual = Command::cargo_bin("rfd")
-        .unwrap()
+    let actual = rushfind_command()
         .env("RUSHFIND_WORKERS", "1")
         .args(&args)
         .output()
@@ -285,7 +282,7 @@ fn ordered_execdir_plus_batches_only_within_each_directory() {
             "-execdir".into(),
             "sh".into(),
             "-c".into(),
-            "printf '%s|' \"$PWD\"; printf '%s ' \"$@\"; printf '\\n'".into(),
+            "pwd -P | tr -d '\\n'; printf '|'; printf '%s ' \"$@\"; printf '\\n'".into(),
             "sh".into(),
             "{}".into(),
             "+".into(),
@@ -653,7 +650,7 @@ fn parallel_okdir_yes_uses_directory_local_execution() {
             "-okdir".into(),
             "sh".into(),
             "-c".into(),
-            "printf '%s|%s\\n' \"$PWD\" \"$1\"".into(),
+            "printf '%s|%s\\n' \"$(pwd -P)\" \"$1\"".into(),
             "sh".into(),
             "{}".into(),
             ";".into(),
@@ -722,7 +719,7 @@ fn parallel_execdir_semicolon_replays_each_child_output_atomically() {
             "-execdir".into(),
             "sh".into(),
             "-c".into(),
-            "printf 'BEGIN:%s:%s\\n' \"$PWD\" \"$1\"; sleep 0.05; printf 'END:%s:%s\\n' \"$PWD\" \"$1\"".into(),
+            "cwd=$(pwd -P); printf 'BEGIN:%s:%s\\n' \"$cwd\" \"$1\"; sleep 0.05; printf 'END:%s:%s\\n' \"$cwd\" \"$1\"".into(),
             "sh".into(),
             "{}".into(),
             ";".into(),
@@ -765,7 +762,7 @@ fn parallel_execdir_plus_never_mixes_directories_within_one_invocation() {
             "-execdir".into(),
             "sh".into(),
             "-c".into(),
-            "printf '%s|' \"$PWD\"; printf '%s ' \"$@\"; printf '\\n'".into(),
+            "pwd -P | tr -d '\\n'; printf '|'; printf '%s ' \"$@\"; printf '\\n'".into(),
             "sh".into(),
             "{}".into(),
             "+".into(),

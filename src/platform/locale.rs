@@ -12,7 +12,9 @@ use std::ffi::CString;
     windows,
     all(target_os = "linux", target_env = "gnu"),
     target_os = "freebsd",
-    target_os = "aix"
+    target_os = "aix",
+    target_os = "solaris",
+    target_os = "illumos"
 )))]
 use std::mem::MaybeUninit;
 
@@ -49,6 +51,14 @@ struct PosixLocaleBackend;
 ))]
 unsafe extern "C" {
     fn rpmatch(response: *const libc::c_char) -> libc::c_int;
+}
+
+#[cfg(any(target_os = "solaris", target_os = "illumos"))]
+unsafe extern "C" {
+    fn rushfind_regexec_match(
+        pattern: *const libc::c_char,
+        reply: *const libc::c_char,
+    ) -> libc::c_int;
 }
 
 #[cfg(not(windows))]
@@ -167,7 +177,9 @@ fn langinfo_string(item: libc::nl_item) -> Option<CString> {
     windows,
     all(target_os = "linux", target_env = "gnu"),
     target_os = "freebsd",
-    target_os = "aix"
+    target_os = "aix",
+    target_os = "solaris",
+    target_os = "illumos"
 )))]
 fn regexec_matches(pattern: &CString, reply: &CString) -> Option<bool> {
     let mut regex = MaybeUninit::<libc::regex_t>::zeroed();
@@ -189,6 +201,15 @@ fn regexec_matches(pattern: &CString, reply: &CString) -> Option<bool> {
     }
 
     Some(exec_status == 0)
+}
+
+#[cfg(any(target_os = "solaris", target_os = "illumos"))]
+fn regexec_matches(pattern: &CString, reply: &CString) -> Option<bool> {
+    match unsafe { rushfind_regexec_match(pattern.as_ptr(), reply.as_ptr()) } {
+        1 => Some(true),
+        0 => Some(false),
+        _ => None,
+    }
 }
 
 #[cfg_attr(

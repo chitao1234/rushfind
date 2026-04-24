@@ -2,14 +2,13 @@
 
 mod support;
 
-use assert_cmd::cargo::CommandCargoExt;
 use std::ffi::OsString;
 use std::fs;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs as unix_fs;
 use std::path::PathBuf;
-use std::process::{Command, Output};
-use support::{gnu_find_output, path_arg, supports_non_utf8_temp_paths};
+use std::process::Output;
+use support::{gnu_find_output, path_arg, rushfind_command, supports_non_utf8_temp_paths};
 use tempfile::tempdir;
 
 fn os(bytes: &[u8]) -> OsString {
@@ -25,8 +24,7 @@ fn run_gnu(args: &[OsString]) -> Option<Output> {
 }
 
 fn run_fox(args: &[OsString]) -> Output {
-    Command::cargo_bin("rfd")
-        .unwrap()
+    rushfind_command()
         .env("RUSHFIND_WORKERS", "1")
         .env("LC_ALL", "C")
         .args(args)
