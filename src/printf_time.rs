@@ -443,9 +443,9 @@ fn timezone_name_bytes(local: &libc::tm) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ResolvedTimeParts, parse_numeric_utc_offset, render_full_time_bytes, render_selector_bytes,
-    };
+    #[cfg(unix)]
+    use super::parse_numeric_utc_offset;
+    use super::{ResolvedTimeParts, render_full_time_bytes, render_selector_bytes};
     use crate::printf::PrintfTimeSelector;
     use crate::time::Timestamp;
 
