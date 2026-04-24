@@ -16,7 +16,9 @@ use crate::optimizer::optimize_read_only_and_chains;
 use crate::pattern::{CompiledGlob, GlobCaseMode, GlobSlashMode};
 use crate::perm::{PermMatcher, parse_perm_argument};
 use crate::platform::{PlatformCapabilities, PlatformFeature, SupportLevel, active_capabilities};
-use crate::printf::{PrintfAtom, PrintfDirectiveKind, PrintfProgram, compile_printf_program};
+use crate::printf::{
+    PrintfAtom, PrintfDirectiveKind, PrintfProgram, PrintfTimeFamily, compile_printf_program,
+};
 use crate::regex_match::{RegexDialect, RegexMatcher};
 use crate::runtime_policy::{RuntimePolicy, build_traversal_control_plan};
 use crate::size::{SizeMatcher, parse_size_argument};
@@ -417,6 +419,13 @@ fn validate_platform_printf_program(
             }
             PrintfDirectiveKind::ModeOctal | PrintfDirectiveKind::ModeSymbolic => {
                 require_platform_feature(capabilities, PlatformFeature::ModeBits, state)?;
+            }
+            PrintfDirectiveKind::FullTimestamp(PrintfTimeFamily::Birth)
+            | PrintfDirectiveKind::TimestampPart {
+                family: PrintfTimeFamily::Birth,
+                ..
+            } => {
+                require_platform_feature(capabilities, PlatformFeature::BirthTime, state)?;
             }
             PrintfDirectiveKind::Device
             | PrintfDirectiveKind::Blocks512
@@ -1093,6 +1102,39 @@ mod tests {
             )
     }
 
+    fn generic_unix_caps() -> PlatformCapabilities {
+        PlatformCapabilities::for_tests()
+            .with(
+                PlatformFeature::FsType,
+                SupportLevel::Unsupported("`-fstype` is not supported on this platform"),
+            )
+            .with(PlatformFeature::SameFileSystem, SupportLevel::Exact)
+            .with(
+                PlatformFeature::BirthTime,
+                SupportLevel::Unsupported("birth time is not supported on this platform"),
+            )
+            .with(
+                PlatformFeature::FileFlags,
+                SupportLevel::Unsupported("`-flags` is not supported on this platform"),
+            )
+            .with(PlatformFeature::NamedOwnership, SupportLevel::Exact)
+            .with(PlatformFeature::NumericOwnership, SupportLevel::Exact)
+            .with(PlatformFeature::AccessPredicates, SupportLevel::Exact)
+            .with(
+                PlatformFeature::MessagesLocale,
+                SupportLevel::Approximate(
+                    "interactive locale behavior is approximate on this platform",
+                ),
+            )
+            .with(
+                PlatformFeature::CaseInsensitiveGlob,
+                SupportLevel::Approximate(
+                    "case-insensitive glob matching may differ outside the C locale on this platform",
+                ),
+            )
+            .with(PlatformFeature::ModeBits, SupportLevel::Exact)
+    }
+
     #[test]
     fn unsupported_platform_features_fail_during_planning() {
         let ast = parse_command(&argv(&[".", "-fstype", "tmpfs"])).unwrap();
@@ -1125,6 +1167,73 @@ mod tests {
         assert!(plan.startup_warnings.iter().any(|warning: &String| {
             warning.contains("interactive locale behavior is approximate")
         }));
+    }
+
+    #[test]
+    fn generic_unix_keeps_xdev_exact() {
+        let plan = plan_command_with_now_and_capabilities(
+            parse_command(&argv(&[".", "-xdev", "-name", "*.rs"])).unwrap(),
+            1,
+            Timestamp::new(0, 0),
+            &generic_unix_caps(),
+        )
+        .unwrap();
+
+        assert!(plan.traversal.same_file_system);
+    }
+
+    #[test]
+    fn generic_unix_warns_for_iname_and_ok() {
+        let plan = plan_command_with_now_and_capabilities(
+            parse_command(&argv(&[
+                ".",
+                "-iname",
+                "*.rs",
+                "-ok",
+                "printf",
+                "%s\\n",
+                "{}",
+                ";",
+            ]))
+            .unwrap(),
+            1,
+            Timestamp::new(0, 0),
+            &generic_unix_caps(),
+        )
+        .unwrap();
+
+        assert!(plan.runtime.messages_locale_required);
+        assert!(plan.startup_warnings.iter().any(|warning| {
+            warning.contains("case-insensitive glob matching may differ")
+        }));
+        assert!(plan.startup_warnings.iter().any(|warning| {
+            warning.contains("interactive locale behavior is approximate")
+        }));
+    }
+
+    #[test]
+    fn generic_unix_rejects_fstype_flags_and_birth_time() {
+        for args in [
+            argv(&[".", "-fstype", "ufs"]),
+            argv(&[".", "-flags", "nodump"]),
+            argv(&[".", "-newerBt", "2024-01-01"]),
+            argv(&[".", "-printf", "%F\\n"]),
+            argv(&[".", "-printf", "%B@\\n"]),
+        ] {
+            let error = plan_command_with_now_and_capabilities(
+                parse_command(&args).unwrap(),
+                1,
+                Timestamp::new(0, 0),
+                &generic_unix_caps(),
+            )
+            .unwrap_err();
+
+            assert!(
+                error.message.contains("not supported"),
+                "{args:?} -> {}",
+                error.message
+            );
+        }
     }
 
     #[test]
