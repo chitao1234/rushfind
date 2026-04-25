@@ -52,20 +52,29 @@ impl ActionRequest {
 }
 
 #[derive(Debug, Clone)]
+struct ListContinuation {
+    items: Arc<[RuntimeExpr]>,
+    next_index: usize,
+    accumulated: RuntimeStatus,
+    parent: Box<EvalContinuation>,
+}
+
+impl ListContinuation {
+    fn new(items: Arc<[RuntimeExpr]>, parent: EvalContinuation) -> Self {
+        Self {
+            items,
+            next_index: 1,
+            accumulated: RuntimeStatus::default(),
+            parent: Box::new(parent),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 enum EvalContinuation {
     Done,
-    AfterAnd {
-        items: Arc<[RuntimeExpr]>,
-        next_index: usize,
-        accumulated: RuntimeStatus,
-        parent: Box<EvalContinuation>,
-    },
-    AfterSequence {
-        items: Arc<[RuntimeExpr]>,
-        next_index: usize,
-        accumulated: RuntimeStatus,
-        parent: Box<EvalContinuation>,
-    },
+    AfterAnd(ListContinuation),
+    AfterSequence(ListContinuation),
     AfterOrLeft {
         right: Arc<RuntimeExpr>,
         parent: Box<EvalContinuation>,
@@ -184,60 +193,22 @@ fn step_expr(
                 continuation,
             },
         }),
-        RuntimeExpr::And(items) => {
-            if let Some(first) = items.first() {
-                return step_expr(
-                    first,
-                    entry,
-                    follow_mode,
-                    EvalContinuation::AfterAnd {
-                        items: items.clone(),
-                        next_index: 1,
-                        accumulated: RuntimeStatus::default(),
-                        parent: Box::new(continuation),
-                    },
-                    context,
-                );
-            }
-
-            finish_with_outcome(
-                continuation,
-                entry,
-                follow_mode,
-                EvalOutcome {
-                    matched: true,
-                    status: RuntimeStatus::default(),
-                },
-                context,
-            )
-        }
-        RuntimeExpr::Sequence(items) => {
-            if let Some(first) = items.first() {
-                return step_expr(
-                    first,
-                    entry,
-                    follow_mode,
-                    EvalContinuation::AfterSequence {
-                        items: items.clone(),
-                        next_index: 1,
-                        accumulated: RuntimeStatus::default(),
-                        parent: Box::new(continuation),
-                    },
-                    context,
-                );
-            }
-
-            finish_with_outcome(
-                continuation,
-                entry,
-                follow_mode,
-                EvalOutcome {
-                    matched: true,
-                    status: RuntimeStatus::default(),
-                },
-                context,
-            )
-        }
+        RuntimeExpr::And(items) => step_list_expr(
+            items,
+            entry,
+            follow_mode,
+            continuation,
+            context,
+            EvalContinuation::AfterAnd,
+        ),
+        RuntimeExpr::Sequence(items) => step_list_expr(
+            items,
+            entry,
+            follow_mode,
+            continuation,
+            context,
+            EvalContinuation::AfterSequence,
+        ),
         RuntimeExpr::Or(left, right) => step_expr(
             left.as_ref(),
             entry,
@@ -270,6 +241,36 @@ fn step_expr(
     }
 }
 
+fn step_list_expr(
+    items: &Arc<[RuntimeExpr]>,
+    entry: EntryContext,
+    follow_mode: FollowMode,
+    continuation: EvalContinuation,
+    context: &EvalContext,
+    make_continuation: fn(ListContinuation) -> EvalContinuation,
+) -> Result<EvalStep, Diagnostic> {
+    if let Some(first) = items.first() {
+        return step_expr(
+            first,
+            entry,
+            follow_mode,
+            make_continuation(ListContinuation::new(items.clone(), continuation)),
+            context,
+        );
+    }
+
+    finish_with_outcome(
+        continuation,
+        entry,
+        follow_mode,
+        EvalOutcome {
+            matched: true,
+            status: RuntimeStatus::default(),
+        },
+        context,
+    )
+}
+
 fn finish_with_outcome(
     continuation: EvalContinuation,
     entry: EntryContext,
@@ -279,84 +280,11 @@ fn finish_with_outcome(
 ) -> Result<EvalStep, Diagnostic> {
     match continuation {
         EvalContinuation::Done => Ok(EvalStep::Complete(outcome)),
-        EvalContinuation::AfterAnd {
-            items,
-            next_index,
-            accumulated,
-            parent,
-        } => {
-            let accumulated = accumulated.merge(outcome.status);
-            if !outcome.matched || accumulated.is_stop_requested() {
-                return finish_with_outcome(
-                    *parent,
-                    entry,
-                    follow_mode,
-                    EvalOutcome {
-                        matched: outcome.matched,
-                        status: accumulated,
-                    },
-                    context,
-                );
-            }
-
-            if next_index >= items.len() {
-                return finish_with_outcome(
-                    *parent,
-                    entry,
-                    follow_mode,
-                    EvalOutcome {
-                        matched: true,
-                        status: accumulated,
-                    },
-                    context,
-                );
-            }
-
-            step_expr(
-                &items[next_index],
-                entry,
-                follow_mode,
-                EvalContinuation::AfterAnd {
-                    items: items.clone(),
-                    next_index: next_index + 1,
-                    accumulated,
-                    parent,
-                },
-                context,
-            )
+        EvalContinuation::AfterAnd(state) => {
+            finish_after_and(state, entry, follow_mode, outcome, context)
         }
-        EvalContinuation::AfterSequence {
-            items,
-            next_index,
-            accumulated,
-            parent,
-        } => {
-            let accumulated = accumulated.merge(outcome.status);
-            if accumulated.is_stop_requested() || next_index >= items.len() {
-                return finish_with_outcome(
-                    *parent,
-                    entry,
-                    follow_mode,
-                    EvalOutcome {
-                        matched: outcome.matched,
-                        status: accumulated,
-                    },
-                    context,
-                );
-            }
-
-            step_expr(
-                &items[next_index],
-                entry,
-                follow_mode,
-                EvalContinuation::AfterSequence {
-                    items: items.clone(),
-                    next_index: next_index + 1,
-                    accumulated,
-                    parent,
-                },
-                context,
-            )
+        EvalContinuation::AfterSequence(state) => {
+            finish_after_sequence(state, entry, follow_mode, outcome, context)
         }
         EvalContinuation::AfterOrLeft { right, parent } => {
             if outcome.matched || outcome.status.is_stop_requested() {
@@ -398,6 +326,114 @@ fn finish_with_outcome(
             context,
         ),
     }
+}
+
+fn finish_after_and(
+    state: ListContinuation,
+    entry: EntryContext,
+    follow_mode: FollowMode,
+    outcome: EvalOutcome,
+    context: &EvalContext,
+) -> Result<EvalStep, Diagnostic> {
+    let accumulated = state.accumulated.merge(outcome.status);
+    if !outcome.matched || accumulated.is_stop_requested() {
+        return finish_parent(
+            *state.parent,
+            entry,
+            follow_mode,
+            outcome.matched,
+            accumulated,
+            context,
+        );
+    }
+
+    if state.next_index >= state.items.len() {
+        return finish_parent(
+            *state.parent,
+            entry,
+            follow_mode,
+            true,
+            accumulated,
+            context,
+        );
+    }
+
+    continue_list(
+        state,
+        entry,
+        follow_mode,
+        accumulated,
+        context,
+        EvalContinuation::AfterAnd,
+    )
+}
+
+fn finish_after_sequence(
+    state: ListContinuation,
+    entry: EntryContext,
+    follow_mode: FollowMode,
+    outcome: EvalOutcome,
+    context: &EvalContext,
+) -> Result<EvalStep, Diagnostic> {
+    let accumulated = state.accumulated.merge(outcome.status);
+    if accumulated.is_stop_requested() || state.next_index >= state.items.len() {
+        return finish_parent(
+            *state.parent,
+            entry,
+            follow_mode,
+            outcome.matched,
+            accumulated,
+            context,
+        );
+    }
+
+    continue_list(
+        state,
+        entry,
+        follow_mode,
+        accumulated,
+        context,
+        EvalContinuation::AfterSequence,
+    )
+}
+
+fn continue_list(
+    state: ListContinuation,
+    entry: EntryContext,
+    follow_mode: FollowMode,
+    accumulated: RuntimeStatus,
+    context: &EvalContext,
+    make_continuation: fn(ListContinuation) -> EvalContinuation,
+) -> Result<EvalStep, Diagnostic> {
+    step_expr(
+        &state.items[state.next_index],
+        entry,
+        follow_mode,
+        make_continuation(ListContinuation {
+            items: state.items.clone(),
+            next_index: state.next_index + 1,
+            accumulated,
+            parent: state.parent,
+        }),
+        context,
+    )
+}
+
+fn finish_parent(
+    parent: EvalContinuation,
+    entry: EntryContext,
+    follow_mode: FollowMode,
+    matched: bool,
+    status: RuntimeStatus,
+    context: &EvalContext,
+) -> Result<EvalStep, Diagnostic> {
+    finish_with_outcome(
+        parent,
+        entry,
+        follow_mode,
+        EvalOutcome { matched, status },
+        context,
+    )
 }
 
 #[cfg(test)]
