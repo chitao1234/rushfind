@@ -3,10 +3,11 @@
 mod backend;
 mod gnu;
 mod ir;
+mod locale;
 
 use crate::diagnostics::Diagnostic;
 use backend::{CompiledRegex, RegexBackendKind, compile_pcre2_anchored, compile_rust_anchored};
-use gnu::compile_gnu_regex;
+use gnu::{CompiledGnuRegex, compile_gnu_regex, compile_gnu_regex_with_ctype};
 use std::ffi::OsStr;
 use std::fmt::Write as _;
 use std::sync::Arc;
@@ -60,6 +61,8 @@ struct RegexMatcherInner {
     translated_pattern: String,
     case_insensitive: bool,
     compiled: CompiledRegex,
+    gnu_ir: Option<CompiledGnuRegex>,
+    encoded_gnu_ir: Option<locale::LocaleGnuRegex>,
 }
 
 impl PartialEq for RegexMatcherInner {
@@ -69,6 +72,9 @@ impl PartialEq for RegexMatcherInner {
             && self.original_pattern == other.original_pattern
             && self.translated_pattern == other.translated_pattern
             && self.case_insensitive == other.case_insensitive
+            && self.gnu_ir.as_ref().map(|gnu| &gnu.expr)
+                == other.gnu_ir.as_ref().map(|gnu| &gnu.expr)
+            && self.encoded_gnu_ir == other.encoded_gnu_ir
     }
 }
 
@@ -94,16 +100,44 @@ impl RegexMatcher {
         pattern: &OsStr,
         case_insensitive: bool,
     ) -> Result<Self, Diagnostic> {
+        Self::compile_with_ctype(
+            flag,
+            dialect,
+            pattern,
+            case_insensitive,
+            &crate::ctype::CtypeProfile::ByteC,
+        )
+    }
+
+    pub fn compile_with_ctype(
+        flag: &str,
+        dialect: RegexDialect,
+        pattern: &OsStr,
+        case_insensitive: bool,
+        ctype: &crate::ctype::CtypeProfile,
+    ) -> Result<Self, Diagnostic> {
         let original_pattern = pattern.as_encoded_bytes().to_vec();
 
-        let (backend, translated_pattern, compiled) = match dialect {
+        let (backend, translated_pattern, compiled, gnu_ir, encoded_gnu_ir) = match dialect {
             RegexDialect::Emacs | RegexDialect::PosixExtended | RegexDialect::PosixBasic => {
-                let compiled =
+                let compiled_gnu =
                     compile_gnu_regex(flag, dialect, &original_pattern, case_insensitive)?;
+                let encoded_gnu_ir = if ctype.is_byte_c() || ctype.is_unknown() {
+                    None
+                } else {
+                    Some(compile_gnu_regex_with_ctype(
+                        flag,
+                        dialect,
+                        &original_pattern,
+                        ctype,
+                    )?)
+                };
                 (
-                    compiled.backend,
-                    compiled.translated_pattern,
-                    compiled.compiled,
+                    compiled_gnu.backend,
+                    compiled_gnu.translated_pattern.clone(),
+                    compiled_gnu.compiled.clone(),
+                    Some(compiled_gnu),
+                    encoded_gnu_ir,
                 )
             }
             RegexDialect::Rust => {
@@ -115,7 +149,13 @@ impl RegexMatcher {
                     &anchored_pattern,
                     case_insensitive,
                 )?;
-                (RegexBackendKind::Rust, translated_pattern, compiled)
+                (
+                    RegexBackendKind::Rust,
+                    translated_pattern,
+                    compiled,
+                    None,
+                    None,
+                )
             }
             RegexDialect::Pcre2 => {
                 let translated_pattern = std::str::from_utf8(&original_pattern)
@@ -130,7 +170,13 @@ impl RegexMatcher {
                     })?;
                 let anchored_pattern = format!(r"\A(?:{})\z", translated_pattern);
                 let compiled = compile_pcre2_anchored(flag, &anchored_pattern, case_insensitive)?;
-                (RegexBackendKind::Pcre2, translated_pattern, compiled)
+                (
+                    RegexBackendKind::Pcre2,
+                    translated_pattern,
+                    compiled,
+                    None,
+                    None,
+                )
             }
         };
 
@@ -142,19 +188,10 @@ impl RegexMatcher {
                 translated_pattern,
                 case_insensitive,
                 compiled,
+                gnu_ir,
+                encoded_gnu_ir,
             }),
         })
-    }
-
-    pub fn compile_with_ctype(
-        flag: &str,
-        dialect: RegexDialect,
-        pattern: &OsStr,
-        case_insensitive: bool,
-        ctype: &crate::ctype::CtypeProfile,
-    ) -> Result<Self, Diagnostic> {
-        let _ = ctype;
-        Self::compile(flag, dialect, pattern, case_insensitive)
     }
 
     pub fn dialect(&self) -> RegexDialect {
@@ -177,6 +214,14 @@ impl RegexMatcher {
     ) -> Result<bool, Diagnostic> {
         if ctype.is_byte_c() || ctype.is_unknown() {
             return self.is_match(candidate);
+        }
+        if let Some(gnu) = &self.inner.encoded_gnu_ir {
+            return locale::is_match(
+                gnu,
+                ctype,
+                candidate.as_encoded_bytes(),
+                self.inner.case_insensitive,
+            );
         }
         self.is_match(candidate)
     }

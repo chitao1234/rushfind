@@ -5,12 +5,15 @@ use super::backend::{
 use super::ir::{
     AnchorKind, AssertionKind, ClassExpr, ClassItem, GnuExpr, GnuRegex, RepetitionKind,
 };
+use crate::ctype::CtypeProfile;
+use crate::ctype::text::{TextUnit, decode_units};
 use crate::diagnostics::Diagnostic;
 use std::fmt::Write as _;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum GnuToken {
     Literal(u8),
+    LiteralChar(char),
     Dot,
     AnchorStart,
     AnchorEnd,
@@ -24,7 +27,9 @@ enum GnuToken {
     WordByteClass { negated: bool },
 }
 
-pub struct GnuCompiled {
+#[derive(Debug, Clone)]
+pub(crate) struct CompiledGnuRegex {
+    pub(crate) expr: GnuRegex,
     pub backend: RegexBackendKind,
     pub translated_pattern: String,
     pub compiled: CompiledRegex,
@@ -35,7 +40,7 @@ pub fn compile_gnu_regex(
     dialect: RegexDialect,
     pattern: &[u8],
     case_insensitive: bool,
-) -> Result<GnuCompiled, Diagnostic> {
+) -> Result<CompiledGnuRegex, Diagnostic> {
     let expr = parse_gnu_regex(flag, dialect, pattern)?;
     let backend = choose_backend(&expr);
     let translated_pattern = match backend {
@@ -52,11 +57,21 @@ pub fn compile_gnu_regex(
         }
     };
 
-    Ok(GnuCompiled {
+    Ok(CompiledGnuRegex {
+        expr,
         backend,
         translated_pattern,
         compiled,
     })
+}
+
+pub(crate) fn compile_gnu_regex_with_ctype(
+    flag: &str,
+    dialect: RegexDialect,
+    pattern: &[u8],
+    ctype: &CtypeProfile,
+) -> Result<crate::regex_match::locale::LocaleGnuRegex, Diagnostic> {
+    crate::regex_match::locale::compile(flag, dialect, pattern, ctype)
 }
 
 pub fn choose_backend(expr: &GnuRegex) -> RegexBackendKind {
@@ -65,6 +80,7 @@ pub fn choose_backend(expr: &GnuRegex) -> RegexBackendKind {
             GnuExpr::Backreference(_) | GnuExpr::Assertion(_) => RegexBackendKind::Pcre2,
             GnuExpr::Empty
             | GnuExpr::Literal(_)
+            | GnuExpr::LiteralChar(_)
             | GnuExpr::Dot
             | GnuExpr::Class(_)
             | GnuExpr::Anchor(_)
@@ -92,6 +108,18 @@ pub fn parse_gnu_regex(
     Ok(regex)
 }
 
+pub(crate) fn parse_gnu_regex_with_ctype(
+    flag: &str,
+    dialect: RegexDialect,
+    pattern: &[u8],
+    ctype: &CtypeProfile,
+) -> Result<GnuRegex, Diagnostic> {
+    let tokens = lex_gnu_tokens_with_ctype(flag, dialect, pattern, ctype)?;
+    let regex = TokenParser::new(flag, dialect, &tokens).parse()?;
+    validate_gnu_regex(flag, dialect, &regex)?;
+    Ok(regex)
+}
+
 fn validate_gnu_regex(
     flag: &str,
     dialect: RegexDialect,
@@ -106,6 +134,7 @@ fn validate_gnu_regex(
         match expr {
             GnuExpr::Empty
             | GnuExpr::Literal(_)
+            | GnuExpr::LiteralChar(_)
             | GnuExpr::Dot
             | GnuExpr::Class(_)
             | GnuExpr::Anchor(_)
@@ -236,6 +265,7 @@ fn lex_gnu_tokens(
         can_repeat_atom = matches!(
             token,
             GnuToken::Literal(_)
+                | GnuToken::LiteralChar(_)
                 | GnuToken::Dot
                 | GnuToken::Class(_)
                 | GnuToken::GroupClose
@@ -250,6 +280,117 @@ fn lex_gnu_tokens(
     }
 
     Ok(tokens)
+}
+
+fn lex_gnu_tokens_with_ctype(
+    flag: &str,
+    dialect: RegexDialect,
+    pattern: &[u8],
+    ctype: &CtypeProfile,
+) -> Result<Vec<GnuToken>, Diagnostic> {
+    let units = decode_units(ctype, pattern).collect::<Vec<_>>();
+    let mut tokens = Vec::new();
+    let mut index = 0usize;
+    let mut can_repeat_atom = false;
+    let mut group_depth = 0usize;
+    let mut branch_start = true;
+
+    while let Some(unit) = units.get(index).copied() {
+        index += 1;
+        let ch = unit
+            .as_char()
+            .ok_or_else(|| malformed_regex(flag, dialect, "invalid encoded character"))?;
+        let token = match dialect {
+            RegexDialect::PosixExtended => match ch {
+                '\\' => lex_extended_escape_units(flag, dialect, &units, &mut index)?,
+                '(' => {
+                    group_depth += 1;
+                    GnuToken::GroupOpen
+                }
+                ')' => {
+                    if group_depth == 0 {
+                        GnuToken::Literal(b')')
+                    } else {
+                        group_depth -= 1;
+                        GnuToken::GroupClose
+                    }
+                }
+                '|' => GnuToken::Alternation,
+                '*' => GnuToken::Quantifier(RepetitionKind::ZeroOrMore),
+                '+' => GnuToken::Quantifier(RepetitionKind::OneOrMore),
+                '?' => GnuToken::Quantifier(RepetitionKind::ZeroOrOne),
+                '{' if can_repeat_atom => GnuToken::Quantifier(lex_extended_bound_units(
+                    flag, dialect, &units, &mut index,
+                )?),
+                '[' => GnuToken::Class(lex_class_units(flag, dialect, &units, &mut index)?),
+                '.' => GnuToken::Dot,
+                '^' => GnuToken::AnchorStart,
+                '$' => GnuToken::AnchorEnd,
+                other => literal_token_for_char(other),
+            },
+            RegexDialect::PosixBasic => match ch {
+                '\\' => lex_bre_or_emacs_escape_units(
+                    flag,
+                    dialect,
+                    &units,
+                    &mut index,
+                    can_repeat_atom,
+                    &mut group_depth,
+                )?,
+                '*' if can_repeat_atom => GnuToken::Quantifier(RepetitionKind::ZeroOrMore),
+                '[' => GnuToken::Class(lex_class_units(flag, dialect, &units, &mut index)?),
+                '.' => GnuToken::Dot,
+                '^' => GnuToken::AnchorStart,
+                '$' => GnuToken::AnchorEnd,
+                other => literal_token_for_char(other),
+            },
+            RegexDialect::Emacs => match ch {
+                '\\' => lex_bre_or_emacs_escape_units(
+                    flag,
+                    dialect,
+                    &units,
+                    &mut index,
+                    can_repeat_atom,
+                    &mut group_depth,
+                )?,
+                '^' if branch_start => GnuToken::AnchorStart,
+                '$' if emacs_dollar_is_anchor_units(&units, index) => GnuToken::AnchorEnd,
+                '*' if can_repeat_atom => GnuToken::Quantifier(RepetitionKind::ZeroOrMore),
+                '+' if can_repeat_atom => GnuToken::Quantifier(RepetitionKind::OneOrMore),
+                '?' if can_repeat_atom => GnuToken::Quantifier(RepetitionKind::ZeroOrOne),
+                '[' => GnuToken::Class(lex_class_units(flag, dialect, &units, &mut index)?),
+                '.' => GnuToken::Dot,
+                other => literal_token_for_char(other),
+            },
+            RegexDialect::Rust | RegexDialect::Pcre2 => unreachable!(),
+        };
+
+        can_repeat_atom = matches!(
+            token,
+            GnuToken::Literal(_)
+                | GnuToken::LiteralChar(_)
+                | GnuToken::Dot
+                | GnuToken::Class(_)
+                | GnuToken::GroupClose
+                | GnuToken::WordByteClass { .. }
+        );
+        branch_start = matches!(token, GnuToken::GroupOpen | GnuToken::Alternation);
+        tokens.push(token);
+    }
+
+    if group_depth != 0 {
+        return Err(malformed_regex(flag, dialect, "unclosed group"));
+    }
+
+    Ok(tokens)
+}
+
+fn literal_token_for_char(ch: char) -> GnuToken {
+    if ch.is_ascii() {
+        GnuToken::Literal(ch as u8)
+    } else {
+        GnuToken::LiteralChar(ch)
+    }
 }
 
 fn lex_bre_or_emacs_escape(
@@ -364,10 +505,136 @@ fn lex_extended_escape(
     }
 }
 
+fn lex_bre_or_emacs_escape_units(
+    flag: &str,
+    dialect: RegexDialect,
+    units: &[TextUnit<'_>],
+    index: &mut usize,
+    can_repeat_atom: bool,
+    group_depth: &mut usize,
+) -> Result<GnuToken, Diagnostic> {
+    let escaped = units
+        .get(*index)
+        .copied()
+        .ok_or_else(|| malformed_regex(flag, dialect, "trailing `\\`"))?
+        .as_char()
+        .ok_or_else(|| malformed_regex(flag, dialect, "invalid encoded character"))?;
+    *index += 1;
+
+    match dialect {
+        RegexDialect::PosixBasic => match escaped {
+            '1'..='9' => Ok(GnuToken::Backreference((escaped as u8 - b'0') as u16)),
+            '(' => {
+                *group_depth += 1;
+                Ok(GnuToken::GroupOpen)
+            }
+            ')' => {
+                if *group_depth == 0 {
+                    return Err(malformed_regex(flag, dialect, "unmatched `)`"));
+                }
+                *group_depth -= 1;
+                Ok(GnuToken::GroupClose)
+            }
+            '|' => Ok(GnuToken::Alternation),
+            '+' if can_repeat_atom => Ok(GnuToken::Quantifier(RepetitionKind::OneOrMore)),
+            '+' => Ok(GnuToken::Literal(b'+')),
+            '?' if can_repeat_atom => Ok(GnuToken::Quantifier(RepetitionKind::ZeroOrOne)),
+            '?' => Ok(GnuToken::Literal(b'?')),
+            '{' if can_repeat_atom => Ok(GnuToken::Quantifier(lex_basic_bound_units(
+                flag, dialect, units, index,
+            )?)),
+            '{' => Ok(GnuToken::Literal(b'{')),
+            'w' => Ok(GnuToken::WordByteClass { negated: false }),
+            'W' => Ok(GnuToken::WordByteClass { negated: true }),
+            'b' => Ok(GnuToken::Assertion(AssertionKind::WordBoundary)),
+            'B' => Ok(GnuToken::Assertion(AssertionKind::NotWordBoundary)),
+            '<' => Ok(GnuToken::Assertion(AssertionKind::WordStart)),
+            '>' => Ok(GnuToken::Assertion(AssertionKind::WordEnd)),
+            '`' => Ok(GnuToken::Assertion(AssertionKind::BufferStart)),
+            '\'' => Ok(GnuToken::Assertion(AssertionKind::BufferEnd)),
+            '\\' | '.' | '^' | '$' | '*' | '[' | ']' | '}' => Ok(GnuToken::Literal(escaped as u8)),
+            other => Err(unsupported_construct(
+                flag,
+                dialect,
+                format!("unsupported escape `{}`", escaped_display_char(other)),
+            )),
+        },
+        RegexDialect::Emacs => match escaped {
+            '(' => {
+                *group_depth += 1;
+                Ok(GnuToken::GroupOpen)
+            }
+            ')' => {
+                if *group_depth == 0 {
+                    return Err(malformed_regex(flag, dialect, "unmatched `)`"));
+                }
+                *group_depth -= 1;
+                Ok(GnuToken::GroupClose)
+            }
+            '|' => Ok(GnuToken::Alternation),
+            '{' if can_repeat_atom => Ok(GnuToken::Quantifier(lex_basic_bound_units(
+                flag, dialect, units, index,
+            )?)),
+            '1'..='9' => Ok(GnuToken::Backreference((escaped as u8 - b'0') as u16)),
+            '\\' | '.' | '^' | '$' | '*' | '+' | '?' | '[' | ']' | '}' => {
+                Ok(GnuToken::Literal(escaped as u8))
+            }
+            other => Ok(literal_token_for_char(other)),
+        },
+        RegexDialect::PosixExtended | RegexDialect::Rust | RegexDialect::Pcre2 => unreachable!(),
+    }
+}
+
+fn lex_extended_escape_units(
+    flag: &str,
+    dialect: RegexDialect,
+    units: &[TextUnit<'_>],
+    index: &mut usize,
+) -> Result<GnuToken, Diagnostic> {
+    let escaped = units
+        .get(*index)
+        .copied()
+        .ok_or_else(|| malformed_regex(flag, dialect, "trailing `\\`"))?
+        .as_char()
+        .ok_or_else(|| malformed_regex(flag, dialect, "invalid encoded character"))?;
+    *index += 1;
+
+    match escaped {
+        '1'..='9' => Ok(GnuToken::Backreference((escaped as u8 - b'0') as u16)),
+        'w' => Ok(GnuToken::WordByteClass { negated: false }),
+        'W' => Ok(GnuToken::WordByteClass { negated: true }),
+        'b' => Ok(GnuToken::Assertion(AssertionKind::WordBoundary)),
+        'B' => Ok(GnuToken::Assertion(AssertionKind::NotWordBoundary)),
+        '<' => Ok(GnuToken::Assertion(AssertionKind::WordStart)),
+        '>' => Ok(GnuToken::Assertion(AssertionKind::WordEnd)),
+        '`' => Ok(GnuToken::Assertion(AssertionKind::BufferStart)),
+        '\'' => Ok(GnuToken::Assertion(AssertionKind::BufferEnd)),
+        '\\' | '.' | '^' | '$' | '*' | '+' | '?' | '(' | ')' | '|' | '{' | '}' | '[' | ']' => {
+            Ok(GnuToken::Literal(escaped as u8))
+        }
+        other => Err(unsupported_construct(
+            flag,
+            dialect,
+            format!("unsupported escape `{}`", escaped_display_char(other)),
+        )),
+    }
+}
+
 fn emacs_dollar_is_anchor(pattern: &[u8], index: usize) -> bool {
     match pattern.get(index).copied() {
         None => true,
         Some(b'\\') => matches!(pattern.get(index + 1).copied(), Some(b')') | Some(b'|')),
+        Some(_) => false,
+    }
+}
+
+fn emacs_dollar_is_anchor_units(units: &[TextUnit<'_>], index: usize) -> bool {
+    match units.get(index).and_then(|unit| unit.as_char()) {
+        None => true,
+        Some('\\') => matches!(
+            units.get(index + 1).and_then(|unit| unit.as_char()),
+            Some(')') | Some('|')
+        ),
         Some(_) => false,
     }
 }
@@ -417,6 +684,73 @@ fn lex_basic_bound(
         dialect,
         "unterminated bounded repetition",
     ))
+}
+
+fn lex_extended_bound_units(
+    flag: &str,
+    dialect: RegexDialect,
+    units: &[TextUnit<'_>],
+    index: &mut usize,
+) -> Result<RepetitionKind, Diagnostic> {
+    let start = *index;
+    while let Some(ch) = units.get(*index).and_then(|unit| unit.as_char()) {
+        *index += 1;
+        if ch == '}' {
+            let body = collect_ascii_units(flag, dialect, &units[start..*index - 1])?;
+            return parse_repetition_body(flag, dialect, &body);
+        }
+    }
+
+    Err(malformed_regex(
+        flag,
+        dialect,
+        "unterminated bounded repetition",
+    ))
+}
+
+fn lex_basic_bound_units(
+    flag: &str,
+    dialect: RegexDialect,
+    units: &[TextUnit<'_>],
+    index: &mut usize,
+) -> Result<RepetitionKind, Diagnostic> {
+    let start = *index;
+    while *index + 1 < units.len() {
+        if units[*index].as_char() == Some('\\') && units[*index + 1].as_char() == Some('}') {
+            let body = collect_ascii_units(flag, dialect, &units[start..*index])?;
+            *index += 2;
+            return parse_repetition_body(flag, dialect, &body);
+        }
+        *index += 1;
+    }
+
+    Err(malformed_regex(
+        flag,
+        dialect,
+        "unterminated bounded repetition",
+    ))
+}
+
+fn collect_ascii_units(
+    flag: &str,
+    dialect: RegexDialect,
+    units: &[TextUnit<'_>],
+) -> Result<String, Diagnostic> {
+    let mut body = String::new();
+    for unit in units {
+        let ch = unit
+            .as_char()
+            .ok_or_else(|| malformed_regex(flag, dialect, "malformed bounded repetition"))?;
+        if !ch.is_ascii() {
+            return Err(malformed_regex(
+                flag,
+                dialect,
+                "malformed bounded repetition",
+            ));
+        }
+        body.push(ch);
+    }
+    Ok(body)
 }
 
 fn parse_repetition_body(
@@ -553,6 +887,116 @@ fn lex_class_item(
     }
 }
 
+fn lex_class_units(
+    flag: &str,
+    dialect: RegexDialect,
+    units: &[TextUnit<'_>],
+    index: &mut usize,
+) -> Result<ClassExpr, Diagnostic> {
+    let mut negated = false;
+    let mut items = Vec::new();
+
+    if units.get(*index).and_then(|unit| unit.as_char()) == Some('^') {
+        *index += 1;
+        negated = true;
+    }
+
+    if units.get(*index).and_then(|unit| unit.as_char()) == Some(']') {
+        *index += 1;
+        items.push(ClassItem::Byte(b']'));
+    }
+
+    while let Some(unit) = units.get(*index).copied() {
+        if unit.as_char() == Some(']') {
+            *index += 1;
+            return Ok(ClassExpr { negated, items });
+        }
+
+        let item = lex_class_item_units(flag, dialect, units, index)?;
+        if matches!(item, ClassItem::Byte(b'-'))
+            && !items.is_empty()
+            && units.get(*index).and_then(|unit| unit.as_char()) != Some(']')
+        {
+            let start = items.pop().unwrap();
+            let end = lex_class_item_units(flag, dialect, units, index)?;
+            match (start, end) {
+                (ClassItem::Byte(start), ClassItem::Byte(end)) => {
+                    if start > end {
+                        return Err(malformed_regex(
+                            flag,
+                            dialect,
+                            "invalid range in bracket expression",
+                        ));
+                    }
+                    items.push(ClassItem::Range(start, end));
+                }
+                (ClassItem::Char(start), ClassItem::Char(end)) => {
+                    if start > end {
+                        return Err(malformed_regex(
+                            flag,
+                            dialect,
+                            "invalid range in bracket expression",
+                        ));
+                    }
+                    items.push(ClassItem::CharRange(start, end));
+                }
+                (start, end) => {
+                    items.push(start);
+                    items.push(ClassItem::Byte(b'-'));
+                    items.push(end);
+                }
+            }
+        } else {
+            items.push(item);
+        }
+    }
+
+    Err(malformed_regex(
+        flag,
+        dialect,
+        "unterminated bracket expression",
+    ))
+}
+
+fn lex_class_item_units(
+    flag: &str,
+    dialect: RegexDialect,
+    units: &[TextUnit<'_>],
+    index: &mut usize,
+) -> Result<ClassItem, Diagnostic> {
+    let ch = units
+        .get(*index)
+        .copied()
+        .ok_or_else(|| malformed_regex(flag, dialect, "unterminated bracket expression"))?
+        .as_char()
+        .ok_or_else(|| malformed_regex(flag, dialect, "invalid encoded character"))?;
+    *index += 1;
+
+    match ch {
+        '[' => match units.get(*index).and_then(|unit| unit.as_char()) {
+            Some(':') => {
+                *index += 1;
+                let name = take_posix_class_name_units(flag, dialect, units, index)?;
+                Ok(ClassItem::PosixClass(name))
+            }
+            Some('.') => Err(unsupported_construct(
+                flag,
+                dialect,
+                "POSIX collating symbols are out of scope",
+            )),
+            Some('=') => Err(unsupported_construct(
+                flag,
+                dialect,
+                "POSIX equivalence classes are out of scope",
+            )),
+            _ => Ok(ClassItem::Byte(b'[')),
+        },
+        '\\' => Ok(ClassItem::Byte(b'\\')),
+        other if other.is_ascii() => Ok(ClassItem::Byte(other as u8)),
+        other => Ok(ClassItem::Char(other)),
+    }
+}
+
 fn take_posix_class_name(
     flag: &str,
     dialect: RegexDialect,
@@ -576,6 +1020,41 @@ fn take_posix_class_name(
                 "unsupported POSIX character class",
             ));
         }
+        *index += 1;
+    }
+
+    Err(malformed_regex(
+        flag,
+        dialect,
+        "unterminated POSIX character class",
+    ))
+}
+
+fn take_posix_class_name_units(
+    flag: &str,
+    dialect: RegexDialect,
+    units: &[TextUnit<'_>],
+    index: &mut usize,
+) -> Result<&'static str, Diagnostic> {
+    let mut name = String::new();
+
+    while *index + 1 < units.len() {
+        if units[*index].as_char() == Some(':') && units[*index + 1].as_char() == Some(']') {
+            *index += 2;
+            return canonical_posix_class(flag, dialect, &name);
+        }
+
+        let ch = units[*index].as_char().ok_or_else(|| {
+            unsupported_construct(flag, dialect, "unsupported POSIX character class")
+        })?;
+        if !ch.is_ascii() {
+            return Err(unsupported_construct(
+                flag,
+                dialect,
+                "unsupported POSIX character class",
+            ));
+        }
+        name.push(ch);
         *index += 1;
     }
 
@@ -688,6 +1167,7 @@ impl<'a> TokenParser<'a> {
     fn parse_atom(&mut self) -> Result<GnuExpr, Diagnostic> {
         match self.next().unwrap() {
             GnuToken::Literal(byte) => Ok(GnuExpr::Literal(byte)),
+            GnuToken::LiteralChar(ch) => Ok(GnuExpr::LiteralChar(ch)),
             GnuToken::Dot => Ok(GnuExpr::Dot),
             GnuToken::AnchorStart => Ok(GnuExpr::Anchor(AnchorKind::Start)),
             GnuToken::AnchorEnd => Ok(GnuExpr::Anchor(AnchorKind::End)),
@@ -750,6 +1230,7 @@ fn render_expr(
     match expr {
         GnuExpr::Empty => {}
         GnuExpr::Literal(byte) => push_literal_regex_byte(out, *byte),
+        GnuExpr::LiteralChar(ch) => push_literal_regex_char(out, *ch),
         GnuExpr::Dot => out.push('.'),
         GnuExpr::Concat(items) => {
             for item in items {
@@ -779,10 +1260,16 @@ fn render_expr(
             for item in &class.items {
                 match item {
                     ClassItem::Byte(byte) => push_bracket_escaped_byte(out, *byte),
+                    ClassItem::Char(ch) => push_bracket_escaped_char(out, *ch),
                     ClassItem::Range(start, end) => {
                         push_bracket_range_endpoint_byte(out, *start);
                         out.push('-');
                         push_bracket_range_endpoint_byte(out, *end);
+                    }
+                    ClassItem::CharRange(start, end) => {
+                        push_bracket_range_endpoint_char(out, *start);
+                        out.push('-');
+                        push_bracket_range_endpoint_char(out, *end);
                     }
                     ClassItem::PosixClass(name) => out.push_str(posix_named_class_fragment(name)),
                 }
@@ -866,6 +1353,16 @@ fn push_literal_regex_byte(out: &mut String, byte: u8) {
     }
 }
 
+fn push_literal_regex_char(out: &mut String, ch: char) {
+    match ch {
+        '.' | '^' | '$' | '|' | '(' | ')' | '[' | ']' | '{' | '}' | '*' | '+' | '?' | '\\' => {
+            out.push('\\');
+            out.push(ch);
+        }
+        other => out.push(other),
+    }
+}
+
 fn push_bracket_escaped_byte(out: &mut String, byte: u8) {
     match byte {
         b'\\' | b']' | b'^' | b'-' => {
@@ -874,6 +1371,16 @@ fn push_bracket_escaped_byte(out: &mut String, byte: u8) {
         }
         0x20..=0x7e => out.push(char::from(byte)),
         other => push_hex_byte(out, other),
+    }
+}
+
+fn push_bracket_escaped_char(out: &mut String, ch: char) {
+    match ch {
+        '\\' | ']' | '^' | '-' => {
+            out.push('\\');
+            out.push(ch);
+        }
+        other => out.push(other),
     }
 }
 
@@ -888,6 +1395,16 @@ fn push_bracket_range_endpoint_byte(out: &mut String, byte: u8) {
     }
 }
 
+fn push_bracket_range_endpoint_char(out: &mut String, ch: char) {
+    match ch {
+        '\\' | ']' | '^' => {
+            out.push('\\');
+            out.push(ch);
+        }
+        other => out.push(other),
+    }
+}
+
 fn push_hex_byte(out: &mut String, byte: u8) {
     write!(out, r"\x{:02X}", byte).unwrap();
 }
@@ -896,6 +1413,14 @@ fn escaped_display(byte: u8) -> String {
     match byte {
         0x20..=0x7e => format!(r"\{}", char::from(byte)),
         _ => format!(r"\x{:02X}", byte),
+    }
+}
+
+fn escaped_display_char(ch: char) -> String {
+    if ch.is_ascii() {
+        escaped_display(ch as u8)
+    } else {
+        format!(r"\{ch}")
     }
 }
 
