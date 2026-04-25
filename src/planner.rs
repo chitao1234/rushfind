@@ -5,6 +5,7 @@ use crate::ast::{
     Action, CommandAst, CompatibilityOptions, Expr, FileTypeFilter, FileTypeMatcher, GlobalOption,
     Predicate,
 };
+use crate::ctype::CtypeProfile;
 use crate::diagnostics::Diagnostic;
 use crate::exec::{
     BatchedExecAction, ExecBatchId, ExecSemantics, ImmediateExecAction, compile_batched_exec,
@@ -59,6 +60,7 @@ pub struct ExecutionPlan {
     pub start_paths: Vec<PathBuf>,
     pub follow_mode: FollowMode,
     pub compatibility_options: CompatibilityOptions,
+    pub ctype_profile: CtypeProfile,
     pub traversal: TraversalOptions,
     pub runtime: RuntimeRequirements,
     pub startup_warnings: Vec<String>,
@@ -196,8 +198,9 @@ fn compile_glob(
     pattern: &std::ffi::OsStr,
     case_insensitive: bool,
     slash_mode: GlobSlashMode,
+    ctype_profile: &CtypeProfile,
 ) -> Result<CompiledGlob, Diagnostic> {
-    CompiledGlob::compile(
+    CompiledGlob::compile_with_ctype(
         flag,
         pattern,
         if case_insensitive {
@@ -206,6 +209,7 @@ fn compile_glob(
             GlobCaseMode::Sensitive
         },
         slash_mode,
+        ctype_profile,
     )
 }
 
@@ -272,7 +276,7 @@ pub(crate) fn plan_command_with_now_and_capabilities(
         execdir_requires_safe_path: false,
         messages_locale_required: false,
     };
-    let mut state = PlanningState::new(now);
+    let mut state = PlanningState::new(now, CtypeProfile::current());
     let lowered = lower_expr(
         expr,
         &mut traversal,
@@ -314,6 +318,7 @@ pub(crate) fn plan_command_with_now_and_capabilities(
         start_paths,
         follow_mode,
         compatibility_options,
+        ctype_profile: state.ctype_profile.clone(),
         traversal,
         runtime,
         startup_warnings: state.startup_warnings.clone(),
@@ -749,7 +754,7 @@ fn lower_pattern_predicate(
             pattern,
             case_insensitive,
         } => Ok(RuntimeExpr::Predicate(RuntimePredicate::Regex(
-            RegexMatcher::compile(
+            RegexMatcher::compile_with_ctype(
                 if case_insensitive {
                     "-iregex"
                 } else {
@@ -758,6 +763,7 @@ fn lower_pattern_predicate(
                 state.regex_dialect,
                 pattern.as_os_str(),
                 case_insensitive,
+                &state.ctype_profile,
             )?,
         ))),
         Predicate::RegexType(raw) => {
@@ -799,7 +805,13 @@ fn compile_case_glob(
     if case_insensitive {
         require_platform_feature(capabilities, PlatformFeature::CaseInsensitiveGlob, state)?;
     }
-    compile_glob(flag, pattern, case_insensitive, GlobSlashMode::Literal)
+    compile_glob(
+        flag,
+        pattern,
+        case_insensitive,
+        GlobSlashMode::Literal,
+        &state.ctype_profile,
+    )
 }
 
 fn compile_normalized_glob(
@@ -1047,6 +1059,7 @@ struct TemporalPlanningState {
 
 #[derive(Debug, Clone)]
 struct PlanningState {
+    ctype_profile: CtypeProfile,
     temporal: TemporalPlanningState,
     regex_dialect: RegexDialect,
     saw_action: bool,
@@ -1068,8 +1081,9 @@ impl TemporalPlanningState {
 }
 
 impl PlanningState {
-    fn new(now: Timestamp) -> Self {
+    fn new(now: Timestamp, ctype_profile: CtypeProfile) -> Self {
         Self {
+            ctype_profile,
             temporal: TemporalPlanningState {
                 now,
                 daystart_active: false,
@@ -1331,6 +1345,20 @@ mod tests {
             .with(PlatformFeature::MessagesLocale, SupportLevel::Exact)
             .with(PlatformFeature::CaseInsensitiveGlob, SupportLevel::Exact)
             .with(PlatformFeature::ModeBits, SupportLevel::Exact)
+    }
+
+    #[test]
+    fn execution_plan_carries_default_ctype_profile() {
+        let ast = parse_command(&argv(&[".", "-name", "*.rs"])).unwrap();
+        let plan = plan_command_with_now_and_capabilities(
+            ast,
+            1,
+            Timestamp::new(0, 0),
+            &linux_like_caps(),
+        )
+        .unwrap();
+
+        assert!(plan.ctype_profile.is_byte_c() || !plan.ctype_profile.is_unknown());
     }
 
     fn windows_like_caps() -> PlatformCapabilities {

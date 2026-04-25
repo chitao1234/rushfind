@@ -77,6 +77,17 @@ impl CompiledGlob {
         })
     }
 
+    pub fn compile_with_ctype(
+        flag: &'static str,
+        pattern: &OsStr,
+        case_mode: GlobCaseMode,
+        slash_mode: GlobSlashMode,
+        ctype: &crate::ctype::CtypeProfile,
+    ) -> Result<Self, Diagnostic> {
+        let _ = ctype;
+        Self::compile(flag, pattern, case_mode, slash_mode)
+    }
+
     pub fn is_match(&self, candidate: &OsStr) -> Result<bool, Diagnostic> {
         owned::matches(
             &self.inner.program,
@@ -84,6 +95,17 @@ impl CompiledGlob {
             self.inner.slash_mode,
             candidate.as_encoded_bytes(),
         )
+    }
+
+    pub fn is_match_with_ctype(
+        &self,
+        candidate: &OsStr,
+        ctype: &crate::ctype::CtypeProfile,
+    ) -> Result<bool, Diagnostic> {
+        if ctype.is_byte_c() || ctype.is_unknown() {
+            return self.is_match(candidate);
+        }
+        self.is_match(candidate)
     }
 }
 

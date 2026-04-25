@@ -1,5 +1,6 @@
 use crate::account::{group_exists, user_exists};
 use crate::ast::{FileTypeFilter, FileTypeMatcher};
+use crate::ctype::CtypeProfile;
 use crate::diagnostics::Diagnostic;
 use crate::entry::{AccessMode, EntryContext, EntryKind};
 use crate::follow::FollowMode;
@@ -96,32 +97,56 @@ pub(crate) struct EvalOutcome {
 pub struct EvalContext {
     mount_snapshot: Option<Arc<FilesystemSnapshot>>,
     evaluation_now: Option<Timestamp>,
+    ctype_profile: CtypeProfile,
 }
 
 impl EvalContext {
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn with_now(now: Timestamp) -> Self {
+        Self::with_now_and_ctype(now, CtypeProfile::ByteC)
+    }
+
+    pub(crate) fn with_now_and_ctype(now: Timestamp, ctype_profile: CtypeProfile) -> Self {
         Self {
             mount_snapshot: None,
             evaluation_now: Some(now),
+            ctype_profile,
         }
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn with_mount_snapshot(snapshot: FilesystemSnapshot) -> Self {
+        Self::with_mount_snapshot_and_ctype(snapshot, CtypeProfile::ByteC)
+    }
+
+    pub(crate) fn with_mount_snapshot_and_ctype(
+        snapshot: FilesystemSnapshot,
+        ctype_profile: CtypeProfile,
+    ) -> Self {
         Self {
             mount_snapshot: Some(Arc::new(snapshot)),
             evaluation_now: None,
+            ctype_profile,
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn with_mount_snapshot_and_now(
         snapshot: FilesystemSnapshot,
         now: Timestamp,
     ) -> Self {
+        Self::with_mount_snapshot_and_now_and_ctype(snapshot, now, CtypeProfile::ByteC)
+    }
+
+    pub(crate) fn with_mount_snapshot_and_now_and_ctype(
+        snapshot: FilesystemSnapshot,
+        now: Timestamp,
+        ctype_profile: CtypeProfile,
+    ) -> Self {
         Self {
             mount_snapshot: Some(Arc::new(snapshot)),
             evaluation_now: Some(now),
+            ctype_profile,
         }
     }
 
@@ -141,6 +166,10 @@ impl EvalContext {
                 1,
             )
         })
+    }
+
+    pub(crate) fn ctype_profile(&self) -> &CtypeProfile {
+        &self.ctype_profile
     }
 }
 
@@ -310,15 +339,15 @@ pub(crate) fn evaluate_predicate(
         RuntimePredicate::Executable => entry.access(AccessMode::Execute),
         RuntimePredicate::Name(glob) => {
             let basename = entry.path.file_name().unwrap_or_else(|| OsStr::new(""));
-            glob.is_match(basename)
+            glob.is_match_with_ctype(basename, context.ctype_profile())
         }
         RuntimePredicate::Path(glob) => {
             let normalized = normalize_match_text(entry.path.as_os_str());
-            glob.is_match(normalized.as_ref())
+            glob.is_match_with_ctype(normalized.as_ref(), context.ctype_profile())
         }
         RuntimePredicate::Regex(matcher) => {
             let normalized = normalize_match_text(entry.path.as_os_str());
-            matcher.is_match(normalized.as_ref())
+            matcher.is_match_with_ctype(normalized.as_ref(), context.ctype_profile())
         }
         RuntimePredicate::Inum(expected) => Ok(expected.matches(entry.active_inode(follow_mode)?)),
         RuntimePredicate::Links(expected) => {
@@ -330,7 +359,7 @@ pub(crate) fn evaluate_predicate(
         RuntimePredicate::LName(glob) => match entry.active_link_target(follow_mode)? {
             Some(target) => {
                 let normalized = normalize_match_text(target.as_os_str());
-                glob.is_match(normalized.as_ref())
+                glob.is_match_with_ctype(normalized.as_ref(), context.ctype_profile())
             }
             None => Ok(false),
         },

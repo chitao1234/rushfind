@@ -146,6 +146,17 @@ impl RegexMatcher {
         })
     }
 
+    pub fn compile_with_ctype(
+        flag: &str,
+        dialect: RegexDialect,
+        pattern: &OsStr,
+        case_insensitive: bool,
+        ctype: &crate::ctype::CtypeProfile,
+    ) -> Result<Self, Diagnostic> {
+        let _ = ctype;
+        Self::compile(flag, dialect, pattern, case_insensitive)
+    }
+
     pub fn dialect(&self) -> RegexDialect {
         self.inner.dialect
     }
@@ -157,6 +168,17 @@ impl RegexMatcher {
 
     pub fn is_match(&self, candidate: &OsStr) -> Result<bool, Diagnostic> {
         self.inner.compiled.is_match(candidate.as_encoded_bytes())
+    }
+
+    pub fn is_match_with_ctype(
+        &self,
+        candidate: &OsStr,
+        ctype: &crate::ctype::CtypeProfile,
+    ) -> Result<bool, Diagnostic> {
+        if ctype.is_byte_c() || ctype.is_unknown() {
+            return self.is_match(candidate);
+        }
+        self.is_match(candidate)
     }
 }
 
