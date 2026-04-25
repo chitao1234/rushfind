@@ -1,6 +1,6 @@
 #![cfg(unix)]
 
-use rushfind::ast::FileTypeFilter;
+use rushfind::ast::{FileTypeFilter, FileTypeMatcher};
 use rushfind::entry::EntryContext;
 use rushfind::eval::evaluate;
 use rushfind::follow::FollowMode;
@@ -17,7 +17,9 @@ fn type_uses_the_active_follow_mode() {
     unix_fs::symlink(root.path().join("real"), root.path().join("dir-link")).unwrap();
 
     let entry = EntryContext::new(root.path().join("dir-link"), 0, true);
-    let expr = RuntimeExpr::Predicate(RuntimePredicate::Type(FileTypeFilter::Directory));
+    let expr = RuntimeExpr::Predicate(RuntimePredicate::Type(FileTypeMatcher::single(
+        FileTypeFilter::Directory,
+    )));
     let mut sink = RecordingSink::default();
 
     assert!(!evaluate(&expr, &entry, FollowMode::Physical, &mut sink).unwrap());
@@ -31,7 +33,9 @@ fn xtype_uses_the_complementary_view() {
     unix_fs::symlink(root.path().join("real"), root.path().join("dir-link")).unwrap();
 
     let entry = EntryContext::new(root.path().join("dir-link"), 0, true);
-    let expr = RuntimeExpr::Predicate(RuntimePredicate::XType(FileTypeFilter::Symlink));
+    let expr = RuntimeExpr::Predicate(RuntimePredicate::XType(FileTypeMatcher::single(
+        FileTypeFilter::Symlink,
+    )));
     let mut sink = RecordingSink::default();
 
     assert!(!evaluate(&expr, &entry, FollowMode::Physical, &mut sink).unwrap());

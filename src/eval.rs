@@ -1,5 +1,5 @@
 use crate::account::{group_exists, user_exists};
-use crate::ast::FileTypeFilter;
+use crate::ast::{FileTypeFilter, FileTypeMatcher};
 use crate::diagnostics::Diagnostic;
 use crate::entry::{AccessMode, EntryContext, EntryKind};
 use crate::follow::FollowMode;
@@ -360,17 +360,17 @@ pub(crate) fn evaluate_predicate(
     }
 }
 
-fn matches_type(expected: FileTypeFilter, actual: EntryKind) -> bool {
-    matches!(
-        (expected, actual),
-        (FileTypeFilter::File, EntryKind::File)
-            | (FileTypeFilter::Directory, EntryKind::Directory)
-            | (FileTypeFilter::Symlink, EntryKind::Symlink)
-            | (FileTypeFilter::Block, EntryKind::Block)
-            | (FileTypeFilter::Character, EntryKind::Character)
-            | (FileTypeFilter::Fifo, EntryKind::Fifo)
-            | (FileTypeFilter::Socket, EntryKind::Socket)
-    )
+fn matches_type(expected: FileTypeMatcher, actual: EntryKind) -> bool {
+    expected.contains(match actual {
+        EntryKind::File => FileTypeFilter::File,
+        EntryKind::Directory => FileTypeFilter::Directory,
+        EntryKind::Symlink => FileTypeFilter::Symlink,
+        EntryKind::Block => FileTypeFilter::Block,
+        EntryKind::Character => FileTypeFilter::Character,
+        EntryKind::Fifo => FileTypeFilter::Fifo,
+        EntryKind::Socket => FileTypeFilter::Socket,
+        EntryKind::Unknown => return false,
+    })
 }
 
 fn entry_timestamp(
@@ -405,11 +405,12 @@ mod tests {
     use super::{
         ActionOutcome, ActionSink, EvalContext, RuntimeStatus, evaluate,
         evaluate_outcome_with_context, evaluate_read_only_outcome, evaluate_with_context,
-        expression_is_read_only,
+        expression_is_read_only, matches_type,
     };
+    use crate::ast::{FileTypeFilter, FileTypeMatcher};
     use crate::diagnostics::Diagnostic;
     use crate::entry::test_support::CountingReader;
-    use crate::entry::{AccessMode, EntryContext};
+    use crate::entry::{AccessMode, EntryContext, EntryKind};
     use crate::follow::FollowMode;
     use crate::mounts::MountSnapshot;
     use crate::output::RecordingSink;
@@ -513,6 +514,16 @@ mod tests {
 
         assert!(outcome.matched);
         assert_eq!(sink.into_utf8(), "sample\n");
+    }
+
+    #[test]
+    fn type_matcher_accepts_any_listed_entry_kind() {
+        let matcher =
+            FileTypeMatcher::from_filters([FileTypeFilter::File, FileTypeFilter::Directory]);
+
+        assert!(matches_type(matcher, EntryKind::File));
+        assert!(matches_type(matcher, EntryKind::Directory));
+        assert!(!matches_type(matcher, EntryKind::Symlink));
     }
 
     #[test]

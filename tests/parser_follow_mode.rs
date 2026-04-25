@@ -1,6 +1,6 @@
 mod support;
 
-use rushfind::ast::{CommandAst, Expr, FileTypeFilter, GlobalOption, Predicate};
+use rushfind::ast::{CommandAst, Expr, FileTypeFilter, FileTypeMatcher, GlobalOption, Predicate};
 use rushfind::follow::FollowMode;
 use rushfind::parser::parse_command;
 use support::argv;
@@ -41,6 +41,8 @@ fn parses_xtype_as_a_normal_predicate() {
 
     assert_eq!(
         ast.expr,
-        Expr::Predicate(Predicate::XType(FileTypeFilter::Symlink))
+        Expr::Predicate(Predicate::XType(FileTypeMatcher::single(
+            FileTypeFilter::Symlink
+        )))
     );
 }

@@ -85,8 +85,8 @@ pub enum Predicate {
         reference_arg: OsString,
     },
     DayStart,
-    Type(FileTypeFilter),
-    XType(FileTypeFilter),
+    Type(FileTypeMatcher),
+    XType(FileTypeMatcher),
     True,
     False,
 }
@@ -118,4 +118,46 @@ pub enum FileTypeFilter {
     Character,
     Fifo,
     Socket,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileTypeMatcher {
+    bits: u8,
+}
+
+impl FileTypeMatcher {
+    pub fn single(filter: FileTypeFilter) -> Self {
+        Self { bits: filter.bit() }
+    }
+
+    pub fn from_filters(filters: impl IntoIterator<Item = FileTypeFilter>) -> Self {
+        let bits = filters
+            .into_iter()
+            .fold(0, |bits, filter| bits | filter.bit());
+        Self { bits }
+    }
+
+    pub fn contains(self, filter: FileTypeFilter) -> bool {
+        self.bits & filter.bit() != 0
+    }
+}
+
+impl From<FileTypeFilter> for FileTypeMatcher {
+    fn from(filter: FileTypeFilter) -> Self {
+        Self::single(filter)
+    }
+}
+
+impl FileTypeFilter {
+    const fn bit(self) -> u8 {
+        match self {
+            Self::File => 1 << 0,
+            Self::Directory => 1 << 1,
+            Self::Symlink => 1 << 2,
+            Self::Block => 1 << 3,
+            Self::Character => 1 << 4,
+            Self::Fifo => 1 << 5,
+            Self::Socket => 1 << 6,
+        }
+    }
 }

@@ -1,5 +1,7 @@
 use crate::args::{Arg, ArgCursor};
-use crate::ast::{Action, CommandAst, Expr, FileTypeFilter, GlobalOption, Predicate};
+use crate::ast::{
+    Action, CommandAst, Expr, FileTypeFilter, FileTypeMatcher, GlobalOption, Predicate,
+};
 use crate::diagnostics::Diagnostic;
 use crate::follow::FollowMode;
 use crate::numeric::validate_numeric_argument;
@@ -658,7 +660,7 @@ impl<'a> Parser<'a> {
 
     fn parse_type_atom(&mut self, follow_symlinks: bool) -> Result<Expr, Diagnostic> {
         let flag = if follow_symlinks { "-xtype" } else { "-type" };
-        let filter = self.take_type_filter_for(flag)?;
+        let filter = self.take_type_matcher_for(flag)?;
         Ok(Expr::Predicate(if follow_symlinks {
             Predicate::XType(filter)
         } else {
@@ -740,21 +742,16 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn take_type_filter_for(&mut self, flag: &str) -> Result<FileTypeFilter, Diagnostic> {
+    fn take_type_matcher_for(&mut self, flag: &str) -> Result<FileTypeMatcher, Diagnostic> {
         let value = self.take_os_string(flag)?;
-        match value.as_os_str().as_encoded_bytes() {
-            b"f" => Ok(FileTypeFilter::File),
-            b"d" => Ok(FileTypeFilter::Directory),
-            b"l" => Ok(FileTypeFilter::Symlink),
-            b"b" => Ok(FileTypeFilter::Block),
-            b"c" => Ok(FileTypeFilter::Character),
-            b"p" => Ok(FileTypeFilter::Fifo),
-            b"s" => Ok(FileTypeFilter::Socket),
-            _ => Err(Diagnostic::parse(format!(
-                "unsupported {flag} value `{}`",
-                value.to_string_lossy()
-            ))),
+        let bytes = value.as_os_str().as_encoded_bytes();
+        let mut filters = Vec::new();
+
+        for component in bytes.split(|byte| *byte == b',') {
+            filters.push(parse_type_filter_component(flag, component, &value)?);
         }
+
+        Ok(FileTypeMatcher::from_filters(filters))
     }
 
     fn take_exec_action(
@@ -806,4 +803,28 @@ fn parse_newerxy_flag(token: Arg<'_>) -> Option<(char, char)> {
     }
 
     Some((char::from(bytes[6]), char::from(bytes[7])))
+}
+
+fn parse_type_filter_component(
+    flag: &str,
+    component: &[u8],
+    full_value: &OsString,
+) -> Result<FileTypeFilter, Diagnostic> {
+    match component {
+        b"f" => Ok(FileTypeFilter::File),
+        b"d" => Ok(FileTypeFilter::Directory),
+        b"l" => Ok(FileTypeFilter::Symlink),
+        b"b" => Ok(FileTypeFilter::Block),
+        b"c" => Ok(FileTypeFilter::Character),
+        b"p" => Ok(FileTypeFilter::Fifo),
+        b"s" => Ok(FileTypeFilter::Socket),
+        b"" => Err(Diagnostic::parse(format!(
+            "empty file type in {flag} list `{}`",
+            full_value.to_string_lossy()
+        ))),
+        other => Err(Diagnostic::parse(format!(
+            "unsupported {flag} value `{}`",
+            String::from_utf8_lossy(other)
+        ))),
+    }
 }

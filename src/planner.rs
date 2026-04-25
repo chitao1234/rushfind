@@ -1,7 +1,7 @@
 use crate::account::{
     PrincipalId, canonicalize_sid_principal, resolve_group_principal, resolve_user_principal,
 };
-use crate::ast::{Action, CommandAst, Expr, FileTypeFilter, GlobalOption, Predicate};
+use crate::ast::{Action, CommandAst, Expr, FileTypeMatcher, GlobalOption, Predicate};
 use crate::diagnostics::Diagnostic;
 use crate::exec::{
     BatchedExecAction, ExecBatchId, ExecSemantics, ImmediateExecAction, compile_batched_exec,
@@ -147,8 +147,8 @@ pub enum RuntimePredicate {
     Used(UsedMatcher),
     RelativeTime(RelativeTimeMatcher),
     Newer(NewerMatcher),
-    Type(FileTypeFilter),
-    XType(FileTypeFilter),
+    Type(FileTypeMatcher),
+    XType(FileTypeMatcher),
     True,
     False,
 }

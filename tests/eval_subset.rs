@@ -1,3 +1,4 @@
+use rushfind::ast::{FileTypeFilter, FileTypeMatcher};
 use rushfind::entry::EntryContext;
 use rushfind::eval::evaluate;
 use rushfind::follow::FollowMode;
@@ -84,9 +85,9 @@ fn type_predicate_filters_by_entry_kind() {
     let path = root.path().join("src");
     fs::create_dir(&path).unwrap();
     let entry = entry_for(&path, 0);
-    let expr = RuntimeExpr::Predicate(RuntimePredicate::Type(
-        rushfind::ast::FileTypeFilter::Directory,
-    ));
+    let expr = RuntimeExpr::Predicate(RuntimePredicate::Type(FileTypeMatcher::single(
+        FileTypeFilter::Directory,
+    )));
     let mut sink = RecordingSink::default();
 
     assert!(evaluate(&expr, &entry, FollowMode::Physical, &mut sink).unwrap());

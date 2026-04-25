@@ -1,6 +1,6 @@
 mod support;
 
-use rushfind::ast::{Action, CommandAst, Expr, FileTypeFilter, Predicate};
+use rushfind::ast::{Action, CommandAst, Expr, FileTypeFilter, FileTypeMatcher, Predicate};
 use rushfind::parser::parse_command;
 use std::path::PathBuf;
 use support::argv;
@@ -46,7 +46,9 @@ fn parses_parenthesized_or_expression() {
                     case_insensitive: false,
                 })),
             ),
-            Expr::Predicate(Predicate::Type(FileTypeFilter::File)),
+            Expr::Predicate(Predicate::Type(FileTypeMatcher::single(
+                FileTypeFilter::File
+            ))),
         ])
     );
 }

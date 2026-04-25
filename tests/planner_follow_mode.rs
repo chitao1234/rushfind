@@ -1,6 +1,6 @@
 mod support;
 
-use rushfind::ast::FileTypeFilter;
+use rushfind::ast::{FileTypeFilter, FileTypeMatcher};
 use rushfind::follow::FollowMode;
 use rushfind::parser::parse_command;
 use rushfind::planner::{RuntimeExpr, RuntimePredicate, plan_command};
@@ -31,7 +31,8 @@ fn lowers_xtype_into_the_runtime_expression_tree() {
         RuntimeExpr::And(ref items) => {
             assert!(items.iter().any(|item| matches!(
                 item,
-                RuntimeExpr::Predicate(RuntimePredicate::XType(FileTypeFilter::Symlink))
+                RuntimeExpr::Predicate(RuntimePredicate::XType(matcher))
+                    if *matcher == FileTypeMatcher::single(FileTypeFilter::Symlink)
             )));
         }
         ref other => panic!("expected conjunction with implicit print, got {other:?}"),
