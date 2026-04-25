@@ -51,3 +51,47 @@ fn parses_xtype_as_a_normal_predicate() {
         )))
     );
 }
+
+#[test]
+fn parses_positional_follow_as_compatibility_option() {
+    let ast = parse_command(&argv(&[".", "-follow", "-print"])).unwrap();
+
+    assert!(ast.compatibility_options.follow);
+    assert_eq!(
+        ast.expr,
+        Expr::And(vec![
+            Expr::Predicate(Predicate::Compatibility(
+                rushfind::ast::CompatibilityPredicate::Follow,
+            )),
+            Expr::Action(rushfind::ast::Action::Print),
+        ])
+    );
+}
+
+#[test]
+fn positional_follow_is_not_a_leading_normal_option() {
+    let error = parse_command(&argv(&["-follow", ".", "-print"])).unwrap_err();
+
+    assert!(
+        error.message.contains("unexpected") || error.message.contains("unsupported"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn parses_context_as_a_recognized_predicate() {
+    let ast = parse_command(&argv(&[".", "-context", "system_u:object_r:tmp_t:s0"])).unwrap();
+
+    assert_eq!(
+        ast.expr,
+        Expr::Predicate(Predicate::Context("system_u:object_r:tmp_t:s0".into()))
+    );
+}
+
+#[test]
+fn rejects_missing_context_operand() {
+    let error = parse_command(&argv(&[".", "-context"])).unwrap_err();
+
+    assert!(error.message.contains("-context"), "{}", error.message);
+}
