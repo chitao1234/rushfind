@@ -1432,6 +1432,155 @@ fn parallel_type_lists_match_gnu_find_as_sets() {
 }
 
 #[test]
+fn ordered_files0_from_matches_gnu_find_exactly() {
+    let root = build_tree();
+    let list = root.path().join("roots.list");
+    let src = root.path().join("src");
+    let docs = root.path().join("docs");
+    fs::write(
+        &list,
+        [
+            src.as_os_str().as_bytes(),
+            b"\0",
+            docs.as_os_str().as_bytes(),
+            b"\0",
+        ]
+        .concat(),
+    )
+    .unwrap();
+
+    let args = vec![
+        "-files0-from".into(),
+        path_arg(&list),
+        "-maxdepth".into(),
+        "0".into(),
+        "-print".into(),
+    ];
+
+    assert_matches_gnu_exact(&args);
+}
+
+#[test]
+fn parallel_files0_from_matches_gnu_find_as_sets() {
+    let root = build_tree();
+    let list = root.path().join("roots.list");
+    let src = root.path().join("src");
+    let docs = root.path().join("docs");
+    fs::write(
+        &list,
+        [
+            src.as_os_str().as_bytes(),
+            b"\0",
+            docs.as_os_str().as_bytes(),
+            b"\0",
+        ]
+        .concat(),
+    )
+    .unwrap();
+
+    let args = vec!["-files0-from".into(), path_arg(&list), "-print".into()];
+
+    assert_matches_gnu_as_sets(&args);
+}
+
+#[test]
+fn ordered_empty_files0_from_matches_gnu_find_exactly() {
+    let root = build_tree();
+    let list = root.path().join("empty.list");
+    fs::write(&list, []).unwrap();
+
+    let args = vec!["-files0-from".into(), path_arg(&list), "-print".into()];
+
+    assert_matches_gnu_exact(&args);
+}
+
+#[test]
+fn files0_from_rejection_outcome_matches_gnu_find() {
+    let root = build_tree();
+    let list = root.path().join("roots.list");
+    fs::write(&list, [root.path().as_os_str().as_bytes(), b"\0"].concat()).unwrap();
+    let args = vec![
+        path_arg(root.path()),
+        "-files0-from".into(),
+        path_arg(&list),
+        "-print".into(),
+    ];
+
+    let Some(expected) = gnu_find_output(&args, false) else {
+        return;
+    };
+    let actual = rushfind_command()
+        .env("RUSHFIND_WORKERS", "1")
+        .args(&args)
+        .output()
+        .unwrap();
+
+    assert_eq!(actual.status.code(), expected.status.code());
+    assert!(!actual.stderr.is_empty());
+}
+
+#[test]
+fn ordered_noop_normal_options_match_gnu_find_exactly() {
+    let root = build_tree();
+
+    let args_sets = vec![
+        vec![
+            "-O0".into(),
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "0".into(),
+            "-print".into(),
+        ],
+        vec![
+            "-O4".into(),
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "0".into(),
+            "-print".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-noleaf".into(),
+            "-maxdepth".into(),
+            "0".into(),
+            "-print".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-warn".into(),
+            "-maxdepth".into(),
+            "0".into(),
+            "-print".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-nowarn".into(),
+            "-maxdepth".into(),
+            "0".into(),
+            "-print".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-ignore_readdir_race".into(),
+            "-maxdepth".into(),
+            "0".into(),
+            "-print".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-noignore_readdir_race".into(),
+            "-maxdepth".into(),
+            "0".into(),
+            "-print".into(),
+        ],
+    ];
+
+    for args in args_sets {
+        assert_matches_gnu_exact(&args);
+    }
+}
+
+#[test]
 fn parallel_fstype_matches_gnu_as_a_set() {
     let root = build_tree();
     let Some(host_type) = current_fstype(root.path()) else {

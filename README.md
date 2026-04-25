@@ -14,10 +14,13 @@ Find for the occupātus.
 ## Current scope
 
 - GNU-style argv parsing, including comma expression sequencing
-- Global follow-mode and metadata options: `-P`, `-H`, `-L`, `-version`, `--version`
+- Global follow-mode and normal compatibility options: `-P`, `-H`, `-L`, `-version`,
+  `--version`, `--help`, `-Olevel`, `-D debugopts`
 - Read-only predicates: `-name`, `-iname`, `-path`, `-ipath`, `-type`, `-xtype`, `-true`,
   `-false`, `-fstype`
 - `-type` and `-xtype` accept GNU-style comma lists such as `-type f,d`
+- GNU normal compatibility options: `-files0-from FILE`, `-noleaf`, `-warn`, `-nowarn`,
+  `-ignore_readdir_race`, and `-noignore_readdir_race`
 - Identity/link predicates: `-samefile`, `-inum`, `-links`
 - Ownership/account predicates: `-uid`, `-gid`, `-user`, `-group`, `-nouser`, `-nogroup`,
   plus Windows-specific `-owner`, `-owner-sid`, and `-group-sid`
@@ -78,6 +81,11 @@ Find for the occupātus.
   macOS and BSD, and volume metadata on Windows
 - Requested filesystem types are resolved against the set known at command startup
 - Commands that do not use `-fstype` do not read mount-table state
+- `-Olevel` is accepted for GNU command-line compatibility but does not change optimizer behavior
+- `-D debugopts` emits lightweight `rushfind` diagnostics for requested categories rather than
+  GNU findutils' detailed tracing stream
+- `-ignore_readdir_race` and `-noignore_readdir_race` are accepted and recorded compatibility
+  options; this implementation does not yet alter runtime race handling for disappearing entries
 - Access predicates use kernel access checks and intentionally can differ from `-perm`
 - Access predicates use real-ID GNU `access(2)` semantics and are not mode-bit emulation
 - When available, the access predicate path uses `faccessat`, with `access(2)` as the fallback
