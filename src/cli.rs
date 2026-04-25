@@ -81,7 +81,7 @@ fn resolve_worker_count_from(
     }
 
     ResolvedWorkerCount {
-        count: host_parallelism.max(1).min(DEFAULT_PARALLEL_WORKER_CAP),
+        count: host_parallelism.clamp(1, DEFAULT_PARALLEL_WORKER_CAP),
         source: WorkerCountSource::Default,
     }
 }
