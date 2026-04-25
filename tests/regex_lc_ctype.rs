@@ -72,3 +72,51 @@ fn utf8_gnu_iregex_uses_single_character_case_folding() {
             .unwrap()
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn utf8_gnu_regex_dot_does_not_classify_invalid_byte_as_alpha() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let ctype = utf8();
+    let matcher = RegexMatcher::compile_with_ctype(
+        "-regex",
+        RegexDialect::PosixExtended,
+        OsStr::new(".*/x[[:alpha:]]"),
+        false,
+        &ctype,
+    )
+    .unwrap();
+    let candidate = OsString::from_vec(b"./x\xc3".to_vec());
+
+    assert!(
+        !matcher
+            .is_match_with_ctype(candidate.as_os_str(), &ctype)
+            .unwrap()
+    );
+}
+
+#[test]
+fn utf8_gnu_regex_word_escape_remains_ascii_word_for_now() {
+    let ctype = utf8();
+    let matcher = RegexMatcher::compile_with_ctype(
+        "-regex",
+        RegexDialect::Emacs,
+        OsStr::new(r".*/\w"),
+        false,
+        &ctype,
+    )
+    .unwrap();
+
+    assert!(
+        matcher
+            .is_match_with_ctype(OsStr::new("./A"), &ctype)
+            .unwrap()
+    );
+    assert!(
+        !matcher
+            .is_match_with_ctype(OsStr::new("./é"), &ctype)
+            .unwrap()
+    );
+}

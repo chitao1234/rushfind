@@ -4,7 +4,9 @@ use crate::ctype::class::{PosixClass, class_contains};
 use crate::ctype::text::{TextUnit, decode_units};
 use crate::diagnostics::Diagnostic;
 use crate::regex_match::RegexDialect;
-use crate::regex_match::ir::{AnchorKind, ClassExpr, ClassItem, GnuExpr, GnuRegex, RepetitionKind};
+use crate::regex_match::ir::{
+    AnchorKind, AssertionKind, ClassExpr, ClassItem, GnuExpr, GnuRegex, RepetitionKind,
+};
 
 pub(crate) type LocaleGnuRegex = GnuRegex;
 
@@ -87,9 +89,9 @@ fn match_expr(
                 Vec::new()
             }
         }
-        GnuExpr::Backreference(_) | GnuExpr::Assertion(_) | GnuExpr::WordByteClass { .. } => {
-            Vec::new()
-        }
+        GnuExpr::Backreference(_) => Vec::new(),
+        GnuExpr::Assertion(kind) => match_assertion(*kind, units, pos),
+        GnuExpr::WordByteClass { negated } => match_word_byte_class(*negated, units, pos),
     }
 }
 
@@ -220,4 +222,40 @@ fn char_range_contains(start: char, end: char, actual: char, case_insensitive: b
         end
     };
     start <= actual && actual <= end
+}
+
+fn match_word_byte_class(negated: bool, units: &[TextUnit<'_>], pos: usize) -> Vec<usize> {
+    let matched = units
+        .get(pos)
+        .copied()
+        .and_then(TextUnit::as_char)
+        .is_some_and(is_ascii_word);
+    if matched ^ negated {
+        vec![pos + 1]
+    } else {
+        Vec::new()
+    }
+}
+
+fn is_ascii_word(ch: char) -> bool {
+    ch == '_' || ch.is_ascii_alphanumeric()
+}
+
+fn match_assertion(kind: AssertionKind, units: &[TextUnit<'_>], pos: usize) -> Vec<usize> {
+    let before = pos
+        .checked_sub(1)
+        .and_then(|idx| units.get(idx))
+        .and_then(|unit| unit.as_char());
+    let after = units.get(pos).copied().and_then(TextUnit::as_char);
+    let before_word = before.is_some_and(is_ascii_word);
+    let after_word = after.is_some_and(is_ascii_word);
+    let matched = match kind {
+        AssertionKind::WordBoundary => before_word != after_word,
+        AssertionKind::NotWordBoundary => before_word == after_word,
+        AssertionKind::WordStart => !before_word && after_word,
+        AssertionKind::WordEnd => before_word && !after_word,
+        AssertionKind::BufferStart => pos == 0,
+        AssertionKind::BufferEnd => pos == units.len(),
+    };
+    if matched { vec![pos] } else { Vec::new() }
 }

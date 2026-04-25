@@ -464,6 +464,14 @@ fn lex_bre_or_emacs_escape(
                 flag, dialect, pattern, index,
             )?)),
             b'1'..=b'9' => Ok(GnuToken::Backreference((escaped - b'0') as u16)),
+            b'w' => Ok(GnuToken::WordByteClass { negated: false }),
+            b'W' => Ok(GnuToken::WordByteClass { negated: true }),
+            b'b' => Ok(GnuToken::Assertion(AssertionKind::WordBoundary)),
+            b'B' => Ok(GnuToken::Assertion(AssertionKind::NotWordBoundary)),
+            b'<' => Ok(GnuToken::Assertion(AssertionKind::WordStart)),
+            b'>' => Ok(GnuToken::Assertion(AssertionKind::WordEnd)),
+            b'`' => Ok(GnuToken::Assertion(AssertionKind::BufferStart)),
+            b'\'' => Ok(GnuToken::Assertion(AssertionKind::BufferEnd)),
             b'\\' | b'.' | b'^' | b'$' | b'*' | b'+' | b'?' | b'[' | b']' | b'}' => {
                 Ok(GnuToken::Literal(escaped))
             }
@@ -576,6 +584,14 @@ fn lex_bre_or_emacs_escape_units(
                 flag, dialect, units, index,
             )?)),
             '1'..='9' => Ok(GnuToken::Backreference((escaped as u8 - b'0') as u16)),
+            'w' => Ok(GnuToken::WordByteClass { negated: false }),
+            'W' => Ok(GnuToken::WordByteClass { negated: true }),
+            'b' => Ok(GnuToken::Assertion(AssertionKind::WordBoundary)),
+            'B' => Ok(GnuToken::Assertion(AssertionKind::NotWordBoundary)),
+            '<' => Ok(GnuToken::Assertion(AssertionKind::WordStart)),
+            '>' => Ok(GnuToken::Assertion(AssertionKind::WordEnd)),
+            '`' => Ok(GnuToken::Assertion(AssertionKind::BufferStart)),
+            '\'' => Ok(GnuToken::Assertion(AssertionKind::BufferEnd)),
             '\\' | '.' | '^' | '$' | '*' | '+' | '?' | '[' | ']' | '}' => {
                 Ok(GnuToken::Literal(escaped as u8))
             }
