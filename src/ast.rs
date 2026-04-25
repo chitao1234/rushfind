@@ -5,7 +5,9 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandAst {
     pub start_paths: Vec<PathBuf>,
+    pub start_paths_explicit: bool,
     pub global_options: Vec<GlobalOption>,
+    pub compatibility_options: CompatibilityOptions,
     pub expr: Expr,
 }
 
@@ -13,6 +15,90 @@ pub struct CommandAst {
 pub enum GlobalOption {
     Follow(FollowMode),
     Version,
+    Help,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CompatibilityOptions {
+    pub optimizer_level: Option<u32>,
+    pub debug_options: Vec<DebugOption>,
+    pub unknown_debug_options: Vec<OsString>,
+    pub files0_from: Option<Files0From>,
+    pub warning_mode: WarningMode,
+    pub noleaf: bool,
+    pub ignore_readdir_race: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Files0From {
+    Path(PathBuf),
+    Stdin,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WarningMode {
+    Warn,
+    NoWarn,
+}
+
+impl Default for WarningMode {
+    fn default() -> Self {
+        Self::Warn
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DebugOption {
+    Exec,
+    Opt,
+    Rates,
+    Search,
+    Stat,
+    Time,
+    Tree,
+    All,
+    Help,
+}
+
+impl DebugOption {
+    pub fn parse(raw: &[u8]) -> Option<Self> {
+        match raw {
+            b"exec" => Some(Self::Exec),
+            b"opt" => Some(Self::Opt),
+            b"rates" => Some(Self::Rates),
+            b"search" => Some(Self::Search),
+            b"stat" => Some(Self::Stat),
+            b"time" => Some(Self::Time),
+            b"tree" => Some(Self::Tree),
+            b"all" => Some(Self::All),
+            b"help" => Some(Self::Help),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Exec => "exec",
+            Self::Opt => "opt",
+            Self::Rates => "rates",
+            Self::Search => "search",
+            Self::Stat => "stat",
+            Self::Time => "time",
+            Self::Tree => "tree",
+            Self::All => "all",
+            Self::Help => "help",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompatibilityPredicate {
+    Files0From,
+    NoLeaf,
+    Warn,
+    NoWarn,
+    IgnoreReaddirRace,
+    NoIgnoreReaddirRace,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,6 +174,7 @@ pub enum Predicate {
     DayStart,
     Type(FileTypeMatcher),
     XType(FileTypeMatcher),
+    Compatibility(CompatibilityPredicate),
     True,
     False,
 }

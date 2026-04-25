@@ -1,6 +1,9 @@
 mod support;
 
-use rushfind::ast::{CommandAst, Expr, FileTypeFilter, FileTypeMatcher, GlobalOption, Predicate};
+use rushfind::ast::{
+    CommandAst, CompatibilityOptions, Expr, FileTypeFilter, FileTypeMatcher, GlobalOption,
+    Predicate,
+};
 use rushfind::follow::FollowMode;
 use rushfind::parser::parse_command;
 use support::argv;
@@ -13,6 +16,8 @@ fn parses_global_follow_mode_options_before_paths() {
         ast,
         CommandAst {
             start_paths: vec![".".into()],
+            start_paths_explicit: true,
+            compatibility_options: CompatibilityOptions::default(),
             global_options: vec![GlobalOption::Follow(FollowMode::Logical)],
             expr: Expr::Predicate(Predicate::Name {
                 pattern: "*.rs".into(),

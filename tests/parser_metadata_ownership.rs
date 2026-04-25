@@ -1,6 +1,6 @@
 mod support;
 
-use rushfind::ast::{CommandAst, Expr, Predicate};
+use rushfind::ast::{CommandAst, CompatibilityOptions, Expr, Predicate};
 use rushfind::parser::parse_command;
 use std::path::PathBuf;
 use support::argv;
@@ -32,6 +32,8 @@ fn parses_metadata_ownership_predicates() {
         ast,
         CommandAst {
             start_paths: vec![PathBuf::from(".")],
+            start_paths_explicit: true,
+            compatibility_options: CompatibilityOptions::default(),
             global_options: vec![],
             expr: Expr::And(vec![
                 Expr::Predicate(Predicate::Uid("+42".into())),

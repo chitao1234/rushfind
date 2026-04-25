@@ -1,6 +1,6 @@
 mod support;
 
-use rushfind::ast::{Action, CommandAst, Expr, Predicate};
+use rushfind::ast::{Action, CommandAst, CompatibilityOptions, Expr, Predicate};
 use rushfind::parser::parse_command;
 use std::path::PathBuf;
 use support::argv;
@@ -27,6 +27,8 @@ fn parses_regex_family_and_path_aliases() {
         ast,
         CommandAst {
             start_paths: vec![PathBuf::from(".")],
+            start_paths_explicit: true,
+            compatibility_options: CompatibilityOptions::default(),
             global_options: vec![],
             expr: Expr::And(vec![
                 Expr::Predicate(Predicate::Regex {
@@ -78,6 +80,8 @@ fn parses_posix_basic_regextype_as_regex_type_argument() {
         ast,
         CommandAst {
             start_paths: vec![PathBuf::from(".")],
+            start_paths_explicit: true,
+            compatibility_options: CompatibilityOptions::default(),
             global_options: vec![],
             expr: Expr::And(vec![
                 Expr::Predicate(Predicate::RegexType("posix-basic".into())),
@@ -105,6 +109,8 @@ fn pcre2_regextype_parses_as_regex_type_argument() {
         ast,
         CommandAst {
             start_paths: vec![PathBuf::from(".")],
+            start_paths_explicit: true,
+            compatibility_options: CompatibilityOptions::default(),
             global_options: vec![],
             expr: Expr::And(vec![
                 Expr::Predicate(Predicate::RegexType("pcre2".into())),

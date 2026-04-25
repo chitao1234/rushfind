@@ -1,6 +1,8 @@
 mod support;
 
-use rushfind::ast::{Action, CommandAst, Expr, FileTypeFilter, FileTypeMatcher, Predicate};
+use rushfind::ast::{
+    Action, CommandAst, CompatibilityOptions, Expr, FileTypeFilter, FileTypeMatcher, Predicate,
+};
 use rushfind::parser::parse_command;
 use std::path::PathBuf;
 use support::argv;
@@ -13,6 +15,8 @@ fn parses_implicit_and_chain() {
         ast,
         CommandAst {
             start_paths: vec![PathBuf::from(".")],
+            start_paths_explicit: true,
+            compatibility_options: CompatibilityOptions::default(),
             global_options: vec![],
             expr: Expr::And(vec![
                 Expr::Predicate(Predicate::MaxDepth(2)),

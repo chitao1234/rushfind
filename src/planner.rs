@@ -382,7 +382,7 @@ fn resolve_follow_mode(global_options: &[GlobalOption]) -> FollowMode {
         .iter()
         .fold(FollowMode::Physical, |_, option| match option {
             GlobalOption::Follow(next) => *next,
-            GlobalOption::Version => FollowMode::Physical,
+            GlobalOption::Version | GlobalOption::Help => FollowMode::Physical,
         })
 }
 
@@ -617,6 +617,7 @@ fn lower_predicate(
         }
         Predicate::Type(kind) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Type(kind))),
         Predicate::XType(kind) => Ok(RuntimeExpr::Predicate(RuntimePredicate::XType(kind))),
+        Predicate::Compatibility(_) => Ok(RuntimeExpr::Barrier),
         Predicate::True => Ok(RuntimeExpr::Predicate(RuntimePredicate::True)),
         Predicate::False => Ok(RuntimeExpr::Predicate(RuntimePredicate::False)),
     }

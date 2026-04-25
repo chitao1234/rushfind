@@ -1,6 +1,6 @@
 mod support;
 
-use rushfind::ast::{CommandAst, Expr, Predicate};
+use rushfind::ast::{CommandAst, CompatibilityOptions, Expr, Predicate};
 use rushfind::parser::parse_command;
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -34,6 +34,8 @@ fn parses_stage8_size_time_predicates() {
         ast,
         CommandAst {
             start_paths: vec![PathBuf::from(".")],
+            start_paths_explicit: true,
+            compatibility_options: CompatibilityOptions::default(),
             global_options: vec![],
             expr: Expr::And(vec![
                 Expr::Predicate(Predicate::Size("+2M".into())),

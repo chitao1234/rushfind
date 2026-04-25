@@ -14,6 +14,10 @@ impl<'a> Arg<'a> {
         self.inner == OsStr::new(value)
     }
 
+    pub fn as_os_str(self) -> &'a OsStr {
+        self.inner
+    }
+
     pub fn starts_with_dash(self) -> bool {
         self.inner.as_encoded_bytes().first() == Some(&b'-')
     }

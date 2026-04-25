@@ -1,6 +1,6 @@
 mod support;
 
-use rushfind::ast::{Action, CommandAst, Expr, GlobalOption};
+use rushfind::ast::{Action, CommandAst, CompatibilityOptions, Expr, GlobalOption};
 use rushfind::follow::FollowMode;
 use rushfind::parser::parse_command;
 use support::argv;
@@ -12,6 +12,8 @@ fn parses_version_aliases_as_leading_global_options() {
         short,
         CommandAst {
             start_paths: vec![".".into()],
+            start_paths_explicit: true,
+            compatibility_options: CompatibilityOptions::default(),
             global_options: vec![GlobalOption::Version],
             expr: Expr::Action(Action::Print),
         }

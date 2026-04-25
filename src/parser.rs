@@ -1,24 +1,27 @@
 use crate::args::{Arg, ArgCursor};
 use crate::ast::{
-    Action, CommandAst, Expr, FileTypeFilter, FileTypeMatcher, GlobalOption, Predicate,
+    Action, CommandAst, CompatibilityOptions, CompatibilityPredicate, DebugOption, Expr,
+    FileTypeFilter, FileTypeMatcher, Files0From, GlobalOption, Predicate, WarningMode,
 };
 use crate::diagnostics::Diagnostic;
 use crate::follow::FollowMode;
 use crate::numeric::validate_numeric_argument;
 use crate::time::validate_time_argument;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 
 pub fn parse_command(argv: &[OsString]) -> Result<CommandAst, Diagnostic> {
     let mut global_options = Vec::new();
+    let mut compatibility_options = CompatibilityOptions::default();
     let mut index = 0;
 
-    while let Some(option) = argv
-        .get(index)
-        .and_then(|arg| parse_global_option(Arg::new(arg.as_os_str())))
-    {
-        global_options.push(option);
-        index += 1;
+    while index < argv.len() {
+        let consumed =
+            parse_leading_option(argv, index, &mut global_options, &mut compatibility_options)?;
+        if consumed == 0 {
+            break;
+        }
+        index += consumed;
     }
 
     let path_count = argv[index..]
@@ -26,25 +29,29 @@ pub fn parse_command(argv: &[OsString]) -> Result<CommandAst, Diagnostic> {
         .position(|arg| is_expression_start(Arg::new(arg.as_os_str())))
         .unwrap_or(argv[index..].len());
     let split_index = index + path_count;
+    let start_paths_explicit = path_count > 0;
 
-    let start_paths = if path_count == 0 {
-        vec![PathBuf::from(".")]
-    } else {
+    let start_paths = if start_paths_explicit {
         argv[index..split_index].iter().map(PathBuf::from).collect()
+    } else {
+        vec![PathBuf::from(".")]
     };
 
     let expr = if split_index == argv.len() {
         Expr::Action(Action::Print)
     } else {
-        let mut parser = Parser::new(&argv[split_index..]);
+        let mut parser = Parser::new(&argv[split_index..], compatibility_options);
         let expr = parser.parse_sequence_expression()?;
         parser.expect_end()?;
+        compatibility_options = parser.into_compatibility_options();
         expr
     };
 
     Ok(CommandAst {
         start_paths,
+        start_paths_explicit,
         global_options,
+        compatibility_options,
         expr,
     })
 }
@@ -70,8 +77,83 @@ fn parse_global_option(arg: Arg<'_>) -> Option<GlobalOption> {
         Some(GlobalOption::Follow(FollowMode::Logical))
     } else if arg.matches("-version") || arg.matches("--version") {
         Some(GlobalOption::Version)
+    } else if arg.matches("--help") {
+        Some(GlobalOption::Help)
     } else {
         None
+    }
+}
+
+fn parse_leading_option(
+    argv: &[OsString],
+    index: usize,
+    global_options: &mut Vec<GlobalOption>,
+    compatibility_options: &mut CompatibilityOptions,
+) -> Result<usize, Diagnostic> {
+    let arg = Arg::new(argv[index].as_os_str());
+
+    if let Some(option) = parse_global_option(arg) {
+        global_options.push(option);
+        return Ok(1);
+    }
+
+    if let Some(level) = parse_optimizer_option(arg)? {
+        compatibility_options.optimizer_level = Some(level);
+        return Ok(1);
+    }
+
+    if arg.matches("-D") {
+        let raw = argv
+            .get(index + 1)
+            .ok_or_else(|| Diagnostic::parse("missing argument for `-D`"))?;
+        parse_debug_options(raw, compatibility_options);
+        return Ok(2);
+    }
+
+    Ok(0)
+}
+
+fn parse_optimizer_option(arg: Arg<'_>) -> Result<Option<u32>, Diagnostic> {
+    let bytes = arg.as_os_str().as_encoded_bytes();
+    if bytes == b"-O" {
+        return Err(Diagnostic::parse(
+            "the -O option must be immediately followed by a decimal integer",
+        ));
+    }
+
+    let Some(rest) = bytes.strip_prefix(b"-O") else {
+        return Ok(None);
+    };
+
+    if rest.is_empty() || !rest.iter().all(u8::is_ascii_digit) {
+        return Err(Diagnostic::parse(
+            "please specify a decimal number immediately after -O",
+        ));
+    }
+
+    let raw = std::str::from_utf8(rest)
+        .map_err(|_| Diagnostic::parse("please specify a decimal number immediately after -O"))?;
+    let level = raw
+        .parse::<u32>()
+        .map_err(|_| Diagnostic::parse("invalid -O optimization level"))?;
+    Ok(Some(level))
+}
+
+fn parse_debug_options(raw: &OsString, compatibility_options: &mut CompatibilityOptions) {
+    for component in raw
+        .as_os_str()
+        .as_encoded_bytes()
+        .split(|byte| *byte == b',')
+    {
+        if let Some(option) = DebugOption::parse(component) {
+            compatibility_options.debug_options.push(option);
+        } else {
+            compatibility_options
+                .unknown_debug_options
+                .push(OsString::from(
+                    String::from_utf8_lossy(component).into_owned(),
+                ));
+        }
     }
 }
 
@@ -109,6 +191,7 @@ enum AtomKind {
     Boolean(bool),
     Output(OutputAtom),
     FileOutput(FileOutputAtom),
+    Compatibility(CompatibilityAtom),
     Quit,
     Exec(ExecAtom),
     Delete,
@@ -202,11 +285,22 @@ enum ExecAtom {
     OkDir,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompatibilityAtom {
+    Files0From,
+    NoLeaf,
+    Warn,
+    NoWarn,
+    IgnoreReaddirRace,
+    NoIgnoreReaddirRace,
+}
+
 fn classify_atom(token: Arg<'_>) -> Option<AtomKind> {
     classify_structural_atom(token)
         .or_else(|| classify_name_regex_atom(token))
         .or_else(|| classify_metadata_atom(token))
         .or_else(|| classify_time_atom(token))
+        .or_else(|| classify_compatibility_atom(token))
         .or_else(|| classify_action_atom(token))
 }
 
@@ -407,15 +501,43 @@ fn classify_action_atom(token: Arg<'_>) -> Option<AtomKind> {
     }
 }
 
+fn classify_compatibility_atom(token: Arg<'_>) -> Option<AtomKind> {
+    if token.matches("-files0-from") {
+        Some(AtomKind::Compatibility(CompatibilityAtom::Files0From))
+    } else if token.matches("-noleaf") {
+        Some(AtomKind::Compatibility(CompatibilityAtom::NoLeaf))
+    } else if token.matches("-warn") {
+        Some(AtomKind::Compatibility(CompatibilityAtom::Warn))
+    } else if token.matches("-nowarn") {
+        Some(AtomKind::Compatibility(CompatibilityAtom::NoWarn))
+    } else if token.matches("-ignore_readdir_race") {
+        Some(AtomKind::Compatibility(
+            CompatibilityAtom::IgnoreReaddirRace,
+        ))
+    } else if token.matches("-noignore_readdir_race") {
+        Some(AtomKind::Compatibility(
+            CompatibilityAtom::NoIgnoreReaddirRace,
+        ))
+    } else {
+        None
+    }
+}
+
 struct Parser<'a> {
     args: ArgCursor<'a>,
+    compatibility_options: CompatibilityOptions,
 }
 
 impl<'a> Parser<'a> {
-    fn new(tokens: &'a [OsString]) -> Self {
+    fn new(tokens: &'a [OsString], compatibility_options: CompatibilityOptions) -> Self {
         Self {
             args: ArgCursor::new(tokens),
+            compatibility_options,
         }
+    }
+
+    fn into_compatibility_options(self) -> CompatibilityOptions {
+        self.compatibility_options
     }
 
     fn peek(&self) -> Option<Arg<'a>> {
@@ -580,6 +702,7 @@ impl<'a> Parser<'a> {
             }),
             AtomKind::Output(atom) => self.parse_output_atom(atom)?,
             AtomKind::FileOutput(atom) => self.parse_file_output_atom(atom)?,
+            AtomKind::Compatibility(atom) => self.parse_compatibility_atom(atom)?,
             AtomKind::Quit => Expr::Action(Action::Quit),
             AtomKind::Exec(atom) => Expr::Action(self.parse_exec_atom(atom)?),
             AtomKind::Delete => Expr::Action(Action::Delete),
@@ -681,6 +804,43 @@ impl<'a> Parser<'a> {
         } else {
             Predicate::Type(filter)
         }))
+    }
+
+    fn parse_compatibility_atom(&mut self, atom: CompatibilityAtom) -> Result<Expr, Diagnostic> {
+        let predicate = match atom {
+            CompatibilityAtom::Files0From => {
+                let value = self.take_os_string("-files0-from")?;
+                self.compatibility_options.files0_from =
+                    Some(if value.as_os_str() == OsStr::new("-") {
+                        Files0From::Stdin
+                    } else {
+                        Files0From::Path(PathBuf::from(value))
+                    });
+                CompatibilityPredicate::Files0From
+            }
+            CompatibilityAtom::NoLeaf => {
+                self.compatibility_options.noleaf = true;
+                CompatibilityPredicate::NoLeaf
+            }
+            CompatibilityAtom::Warn => {
+                self.compatibility_options.warning_mode = WarningMode::Warn;
+                CompatibilityPredicate::Warn
+            }
+            CompatibilityAtom::NoWarn => {
+                self.compatibility_options.warning_mode = WarningMode::NoWarn;
+                CompatibilityPredicate::NoWarn
+            }
+            CompatibilityAtom::IgnoreReaddirRace => {
+                self.compatibility_options.ignore_readdir_race = Some(true);
+                CompatibilityPredicate::IgnoreReaddirRace
+            }
+            CompatibilityAtom::NoIgnoreReaddirRace => {
+                self.compatibility_options.ignore_readdir_race = Some(false);
+                CompatibilityPredicate::NoIgnoreReaddirRace
+            }
+        };
+
+        Ok(Expr::Predicate(Predicate::Compatibility(predicate)))
     }
 
     fn parse_output_atom(&mut self, atom: OutputAtom) -> Result<Expr, Diagnostic> {
