@@ -4,6 +4,7 @@ pub mod args;
 pub mod ast;
 pub mod birth;
 pub mod cli;
+pub mod ctype;
 pub mod diagnostics;
 pub mod entry;
 pub mod eval;
