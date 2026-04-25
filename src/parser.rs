@@ -73,6 +73,338 @@ fn parse_global_option(arg: Arg<'_>) -> Option<GlobalOption> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AtomKind {
+    MaxDepth,
+    MinDepth,
+    Depth,
+    Prune,
+    XDev,
+    Access(AccessAtom),
+    Glob(GlobAtom),
+    Regex {
+        case_insensitive: bool,
+        flag: &'static str,
+    },
+    RegexType,
+    FsType,
+    LinkGlob {
+        case_insensitive: bool,
+        flag: &'static str,
+    },
+    Ownership(OwnershipAtom),
+    FlagPredicate(FlagAtom),
+    Size,
+    Empty,
+    Used,
+    Identity(IdentityAtom),
+    Time(TimeAtom),
+    Newer(NewerAtom),
+    DayStart,
+    Type {
+        follow_symlinks: bool,
+    },
+    Boolean(bool),
+    Output(OutputAtom),
+    FileOutput(FileOutputAtom),
+    Quit,
+    Exec(ExecAtom),
+    Delete,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AccessAtom {
+    Readable,
+    Writable,
+    Executable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GlobAtom {
+    Name {
+        case_insensitive: bool,
+        flag: &'static str,
+    },
+    Path {
+        case_insensitive: bool,
+        flag: &'static str,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OwnershipAtom {
+    Uid,
+    Gid,
+    User,
+    Group,
+    Owner,
+    OwnerSid,
+    GroupSid,
+    NoUser,
+    NoGroup,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FlagAtom {
+    Perm,
+    Flags,
+    ReparseType,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IdentityAtom {
+    Inum,
+    Links,
+    SameFile,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TimeAtom {
+    ATime,
+    CTime,
+    MTime,
+    AMin,
+    CMin,
+    MMin,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NewerAtom {
+    Newer,
+    ANewer,
+    CNewer,
+    NewerXY { current: char, reference: char },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OutputAtom {
+    Print,
+    Print0,
+    Printf,
+    Ls,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FileOutputAtom {
+    FPrint,
+    FPrint0,
+    FPrintf,
+    Fls,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExecAtom {
+    Exec,
+    ExecDir,
+    Ok,
+    OkDir,
+}
+
+fn classify_atom(token: Arg<'_>) -> Option<AtomKind> {
+    classify_structural_atom(token)
+        .or_else(|| classify_name_regex_atom(token))
+        .or_else(|| classify_metadata_atom(token))
+        .or_else(|| classify_time_atom(token))
+        .or_else(|| classify_action_atom(token))
+}
+
+fn classify_structural_atom(token: Arg<'_>) -> Option<AtomKind> {
+    if token.matches("-maxdepth") {
+        Some(AtomKind::MaxDepth)
+    } else if token.matches("-mindepth") {
+        Some(AtomKind::MinDepth)
+    } else if token.matches("-depth") {
+        Some(AtomKind::Depth)
+    } else if token.matches("-prune") {
+        Some(AtomKind::Prune)
+    } else if token.matches("-xdev") || token.matches("-mount") {
+        Some(AtomKind::XDev)
+    } else if token.matches("-daystart") {
+        Some(AtomKind::DayStart)
+    } else if token.matches("-type") {
+        Some(AtomKind::Type {
+            follow_symlinks: false,
+        })
+    } else if token.matches("-xtype") {
+        Some(AtomKind::Type {
+            follow_symlinks: true,
+        })
+    } else if token.matches("-true") {
+        Some(AtomKind::Boolean(true))
+    } else if token.matches("-false") {
+        Some(AtomKind::Boolean(false))
+    } else {
+        None
+    }
+}
+
+fn classify_name_regex_atom(token: Arg<'_>) -> Option<AtomKind> {
+    if token.matches("-name") {
+        Some(AtomKind::Glob(GlobAtom::Name {
+            case_insensitive: false,
+            flag: "-name",
+        }))
+    } else if token.matches("-iname") {
+        Some(AtomKind::Glob(GlobAtom::Name {
+            case_insensitive: true,
+            flag: "-iname",
+        }))
+    } else if token.matches("-path") {
+        Some(AtomKind::Glob(GlobAtom::Path {
+            case_insensitive: false,
+            flag: "-path",
+        }))
+    } else if token.matches("-wholename") {
+        Some(AtomKind::Glob(GlobAtom::Path {
+            case_insensitive: false,
+            flag: "-wholename",
+        }))
+    } else if token.matches("-ipath") {
+        Some(AtomKind::Glob(GlobAtom::Path {
+            case_insensitive: true,
+            flag: "-ipath",
+        }))
+    } else if token.matches("-iwholename") {
+        Some(AtomKind::Glob(GlobAtom::Path {
+            case_insensitive: true,
+            flag: "-iwholename",
+        }))
+    } else if token.matches("-regex") {
+        Some(AtomKind::Regex {
+            case_insensitive: false,
+            flag: "-regex",
+        })
+    } else if token.matches("-iregex") {
+        Some(AtomKind::Regex {
+            case_insensitive: true,
+            flag: "-iregex",
+        })
+    } else if token.matches("-regextype") {
+        Some(AtomKind::RegexType)
+    } else if token.matches("-fstype") {
+        Some(AtomKind::FsType)
+    } else if token.matches("-lname") {
+        Some(AtomKind::LinkGlob {
+            case_insensitive: false,
+            flag: "-lname",
+        })
+    } else if token.matches("-ilname") {
+        Some(AtomKind::LinkGlob {
+            case_insensitive: true,
+            flag: "-ilname",
+        })
+    } else {
+        None
+    }
+}
+
+fn classify_metadata_atom(token: Arg<'_>) -> Option<AtomKind> {
+    if token.matches("-readable") {
+        Some(AtomKind::Access(AccessAtom::Readable))
+    } else if token.matches("-writable") {
+        Some(AtomKind::Access(AccessAtom::Writable))
+    } else if token.matches("-executable") {
+        Some(AtomKind::Access(AccessAtom::Executable))
+    } else if token.matches("-uid") {
+        Some(AtomKind::Ownership(OwnershipAtom::Uid))
+    } else if token.matches("-gid") {
+        Some(AtomKind::Ownership(OwnershipAtom::Gid))
+    } else if token.matches("-user") {
+        Some(AtomKind::Ownership(OwnershipAtom::User))
+    } else if token.matches("-group") {
+        Some(AtomKind::Ownership(OwnershipAtom::Group))
+    } else if token.matches("-owner") {
+        Some(AtomKind::Ownership(OwnershipAtom::Owner))
+    } else if token.matches("-owner-sid") {
+        Some(AtomKind::Ownership(OwnershipAtom::OwnerSid))
+    } else if token.matches("-group-sid") {
+        Some(AtomKind::Ownership(OwnershipAtom::GroupSid))
+    } else if token.matches("-nouser") {
+        Some(AtomKind::Ownership(OwnershipAtom::NoUser))
+    } else if token.matches("-nogroup") {
+        Some(AtomKind::Ownership(OwnershipAtom::NoGroup))
+    } else if token.matches("-perm") {
+        Some(AtomKind::FlagPredicate(FlagAtom::Perm))
+    } else if token.matches("-flags") {
+        Some(AtomKind::FlagPredicate(FlagAtom::Flags))
+    } else if token.matches("-reparse-type") {
+        Some(AtomKind::FlagPredicate(FlagAtom::ReparseType))
+    } else if token.matches("-size") {
+        Some(AtomKind::Size)
+    } else if token.matches("-empty") {
+        Some(AtomKind::Empty)
+    } else if token.matches("-inum") {
+        Some(AtomKind::Identity(IdentityAtom::Inum))
+    } else if token.matches("-links") {
+        Some(AtomKind::Identity(IdentityAtom::Links))
+    } else if token.matches("-samefile") {
+        Some(AtomKind::Identity(IdentityAtom::SameFile))
+    } else {
+        None
+    }
+}
+
+fn classify_time_atom(token: Arg<'_>) -> Option<AtomKind> {
+    if token.matches("-used") {
+        Some(AtomKind::Used)
+    } else if token.matches("-atime") {
+        Some(AtomKind::Time(TimeAtom::ATime))
+    } else if token.matches("-ctime") {
+        Some(AtomKind::Time(TimeAtom::CTime))
+    } else if token.matches("-mtime") {
+        Some(AtomKind::Time(TimeAtom::MTime))
+    } else if token.matches("-amin") {
+        Some(AtomKind::Time(TimeAtom::AMin))
+    } else if token.matches("-cmin") {
+        Some(AtomKind::Time(TimeAtom::CMin))
+    } else if token.matches("-mmin") {
+        Some(AtomKind::Time(TimeAtom::MMin))
+    } else if token.matches("-newer") {
+        Some(AtomKind::Newer(NewerAtom::Newer))
+    } else if token.matches("-anewer") {
+        Some(AtomKind::Newer(NewerAtom::ANewer))
+    } else if token.matches("-cnewer") {
+        Some(AtomKind::Newer(NewerAtom::CNewer))
+    } else {
+        parse_newerxy_flag(token)
+            .map(|(current, reference)| AtomKind::Newer(NewerAtom::NewerXY { current, reference }))
+    }
+}
+
+fn classify_action_atom(token: Arg<'_>) -> Option<AtomKind> {
+    if token.matches("-print") {
+        Some(AtomKind::Output(OutputAtom::Print))
+    } else if token.matches("-print0") {
+        Some(AtomKind::Output(OutputAtom::Print0))
+    } else if token.matches("-printf") {
+        Some(AtomKind::Output(OutputAtom::Printf))
+    } else if token.matches("-ls") {
+        Some(AtomKind::Output(OutputAtom::Ls))
+    } else if token.matches("-fprint") {
+        Some(AtomKind::FileOutput(FileOutputAtom::FPrint))
+    } else if token.matches("-fprint0") {
+        Some(AtomKind::FileOutput(FileOutputAtom::FPrint0))
+    } else if token.matches("-fprintf") {
+        Some(AtomKind::FileOutput(FileOutputAtom::FPrintf))
+    } else if token.matches("-fls") {
+        Some(AtomKind::FileOutput(FileOutputAtom::Fls))
+    } else if token.matches("-quit") {
+        Some(AtomKind::Quit)
+    } else if token.matches("-exec") {
+        Some(AtomKind::Exec(ExecAtom::Exec))
+    } else if token.matches("-execdir") {
+        Some(AtomKind::Exec(ExecAtom::ExecDir))
+    } else if token.matches("-ok") {
+        Some(AtomKind::Exec(ExecAtom::Ok))
+    } else if token.matches("-okdir") {
+        Some(AtomKind::Exec(ExecAtom::OkDir))
+    } else if token.matches("-delete") {
+        Some(AtomKind::Delete)
+    } else {
+        None
+    }
+}
+
 struct Parser<'a> {
     args: ArgCursor<'a>,
 }
@@ -178,216 +510,218 @@ impl<'a> Parser<'a> {
             .bump()
             .ok_or_else(|| Diagnostic::parse("expected predicate or action"))?;
         let token_display = token.display();
-
-        let expr = if token.matches("-maxdepth") {
-            Expr::Predicate(Predicate::MaxDepth(self.take_u32("-maxdepth")?))
-        } else if token.matches("-mindepth") {
-            Expr::Predicate(Predicate::MinDepth(self.take_u32("-mindepth")?))
-        } else if token.matches("-depth") {
-            Expr::Predicate(Predicate::Depth)
-        } else if token.matches("-prune") {
-            Expr::Predicate(Predicate::Prune)
-        } else if token.matches("-xdev") || token.matches("-mount") {
-            Expr::Predicate(Predicate::XDev)
-        } else if token.matches("-readable") {
-            Expr::Predicate(Predicate::Readable)
-        } else if token.matches("-writable") {
-            Expr::Predicate(Predicate::Writable)
-        } else if token.matches("-executable") {
-            Expr::Predicate(Predicate::Executable)
-        } else if token.matches("-name") {
-            Expr::Predicate(Predicate::Name {
-                pattern: self.take_os_string("-name")?,
-                case_insensitive: false,
-            })
-        } else if token.matches("-iname") {
-            Expr::Predicate(Predicate::Name {
-                pattern: self.take_os_string("-iname")?,
-                case_insensitive: true,
-            })
-        } else if token.matches("-path") || token.matches("-wholename") {
-            Expr::Predicate(Predicate::Path {
-                pattern: self.take_os_string(token_display.as_str())?,
-                case_insensitive: false,
-            })
-        } else if token.matches("-ipath") || token.matches("-iwholename") {
-            Expr::Predicate(Predicate::Path {
-                pattern: self.take_os_string(token_display.as_str())?,
-                case_insensitive: true,
-            })
-        } else if token.matches("-regex") {
-            Expr::Predicate(Predicate::Regex {
-                pattern: self.take_os_string("-regex")?,
-                case_insensitive: false,
-            })
-        } else if token.matches("-iregex") {
-            Expr::Predicate(Predicate::Regex {
-                pattern: self.take_os_string("-iregex")?,
-                case_insensitive: true,
-            })
-        } else if token.matches("-regextype") {
-            Expr::Predicate(Predicate::RegexType(self.take_os_string("-regextype")?))
-        } else if token.matches("-fstype") {
-            Expr::Predicate(Predicate::FsType(self.take_os_string("-fstype")?))
-        } else if token.matches("-lname") {
-            Expr::Predicate(Predicate::LName {
-                pattern: self.take_os_string("-lname")?,
-                case_insensitive: false,
-            })
-        } else if token.matches("-ilname") {
-            Expr::Predicate(Predicate::LName {
-                pattern: self.take_os_string("-ilname")?,
-                case_insensitive: true,
-            })
-        } else if token.matches("-uid") {
-            let raw = self.take_os_string("-uid")?;
-            validate_numeric_argument("-uid", raw.as_os_str())?;
-            Expr::Predicate(Predicate::Uid(raw))
-        } else if token.matches("-gid") {
-            let raw = self.take_os_string("-gid")?;
-            validate_numeric_argument("-gid", raw.as_os_str())?;
-            Expr::Predicate(Predicate::Gid(raw))
-        } else if token.matches("-user") {
-            Expr::Predicate(Predicate::User(self.take_os_string("-user")?))
-        } else if token.matches("-group") {
-            Expr::Predicate(Predicate::Group(self.take_os_string("-group")?))
-        } else if token.matches("-owner") {
-            Expr::Predicate(Predicate::Owner(self.take_os_string("-owner")?))
-        } else if token.matches("-owner-sid") {
-            Expr::Predicate(Predicate::OwnerSid(self.take_os_string("-owner-sid")?))
-        } else if token.matches("-group-sid") {
-            Expr::Predicate(Predicate::GroupSid(self.take_os_string("-group-sid")?))
-        } else if token.matches("-nouser") {
-            Expr::Predicate(Predicate::NoUser)
-        } else if token.matches("-nogroup") {
-            Expr::Predicate(Predicate::NoGroup)
-        } else if token.matches("-perm") {
-            Expr::Predicate(Predicate::Perm(self.take_os_string("-perm")?))
-        } else if token.matches("-flags") {
-            Expr::Predicate(Predicate::Flags(self.take_os_string("-flags")?))
-        } else if token.matches("-reparse-type") {
-            Expr::Predicate(Predicate::ReparseType(
-                self.take_os_string("-reparse-type")?,
-            ))
-        } else if token.matches("-size") {
-            Expr::Predicate(Predicate::Size(self.take_os_string("-size")?))
-        } else if token.matches("-empty") {
-            Expr::Predicate(Predicate::Empty)
-        } else if token.matches("-used") {
-            let raw = self.take_os_string("-used")?;
-            validate_time_argument("-used", raw.as_os_str())?;
-            Expr::Predicate(Predicate::Used(raw))
-        } else if token.matches("-inum") {
-            let raw = self.take_os_string("-inum")?;
-            validate_numeric_argument("-inum", raw.as_os_str())?;
-            Expr::Predicate(Predicate::Inum(raw))
-        } else if token.matches("-links") {
-            let raw = self.take_os_string("-links")?;
-            validate_numeric_argument("-links", raw.as_os_str())?;
-            Expr::Predicate(Predicate::Links(raw))
-        } else if token.matches("-samefile") {
-            Expr::Predicate(Predicate::SameFile(PathBuf::from(
-                self.take_os_string("-samefile")?,
-            )))
-        } else if token.matches("-atime") {
-            let raw = self.take_os_string("-atime")?;
-            validate_time_argument("-atime", raw.as_os_str())?;
-            Expr::Predicate(Predicate::ATime(raw))
-        } else if token.matches("-ctime") {
-            let raw = self.take_os_string("-ctime")?;
-            validate_time_argument("-ctime", raw.as_os_str())?;
-            Expr::Predicate(Predicate::CTime(raw))
-        } else if token.matches("-mtime") {
-            let raw = self.take_os_string("-mtime")?;
-            validate_time_argument("-mtime", raw.as_os_str())?;
-            Expr::Predicate(Predicate::MTime(raw))
-        } else if token.matches("-amin") {
-            let raw = self.take_os_string("-amin")?;
-            validate_time_argument("-amin", raw.as_os_str())?;
-            Expr::Predicate(Predicate::AMin(raw))
-        } else if token.matches("-cmin") {
-            let raw = self.take_os_string("-cmin")?;
-            validate_time_argument("-cmin", raw.as_os_str())?;
-            Expr::Predicate(Predicate::CMin(raw))
-        } else if token.matches("-mmin") {
-            let raw = self.take_os_string("-mmin")?;
-            validate_time_argument("-mmin", raw.as_os_str())?;
-            Expr::Predicate(Predicate::MMin(raw))
-        } else if token.matches("-newer") {
-            Expr::Predicate(Predicate::Newer(PathBuf::from(
-                self.take_os_string("-newer")?,
-            )))
-        } else if token.matches("-anewer") {
-            Expr::Predicate(Predicate::ANewer(PathBuf::from(
-                self.take_os_string("-anewer")?,
-            )))
-        } else if token.matches("-cnewer") {
-            Expr::Predicate(Predicate::CNewer(PathBuf::from(
-                self.take_os_string("-cnewer")?,
-            )))
-        } else if let Some((current, reference)) = parse_newerxy_flag(token) {
-            Expr::Predicate(Predicate::NewerXY {
-                current,
-                reference,
-                reference_arg: self.take_os_string(token_display.as_str())?,
-            })
-        } else if token.matches("-daystart") {
-            Expr::Predicate(Predicate::DayStart)
-        } else if token.matches("-type") {
-            Expr::Predicate(Predicate::Type(self.take_type_filter()?))
-        } else if token.matches("-xtype") {
-            Expr::Predicate(Predicate::XType(self.take_type_filter_for("-xtype")?))
-        } else if token.matches("-true") {
-            Expr::Predicate(Predicate::True)
-        } else if token.matches("-false") {
-            Expr::Predicate(Predicate::False)
-        } else if token.matches("-print") {
-            Expr::Action(Action::Print)
-        } else if token.matches("-print0") {
-            Expr::Action(Action::Print0)
-        } else if token.matches("-printf") {
-            Expr::Action(Action::Printf {
-                format: self.take_os_string("-printf")?,
-            })
-        } else if token.matches("-fprint") {
-            Expr::Action(Action::FPrint {
-                path: PathBuf::from(self.take_os_string("-fprint")?),
-            })
-        } else if token.matches("-fprint0") {
-            Expr::Action(Action::FPrint0 {
-                path: PathBuf::from(self.take_os_string("-fprint0")?),
-            })
-        } else if token.matches("-fprintf") {
-            Expr::Action(Action::FPrintf {
-                path: PathBuf::from(self.take_os_string("-fprintf")?),
-                format: self.take_os_string("-fprintf")?,
-            })
-        } else if token.matches("-ls") {
-            Expr::Action(Action::Ls)
-        } else if token.matches("-fls") {
-            Expr::Action(Action::Fls {
-                path: PathBuf::from(self.take_os_string("-fls")?),
-            })
-        } else if token.matches("-quit") {
-            Expr::Action(Action::Quit)
-        } else if token.matches("-exec") {
-            Expr::Action(self.take_exec_action(false, false)?)
-        } else if token.matches("-execdir") {
-            Expr::Action(self.take_exec_action(true, false)?)
-        } else if token.matches("-ok") {
-            Expr::Action(self.take_exec_action(false, true)?)
-        } else if token.matches("-okdir") {
-            Expr::Action(self.take_exec_action(true, true)?)
-        } else if token.matches("-delete") {
-            Expr::Action(Action::Delete)
-        } else {
-            return Err(Diagnostic::parse(format!(
+        let kind = classify_atom(token).ok_or_else(|| {
+            Diagnostic::parse(format!(
                 "unsupported token in parser subset `{}`",
                 token_display
-            )));
-        };
+            ))
+        })?;
+        self.parse_classified_atom(kind)
+    }
 
-        Ok(expr)
+    fn parse_classified_atom(&mut self, kind: AtomKind) -> Result<Expr, Diagnostic> {
+        Ok(match kind {
+            AtomKind::MaxDepth => Expr::Predicate(Predicate::MaxDepth(self.take_u32("-maxdepth")?)),
+            AtomKind::MinDepth => Expr::Predicate(Predicate::MinDepth(self.take_u32("-mindepth")?)),
+            AtomKind::Depth => Expr::Predicate(Predicate::Depth),
+            AtomKind::Prune => Expr::Predicate(Predicate::Prune),
+            AtomKind::XDev => Expr::Predicate(Predicate::XDev),
+            AtomKind::Access(atom) => self.parse_access_atom(atom),
+            AtomKind::Glob(atom) => self.parse_glob_atom(atom)?,
+            AtomKind::Regex {
+                case_insensitive,
+                flag,
+            } => Expr::Predicate(Predicate::Regex {
+                pattern: self.take_os_string(flag)?,
+                case_insensitive,
+            }),
+            AtomKind::RegexType => {
+                Expr::Predicate(Predicate::RegexType(self.take_os_string("-regextype")?))
+            }
+            AtomKind::FsType => Expr::Predicate(Predicate::FsType(self.take_os_string("-fstype")?)),
+            AtomKind::LinkGlob {
+                case_insensitive,
+                flag,
+            } => Expr::Predicate(Predicate::LName {
+                pattern: self.take_os_string(flag)?,
+                case_insensitive,
+            }),
+            AtomKind::Ownership(atom) => self.parse_ownership_atom(atom)?,
+            AtomKind::FlagPredicate(atom) => self.parse_flag_atom(atom)?,
+            AtomKind::Size => Expr::Predicate(Predicate::Size(self.take_os_string("-size")?)),
+            AtomKind::Empty => Expr::Predicate(Predicate::Empty),
+            AtomKind::Used => Expr::Predicate(self.parse_validated_time("-used", Predicate::Used)?),
+            AtomKind::Identity(atom) => self.parse_identity_atom(atom)?,
+            AtomKind::Time(atom) => self.parse_time_atom(atom)?,
+            AtomKind::Newer(atom) => self.parse_newer_atom(atom)?,
+            AtomKind::DayStart => Expr::Predicate(Predicate::DayStart),
+            AtomKind::Type { follow_symlinks } => self.parse_type_atom(follow_symlinks)?,
+            AtomKind::Boolean(value) => Expr::Predicate(if value {
+                Predicate::True
+            } else {
+                Predicate::False
+            }),
+            AtomKind::Output(atom) => self.parse_output_atom(atom)?,
+            AtomKind::FileOutput(atom) => self.parse_file_output_atom(atom)?,
+            AtomKind::Quit => Expr::Action(Action::Quit),
+            AtomKind::Exec(atom) => Expr::Action(self.parse_exec_atom(atom)?),
+            AtomKind::Delete => Expr::Action(Action::Delete),
+        })
+    }
+
+    fn parse_access_atom(&mut self, atom: AccessAtom) -> Expr {
+        Expr::Predicate(match atom {
+            AccessAtom::Readable => Predicate::Readable,
+            AccessAtom::Writable => Predicate::Writable,
+            AccessAtom::Executable => Predicate::Executable,
+        })
+    }
+
+    fn parse_glob_atom(&mut self, atom: GlobAtom) -> Result<Expr, Diagnostic> {
+        Ok(Expr::Predicate(match atom {
+            GlobAtom::Name {
+                case_insensitive,
+                flag,
+            } => Predicate::Name {
+                pattern: self.take_os_string(flag)?,
+                case_insensitive,
+            },
+            GlobAtom::Path {
+                case_insensitive,
+                flag,
+            } => Predicate::Path {
+                pattern: self.take_os_string(flag)?,
+                case_insensitive,
+            },
+        }))
+    }
+
+    fn parse_ownership_atom(&mut self, atom: OwnershipAtom) -> Result<Expr, Diagnostic> {
+        Ok(Expr::Predicate(match atom {
+            OwnershipAtom::Uid => self.parse_validated_numeric("-uid", Predicate::Uid)?,
+            OwnershipAtom::Gid => self.parse_validated_numeric("-gid", Predicate::Gid)?,
+            OwnershipAtom::User => Predicate::User(self.take_os_string("-user")?),
+            OwnershipAtom::Group => Predicate::Group(self.take_os_string("-group")?),
+            OwnershipAtom::Owner => Predicate::Owner(self.take_os_string("-owner")?),
+            OwnershipAtom::OwnerSid => Predicate::OwnerSid(self.take_os_string("-owner-sid")?),
+            OwnershipAtom::GroupSid => Predicate::GroupSid(self.take_os_string("-group-sid")?),
+            OwnershipAtom::NoUser => Predicate::NoUser,
+            OwnershipAtom::NoGroup => Predicate::NoGroup,
+        }))
+    }
+
+    fn parse_flag_atom(&mut self, atom: FlagAtom) -> Result<Expr, Diagnostic> {
+        Ok(Expr::Predicate(match atom {
+            FlagAtom::Perm => Predicate::Perm(self.take_os_string("-perm")?),
+            FlagAtom::Flags => Predicate::Flags(self.take_os_string("-flags")?),
+            FlagAtom::ReparseType => Predicate::ReparseType(self.take_os_string("-reparse-type")?),
+        }))
+    }
+
+    fn parse_identity_atom(&mut self, atom: IdentityAtom) -> Result<Expr, Diagnostic> {
+        Ok(Expr::Predicate(match atom {
+            IdentityAtom::Inum => self.parse_validated_numeric("-inum", Predicate::Inum)?,
+            IdentityAtom::Links => self.parse_validated_numeric("-links", Predicate::Links)?,
+            IdentityAtom::SameFile => {
+                Predicate::SameFile(PathBuf::from(self.take_os_string("-samefile")?))
+            }
+        }))
+    }
+
+    fn parse_time_atom(&mut self, atom: TimeAtom) -> Result<Expr, Diagnostic> {
+        let predicate = match atom {
+            TimeAtom::ATime => self.parse_validated_time("-atime", Predicate::ATime)?,
+            TimeAtom::CTime => self.parse_validated_time("-ctime", Predicate::CTime)?,
+            TimeAtom::MTime => self.parse_validated_time("-mtime", Predicate::MTime)?,
+            TimeAtom::AMin => self.parse_validated_time("-amin", Predicate::AMin)?,
+            TimeAtom::CMin => self.parse_validated_time("-cmin", Predicate::CMin)?,
+            TimeAtom::MMin => self.parse_validated_time("-mmin", Predicate::MMin)?,
+        };
+        Ok(Expr::Predicate(predicate))
+    }
+
+    fn parse_newer_atom(&mut self, atom: NewerAtom) -> Result<Expr, Diagnostic> {
+        Ok(Expr::Predicate(match atom {
+            NewerAtom::Newer => Predicate::Newer(PathBuf::from(self.take_os_string("-newer")?)),
+            NewerAtom::ANewer => Predicate::ANewer(PathBuf::from(self.take_os_string("-anewer")?)),
+            NewerAtom::CNewer => Predicate::CNewer(PathBuf::from(self.take_os_string("-cnewer")?)),
+            NewerAtom::NewerXY { current, reference } => {
+                let flag = format!("-newer{current}{reference}");
+                Predicate::NewerXY {
+                    current,
+                    reference,
+                    reference_arg: self.take_os_string(flag.as_str())?,
+                }
+            }
+        }))
+    }
+
+    fn parse_type_atom(&mut self, follow_symlinks: bool) -> Result<Expr, Diagnostic> {
+        let flag = if follow_symlinks { "-xtype" } else { "-type" };
+        let filter = self.take_type_filter_for(flag)?;
+        Ok(Expr::Predicate(if follow_symlinks {
+            Predicate::XType(filter)
+        } else {
+            Predicate::Type(filter)
+        }))
+    }
+
+    fn parse_output_atom(&mut self, atom: OutputAtom) -> Result<Expr, Diagnostic> {
+        Ok(Expr::Action(match atom {
+            OutputAtom::Print => Action::Print,
+            OutputAtom::Print0 => Action::Print0,
+            OutputAtom::Printf => Action::Printf {
+                format: self.take_os_string("-printf")?,
+            },
+            OutputAtom::Ls => Action::Ls,
+        }))
+    }
+
+    fn parse_file_output_atom(&mut self, atom: FileOutputAtom) -> Result<Expr, Diagnostic> {
+        Ok(Expr::Action(match atom {
+            FileOutputAtom::FPrint => Action::FPrint {
+                path: PathBuf::from(self.take_os_string("-fprint")?),
+            },
+            FileOutputAtom::FPrint0 => Action::FPrint0 {
+                path: PathBuf::from(self.take_os_string("-fprint0")?),
+            },
+            FileOutputAtom::FPrintf => Action::FPrintf {
+                path: PathBuf::from(self.take_os_string("-fprintf")?),
+                format: self.take_os_string("-fprintf")?,
+            },
+            FileOutputAtom::Fls => Action::Fls {
+                path: PathBuf::from(self.take_os_string("-fls")?),
+            },
+        }))
+    }
+
+    fn parse_exec_atom(&mut self, atom: ExecAtom) -> Result<Action, Diagnostic> {
+        match atom {
+            ExecAtom::Exec => self.take_exec_action(false, false),
+            ExecAtom::ExecDir => self.take_exec_action(true, false),
+            ExecAtom::Ok => self.take_exec_action(false, true),
+            ExecAtom::OkDir => self.take_exec_action(true, true),
+        }
+    }
+
+    fn parse_validated_numeric(
+        &mut self,
+        flag: &str,
+        build: fn(OsString) -> Predicate,
+    ) -> Result<Predicate, Diagnostic> {
+        let raw = self.take_os_string(flag)?;
+        validate_numeric_argument(flag, raw.as_os_str())?;
+        Ok(build(raw))
+    }
+
+    fn parse_validated_time(
+        &mut self,
+        flag: &str,
+        build: fn(OsString) -> Predicate,
+    ) -> Result<Predicate, Diagnostic> {
+        let raw = self.take_os_string(flag)?;
+        validate_time_argument(flag, raw.as_os_str())?;
+        Ok(build(raw))
     }
 
     fn take_os_string(&mut self, flag: &str) -> Result<OsString, Diagnostic> {
@@ -404,10 +738,6 @@ impl<'a> Parser<'a> {
                 "invalid numeric argument for `{flag}`: `{rendered}`"
             ))
         })
-    }
-
-    fn take_type_filter(&mut self) -> Result<FileTypeFilter, Diagnostic> {
-        self.take_type_filter_for("-type")
     }
 
     fn take_type_filter_for(&mut self, flag: &str) -> Result<FileTypeFilter, Diagnostic> {

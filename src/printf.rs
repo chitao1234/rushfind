@@ -1,17 +1,13 @@
-use crate::account::{group_name, user_name};
 use crate::diagnostics::Diagnostic;
-use crate::entry::{EntryContext, EntryKind, PrintfTargetKind};
+use crate::entry::{EntryContext, EntryKind};
 use crate::eval::EvalContext;
 use crate::follow::FollowMode;
-use crate::metadata_format::{name_or_id_bytes, principal_id_bytes, symbolic_mode_string};
 use crate::platform;
-use crate::platform::path::{
-    display_bytes, display_os_bytes, encoded_bytes, relative_dir_for_printf,
-};
-use crate::printf_time::{
-    ResolvedTimeParts, render_full_time_bytes, render_selector_bytes, resolve_local_time_parts,
-};
+use crate::printf_time::{ResolvedTimeParts, resolve_local_time_parts};
 use std::ffi::OsStr;
+
+mod value;
+use value::render_directive_bytes;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrintfProgram {
@@ -435,157 +431,6 @@ pub(crate) fn render_printf_bytes(
     }
 
     Ok(rendered)
-}
-
-fn render_directive_bytes(
-    directive: &PrintfDirective,
-    entry: &EntryContext,
-    follow_mode: FollowMode,
-    context: &EvalContext,
-    state: &mut PrintfRenderState,
-) -> Result<Vec<u8>, Diagnostic> {
-    Ok(match directive.kind {
-        PrintfDirectiveKind::Path => {
-            format_string_like(&display_bytes(&entry.path), directive.format)
-        }
-        PrintfDirectiveKind::RelativePath => {
-            format_string_like(&display_bytes(entry.relative_to_root()?), directive.format)
-        }
-        PrintfDirectiveKind::StartPath => {
-            format_string_like(&display_bytes(entry.start_path()), directive.format)
-        }
-        PrintfDirectiveKind::Basename => format_string_like(
-            &display_os_bytes(entry.path.file_name().unwrap_or_else(|| OsStr::new(""))),
-            directive.format,
-        ),
-        PrintfDirectiveKind::Dirname => format_string_like(
-            &display_bytes(relative_dir_for_printf(&entry.path).as_path()),
-            directive.format,
-        ),
-        PrintfDirectiveKind::Depth => format_depth(entry.depth, directive.format),
-        PrintfDirectiveKind::FileType => format_string_like(
-            &[file_type_letter(entry.active_kind(follow_mode)?)],
-            directive.format,
-        ),
-        PrintfDirectiveKind::FileTypeFollow => {
-            let byte = match entry.printf_target_kind(follow_mode)? {
-                PrintfTargetKind::Kind(kind) => file_type_letter(kind),
-                PrintfTargetKind::Loop => b'L',
-                PrintfTargetKind::Missing => b'N',
-                PrintfTargetKind::OtherError => b'?',
-            };
-            format_string_like(&[byte], directive.format)
-        }
-        PrintfDirectiveKind::Size => format_string_like(
-            entry.active_size(follow_mode)?.to_string().as_bytes(),
-            directive.format,
-        ),
-        PrintfDirectiveKind::Sparseness => {
-            let text = format_sparseness_ascii(
-                entry.active_size(follow_mode)?,
-                entry.active_blocks(follow_mode)?,
-            );
-            format_string_like(text.as_bytes(), directive.format)
-        }
-        PrintfDirectiveKind::ModeOctal => {
-            format_mode_octal(entry.active_mode_bits(follow_mode)?, directive.format)
-        }
-        PrintfDirectiveKind::ModeSymbolic => {
-            let mode = symbolic_mode_string(
-                entry.active_kind(follow_mode)?,
-                entry.active_mode_bits(follow_mode)?,
-            );
-            format_string_like(mode.as_bytes(), directive.format)
-        }
-        PrintfDirectiveKind::LinkTarget => format_string_like(
-            &display_os_bytes(
-                entry
-                    .active_link_target(follow_mode)?
-                    .as_deref()
-                    .unwrap_or_else(|| OsStr::new("")),
-            ),
-            directive.format,
-        ),
-        PrintfDirectiveKind::Inode => format_string_like(
-            entry.active_inode(follow_mode)?.to_string().as_bytes(),
-            directive.format,
-        ),
-        PrintfDirectiveKind::LinkCount => format_string_like(
-            entry.active_link_count(follow_mode)?.to_string().as_bytes(),
-            directive.format,
-        ),
-        PrintfDirectiveKind::Device => format_string_like(
-            entry.active_device(follow_mode)?.to_string().as_bytes(),
-            directive.format,
-        ),
-        PrintfDirectiveKind::Blocks512 => format_string_like(
-            entry.active_blocks(follow_mode)?.to_string().as_bytes(),
-            directive.format,
-        ),
-        PrintfDirectiveKind::Blocks1024 => {
-            let blocks = entry.active_blocks(follow_mode)?;
-            format_string_like(blocks.div_ceil(2).to_string().as_bytes(), directive.format)
-        }
-        PrintfDirectiveKind::UserName => {
-            let owner = entry.active_owner(follow_mode)?;
-            let name = user_name(owner.clone())?;
-            format_string_like(
-                name_or_id_bytes(name.as_deref(), &owner).as_slice(),
-                directive.format,
-            )
-        }
-        PrintfDirectiveKind::UserSid => {
-            let owner = entry.active_owner(follow_mode)?;
-            format_string_like(principal_id_bytes(&owner).as_slice(), directive.format)
-        }
-        PrintfDirectiveKind::UserId => format_string_like(
-            entry.active_uid(follow_mode)?.to_string().as_bytes(),
-            directive.format,
-        ),
-        PrintfDirectiveKind::GroupName => {
-            let group = entry.active_group(follow_mode)?;
-            let name = group_name(group.clone())?;
-            format_string_like(
-                name_or_id_bytes(name.as_deref(), &group).as_slice(),
-                directive.format,
-            )
-        }
-        PrintfDirectiveKind::GroupSid => {
-            let group = entry.active_group(follow_mode)?;
-            format_string_like(principal_id_bytes(&group).as_slice(), directive.format)
-        }
-        PrintfDirectiveKind::GroupId => format_string_like(
-            entry.active_gid(follow_mode)?.to_string().as_bytes(),
-            directive.format,
-        ),
-        PrintfDirectiveKind::FileSystemType => {
-            let snapshot = context.mount_snapshot()?;
-            let mount_id = entry.active_mount_id(follow_mode)?;
-            let type_name = snapshot.type_for_mount_id(mount_id).ok_or_else(|| {
-                Diagnostic::new(
-                    format!("internal error: mount ID {mount_id} missing from mount snapshot"),
-                    1,
-                )
-            })?;
-            format_string_like(encoded_bytes(type_name), directive.format)
-        }
-        PrintfDirectiveKind::FullTimestamp(family) => {
-            match resolve_cached_time_parts(state, family, entry, follow_mode)? {
-                Some(parts) => {
-                    format_string_like(&render_full_time_bytes(parts)?, directive.format)
-                }
-                None => format_string_like(b"", directive.format),
-            }
-        }
-        PrintfDirectiveKind::TimestampPart { family, selector } => {
-            match resolve_cached_time_parts(state, family, entry, follow_mode)? {
-                Some(parts) => {
-                    format_string_like(&render_selector_bytes(parts, selector)?, directive.format)
-                }
-                None => format_string_like(b"", directive.format),
-            }
-        }
-    })
 }
 
 #[derive(Default)]

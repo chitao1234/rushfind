@@ -1,8 +1,8 @@
 mod support;
 
 use rushfind::parser::parse_command;
-use rushfind::planner::{RuntimePredicate, plan_command};
-use support::{argv, predicate_labels};
+use rushfind::planner::plan_command;
+use support::{argv, collect_predicate_labels};
 
 #[test]
 fn lowering_access_predicates_produces_dedicated_runtime_predicates() {
@@ -14,12 +14,7 @@ fn lowering_access_predicates_produces_dedicated_runtime_predicates() {
 
     assert!(!plan.runtime.mount_snapshot);
     assert_eq!(
-        predicate_labels(&plan.expr, |predicate| match predicate {
-            RuntimePredicate::Readable => Some("readable"),
-            RuntimePredicate::Writable => Some("writable"),
-            RuntimePredicate::Executable => Some("executable"),
-            other => panic!("unexpected predicate in access planner test: {other:?}"),
-        }),
+        collect_predicate_labels(&plan.expr),
         vec!["readable", "writable", "executable"]
     );
 }

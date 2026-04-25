@@ -13,7 +13,7 @@ use crate::follow::FollowMode;
 use crate::parallel::batch::WorkerBatchState;
 use crate::parallel::broker::BrokerMessage;
 use crate::parallel::chunking::{
-    ChunkAccumulator, DEFAULT_SPILL_CHUNK_SIZE, DEFAULT_SPLIT_CHILD_THRESHOLD,
+    ChunkAccumulator, ChunkPlan, DEFAULT_SPILL_CHUNK_SIZE, DEFAULT_SPLIT_CHILD_THRESHOLD,
 };
 use crate::parallel::control::GlobalControl;
 use crate::parallel::postorder::{BarrierRelease, BarrierTable};
@@ -30,6 +30,9 @@ use crate::walker::{
 use crossbeam_channel::Sender;
 use std::path::Path;
 use std::sync::Arc;
+
+mod context;
+use context::{PostorderRunContext, WorkerRunContext};
 
 const DEFAULT_SPILL_THRESHOLD: usize = 64 * 1024;
 pub(crate) struct WorkerActionSink {
@@ -206,6 +209,12 @@ pub(crate) fn run_parallel_worker(
     let mut sink = WorkerActionSink::new(control.clone(), broker, file_outputs, prompt);
     let mut status = RuntimeStatus::default();
     let mut had_runtime_errors = false;
+    let run_context = WorkerRunContext {
+        plan: &plan,
+        backend: &backend,
+        barriers: barriers.as_ref(),
+        eval_context: &eval_context,
+    };
 
     while let Some(task) = worker.pop_blocking(control.as_ref()) {
         if !control.accepts_new_work() {
@@ -216,65 +225,13 @@ pub(crate) fn run_parallel_worker(
             continue;
         }
 
-        let task_result = match task {
-            ParallelTask::PreOrderRoot(task) => {
-                if plan.traversal.order == TraversalOrder::DepthFirstPostOrder {
-                    run_postorder_root_task(
-                        &plan,
-                        &backend,
-                        task,
-                        &mut worker,
-                        barriers.as_ref(),
-                        &eval_context,
-                        &mut sink,
-                        &mut had_runtime_errors,
-                    )
-                } else {
-                    run_preorder_root_serial(
-                        &plan,
-                        &backend,
-                        task,
-                        &mut worker,
-                        &eval_context,
-                        &mut sink,
-                        &mut had_runtime_errors,
-                    )
-                }
-            }
-            ParallelTask::SiblingChunk(task) => {
-                if task.completion_barrier.is_some() {
-                    run_postorder_pending_batch(
-                        &plan,
-                        &backend,
-                        task.pending,
-                        task.completion_barrier,
-                        &mut worker,
-                        barriers.as_ref(),
-                        &eval_context,
-                        &mut sink,
-                        &mut had_runtime_errors,
-                    )
-                } else {
-                    run_preorder_pending_batch(
-                        &plan,
-                        &backend,
-                        task.pending,
-                        &mut worker,
-                        &eval_context,
-                        &mut sink,
-                        &mut had_runtime_errors,
-                    )
-                }
-            }
-            ParallelTask::PostOrderResume(task) => run_postorder_resume(
-                &plan,
-                task,
-                &mut worker,
-                &eval_context,
-                &mut sink,
-                barriers.as_ref(),
-            ),
-        };
+        let task_result = run_parallel_task(
+            task,
+            run_context,
+            &mut worker,
+            &mut sink,
+            &mut had_runtime_errors,
+        );
 
         control.task_finished();
         if control.outstanding_tasks() == 0 {
@@ -310,6 +267,68 @@ pub(crate) fn run_parallel_worker(
         status,
         had_runtime_errors,
     }))
+}
+
+fn run_parallel_task(
+    task: ParallelTask,
+    run: WorkerRunContext<'_>,
+    worker: &mut WorkerHandle,
+    sink: &mut WorkerActionSink,
+    had_runtime_errors: &mut bool,
+) -> Result<RuntimeStatus, Diagnostic> {
+    match task {
+        ParallelTask::PreOrderRoot(task) => {
+            if run.plan.traversal.order == TraversalOrder::DepthFirstPostOrder {
+                let mut context = PostorderRunContext {
+                    run,
+                    worker,
+                    sink,
+                    had_runtime_errors,
+                };
+                run_postorder_root_task(task, &mut context)
+            } else {
+                run_preorder_root_serial(
+                    run.plan,
+                    run.backend,
+                    task,
+                    worker,
+                    run.eval_context,
+                    sink,
+                    had_runtime_errors,
+                )
+            }
+        }
+        ParallelTask::SiblingChunk(task) => {
+            if task.completion_barrier.is_some() {
+                let mut context = PostorderRunContext {
+                    run,
+                    worker,
+                    sink,
+                    had_runtime_errors,
+                };
+                run_postorder_pending_batch(task.pending, task.completion_barrier, &mut context)
+            } else {
+                run_preorder_pending_batch(
+                    run.plan,
+                    run.backend,
+                    task.pending,
+                    worker,
+                    run.eval_context,
+                    sink,
+                    had_runtime_errors,
+                )
+            }
+        }
+        ParallelTask::PostOrderResume(task) => {
+            let mut context = PostorderRunContext {
+                run,
+                worker,
+                sink,
+                had_runtime_errors,
+            };
+            run_postorder_resume(task, &mut context)
+        }
+    }
 }
 
 fn run_preorder_root_serial(
@@ -484,51 +503,29 @@ fn run_preorder_pending_batch(
     Ok(status)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn run_postorder_root_task(
-    plan: &ExecutionPlan,
-    backend: &dyn WalkBackend,
     root: PreOrderRootTask,
-    worker: &mut WorkerHandle,
-    barriers: &BarrierTable,
-    context: &EvalContext,
-    sink: &mut WorkerActionSink,
-    had_runtime_errors: &mut bool,
+    context: &mut PostorderRunContext<'_, '_>,
 ) -> Result<RuntimeStatus, Diagnostic> {
-    run_postorder_pending_batch(
-        plan,
-        backend,
-        vec![root.pending],
-        None,
-        worker,
-        barriers,
-        context,
-        sink,
-        had_runtime_errors,
-    )
+    run_postorder_pending_batch(vec![root.pending], None, context)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn run_postorder_pending_batch(
-    plan: &ExecutionPlan,
-    backend: &dyn WalkBackend,
     initial: Vec<PendingPath>,
     completion_barrier: Option<SubtreeBarrierId>,
-    worker: &mut WorkerHandle,
-    barriers: &BarrierTable,
-    context: &EvalContext,
-    sink: &mut WorkerActionSink,
-    had_runtime_errors: &mut bool,
+    context: &mut PostorderRunContext<'_, '_>,
 ) -> Result<RuntimeStatus, Diagnostic> {
     let mut status = RuntimeStatus::default();
     let batch_barrier = match completion_barrier {
-        Some(parent) if initial.len() > 1 => Some(barriers.begin_batch(initial.len(), parent)?),
+        Some(parent) if initial.len() > 1 => {
+            Some(context.run.barriers.begin_batch(initial.len(), parent)?)
+        }
         _ => None,
     };
     let root_completion = batch_barrier.or(completion_barrier);
 
     for mut pending in initial {
-        if sink.control.quit_seen() || sink.control.fatal_error_seen() {
+        if context.sink.control.quit_seen() || context.sink.control.fatal_error_seen() {
             break;
         }
 
@@ -536,16 +533,7 @@ fn run_postorder_pending_batch(
             pending.parent_completion = Some(parent.0);
         }
 
-        status = status.merge(run_postorder_pending_root(
-            plan,
-            backend,
-            pending,
-            worker,
-            barriers,
-            context,
-            sink,
-            had_runtime_errors,
-        )?);
+        status = status.merge(run_postorder_pending_root(pending, context)?);
         if status.is_stop_requested() {
             break;
         }
@@ -554,27 +542,17 @@ fn run_postorder_pending_batch(
     Ok(status)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn run_postorder_pending_root(
-    plan: &ExecutionPlan,
-    backend: &dyn WalkBackend,
     pending: PendingPath,
-    worker: &mut WorkerHandle,
-    barriers: &BarrierTable,
-    context: &EvalContext,
-    sink: &mut WorkerActionSink,
-    had_runtime_errors: &mut bool,
+    context: &mut PostorderRunContext<'_, '_>,
 ) -> Result<RuntimeStatus, Diagnostic> {
+    let run = context.run;
+    let plan = run.plan;
     let notify_parent = pending.parent_completion.map(SubtreeBarrierId);
-    let entry = match backend.load_entry(&pending) {
+    let entry = match run.backend.load_entry(&pending) {
         Ok(entry) => entry,
         Err(error) => {
-            sink.emit_runtime_error(error)?;
-            *had_runtime_errors = true;
-            if let Some(parent) = notify_parent {
-                notify_parent_barrier(parent, barriers, worker, sink.control.as_ref())?;
-            }
-            return Ok(RuntimeStatus::default());
+            return emit_postorder_runtime_error(error, notify_parent, context);
         }
     };
 
@@ -583,41 +561,26 @@ fn run_postorder_pending_root(
         plan.follow_mode,
         plan.traversal.order,
         &entry,
-        context,
+        run.eval_context,
     ) {
         Ok(control) => control,
         Err(error) => {
-            sink.emit_runtime_error(error)?;
-            *had_runtime_errors = true;
-            if let Some(parent) = notify_parent {
-                notify_parent_barrier(parent, barriers, worker, sink.control.as_ref())?;
-            }
-            return Ok(RuntimeStatus::default());
+            return emit_postorder_runtime_error(error, notify_parent, context);
         }
     };
 
-    let is_directory = match backend.active_directory_identity(&entry, plan.follow_mode) {
+    let is_directory = match run
+        .backend
+        .active_directory_identity(&entry, plan.follow_mode)
+    {
         Ok(identity) => identity.is_some(),
         Err(error) => {
-            sink.emit_runtime_error(error)?;
-            *had_runtime_errors = true;
-            if let Some(parent) = notify_parent {
-                notify_parent_barrier(parent, barriers, worker, sink.control.as_ref())?;
-            }
-            return Ok(RuntimeStatus::default());
+            return emit_postorder_runtime_error(error, notify_parent, context);
         }
     };
 
     if !is_directory {
-        return complete_postorder_entry(
-            plan,
-            entry,
-            notify_parent,
-            worker,
-            barriers,
-            context,
-            sink,
-        );
+        return complete_postorder_entry(entry, notify_parent, context);
     }
 
     let descend = match should_descend_directory(
@@ -626,58 +589,60 @@ fn run_postorder_pending_root(
         plan.follow_mode,
         plan.traversal,
         traversal,
-        backend,
+        run.backend,
     ) {
         Ok(result) => result,
         Err(error) => {
-            sink.emit_runtime_error(error)?;
-            *had_runtime_errors = true;
-            if let Some(parent) = notify_parent {
-                notify_parent_barrier(parent, barriers, worker, sink.control.as_ref())?;
-            }
-            return Ok(RuntimeStatus::default());
+            return emit_postorder_runtime_error(error, notify_parent, context);
         }
     };
 
     let Some((child_ancestry, root_device)) = descend else {
-        return complete_postorder_entry(
-            plan,
-            entry,
-            notify_parent,
-            worker,
-            barriers,
-            context,
-            sink,
-        );
+        return complete_postorder_entry(entry, notify_parent, context);
     };
 
+    let Some(chunk_plan) =
+        collect_postorder_child_chunks(&pending, &child_ancestry, root_device, context)?
+    else {
+        return complete_postorder_entry(entry, notify_parent, context);
+    };
+
+    if context.sink.control.quit_seen() || context.sink.control.fatal_error_seen() {
+        return Ok(RuntimeStatus::default());
+    }
+
+    run_postorder_child_plan(entry, notify_parent, chunk_plan, context)
+}
+
+fn collect_postorder_child_chunks(
+    pending: &PendingPath,
+    child_ancestry: &[crate::identity::FileIdentity],
+    root_device: Option<u64>,
+    context: &mut PostorderRunContext<'_, '_>,
+) -> Result<Option<ChunkPlan>, Diagnostic> {
     let mut chunks = ChunkAccumulator::new(DEFAULT_SPLIT_CHILD_THRESHOLD, DEFAULT_SPILL_CHUNK_SIZE);
     let mut emitted_error = None;
-    match backend.visit_children(&pending.path, &mut |item| match item {
-        Ok(child) => chunks.push(
-            discovered_child_to_pending(child, &pending, &child_ancestry, root_device),
-            sink.control.accepts_new_work(),
-        ),
-        Err(error) => {
-            if let Err(emit_error) = sink.emit_runtime_error(error) {
-                emitted_error = Some(emit_error);
+
+    match context
+        .run
+        .backend
+        .visit_children(&pending.path, &mut |item| match item {
+            Ok(child) => chunks.push(
+                discovered_child_to_pending(child, pending, child_ancestry, root_device),
+                context.sink.control.accepts_new_work(),
+            ),
+            Err(error) => {
+                if let Err(emit_error) = context.sink.emit_runtime_error(error) {
+                    emitted_error = Some(emit_error);
+                }
+                *context.had_runtime_errors = true;
             }
-            *had_runtime_errors = true;
-        }
-    }) {
+        }) {
         Ok(()) => {}
         Err(error) => {
-            sink.emit_runtime_error(error)?;
-            *had_runtime_errors = true;
-            return complete_postorder_entry(
-                plan,
-                entry,
-                notify_parent,
-                worker,
-                barriers,
-                context,
-                sink,
-            );
+            context.sink.emit_runtime_error(error)?;
+            *context.had_runtime_errors = true;
+            return Ok(None);
         }
     }
 
@@ -685,26 +650,25 @@ fn run_postorder_pending_root(
         return Err(error);
     }
 
-    if sink.control.quit_seen() || sink.control.fatal_error_seen() {
-        return Ok(RuntimeStatus::default());
-    }
+    Ok(Some(chunks.finish()))
+}
 
-    let chunk_plan = chunks.finish();
+fn run_postorder_child_plan(
+    entry: EntryContext,
+    notify_parent: Option<SubtreeBarrierId>,
+    chunk_plan: ChunkPlan,
+    context: &mut PostorderRunContext<'_, '_>,
+) -> Result<RuntimeStatus, Diagnostic> {
     let has_local_batch = !chunk_plan.local_stack.is_empty();
     let child_units = chunk_plan.spilled_chunks.len() + usize::from(has_local_batch);
     if child_units == 0 {
-        return complete_postorder_entry(
-            plan,
-            entry,
-            notify_parent,
-            worker,
-            barriers,
-            context,
-            sink,
-        );
+        return complete_postorder_entry(entry, notify_parent, context);
     }
 
-    let barrier = barriers.begin_directory(entry, child_units, notify_parent)?;
+    let barrier = context
+        .run
+        .barriers
+        .begin_directory(entry, child_units, notify_parent)?;
     let mut status = RuntimeStatus::default();
 
     if has_local_batch {
@@ -717,19 +681,13 @@ fn run_postorder_pending_root(
             })
             .collect();
         status = status.merge(run_postorder_pending_batch(
-            plan,
-            backend,
             local_batch,
             Some(barrier),
-            worker,
-            barriers,
             context,
-            sink,
-            had_runtime_errors,
         )?);
     }
 
-    if !sink.control.accepts_new_work() || status.is_stop_requested() {
+    if !context.sink.control.accepts_new_work() || status.is_stop_requested() {
         return Ok(status);
     }
 
@@ -741,12 +699,12 @@ fn run_postorder_pending_root(
                 ..child
             })
             .collect::<Vec<_>>();
-        worker.push_local(
+        context.worker.push_local(
             ParallelTask::SiblingChunk(SiblingChunkTask {
                 pending,
                 completion_barrier: Some(barrier),
             }),
-            sink.control.as_ref(),
+            context.sink.control.as_ref(),
         );
     }
 
@@ -754,14 +712,11 @@ fn run_postorder_pending_root(
 }
 
 fn complete_postorder_entry(
-    plan: &ExecutionPlan,
     entry: EntryContext,
     notify_parent: Option<SubtreeBarrierId>,
-    worker: &mut WorkerHandle,
-    barriers: &BarrierTable,
-    context: &EvalContext,
-    sink: &mut WorkerActionSink,
+    context: &mut PostorderRunContext<'_, '_>,
 ) -> Result<RuntimeStatus, Diagnostic> {
+    let plan = context.run.plan;
     let mut status = RuntimeStatus::default();
 
     if entry.depth >= plan.traversal.min_depth {
@@ -769,8 +724,8 @@ fn complete_postorder_entry(
             plan,
             &entry,
             plan.follow_mode,
-            context,
-            sink,
+            context.run.eval_context,
+            context.sink,
         )?);
         if status.is_stop_requested() {
             return Ok(status);
@@ -778,20 +733,22 @@ fn complete_postorder_entry(
     }
 
     if let Some(parent) = notify_parent {
-        notify_parent_barrier(parent, barriers, worker, sink.control.as_ref())?;
+        notify_parent_barrier(
+            parent,
+            context.run.barriers,
+            context.worker,
+            context.sink.control.as_ref(),
+        )?;
     }
 
     Ok(status)
 }
 
 fn run_postorder_resume(
-    plan: &ExecutionPlan,
     task: PostOrderResumeTask,
-    worker: &mut WorkerHandle,
-    context: &EvalContext,
-    sink: &mut WorkerActionSink,
-    barriers: &BarrierTable,
+    context: &mut PostorderRunContext<'_, '_>,
 ) -> Result<RuntimeStatus, Diagnostic> {
+    let plan = context.run.plan;
     let mut status = RuntimeStatus::default();
 
     if task.entry.depth >= plan.traversal.min_depth {
@@ -799,16 +756,39 @@ fn run_postorder_resume(
             plan,
             &task.entry,
             plan.follow_mode,
-            context,
-            sink,
+            context.run.eval_context,
+            context.sink,
         )?);
     }
 
     if let Some(parent) = task.notify_parent {
-        notify_parent_barrier(parent, barriers, worker, sink.control.as_ref())?;
+        notify_parent_barrier(
+            parent,
+            context.run.barriers,
+            context.worker,
+            context.sink.control.as_ref(),
+        )?;
     }
 
     Ok(status)
+}
+
+fn emit_postorder_runtime_error(
+    error: Diagnostic,
+    notify_parent: Option<SubtreeBarrierId>,
+    context: &mut PostorderRunContext<'_, '_>,
+) -> Result<RuntimeStatus, Diagnostic> {
+    context.sink.emit_runtime_error(error)?;
+    *context.had_runtime_errors = true;
+    if let Some(parent) = notify_parent {
+        notify_parent_barrier(
+            parent,
+            context.run.barriers,
+            context.worker,
+            context.sink.control.as_ref(),
+        )?;
+    }
+    Ok(RuntimeStatus::default())
 }
 
 fn notify_parent_barrier(
@@ -834,6 +814,7 @@ fn notify_parent_barrier(
 
 #[cfg(test)]
 mod tests {
+    use super::context::{PostorderRunContext, WorkerRunContext};
     use super::{WorkerActionSink, run_postorder_root_task, run_preorder_root_serial};
     use crate::eval::{EvalContext, RuntimeStatus};
     use crate::exec::PromptCoordinator;
@@ -910,16 +891,23 @@ mod tests {
         let mut sink = WorkerActionSink::new(control.clone(), broker, file_outputs, prompt);
         let mut had_runtime_errors = false;
         let barriers = BarrierTable::default();
+        let eval_context = EvalContext::default();
+        let run_context = WorkerRunContext {
+            plan: &plan,
+            backend: &FsWalkBackend,
+            barriers: &barriers,
+            eval_context: &eval_context,
+        };
+        let mut postorder_context = PostorderRunContext {
+            run: run_context,
+            worker: &mut worker,
+            sink: &mut sink,
+            had_runtime_errors: &mut had_runtime_errors,
+        };
 
         let status = run_postorder_root_task(
-            &plan,
-            &FsWalkBackend,
             PreOrderRootTask::for_path(root.path().to_path_buf(), 0),
-            &mut worker,
-            &barriers,
-            &EvalContext::default(),
-            &mut sink,
-            &mut had_runtime_errors,
+            &mut postorder_context,
         )
         .unwrap();
 

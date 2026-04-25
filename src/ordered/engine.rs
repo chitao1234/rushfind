@@ -148,25 +148,14 @@ where
                 )
             },
             |event| {
-                match event {
-                    WalkEvent::Entry(item) | WalkEvent::DirectoryComplete(item) => {
-                        let entry = item.entry;
-                        if entry.depth >= plan.traversal.min_depth {
-                            work_tx.send((next_sequence, entry)).map_err(|_| {
-                                Diagnostic::new(
-                                    "internal error: ordered evaluator channel is unavailable",
-                                    1,
-                                )
-                            })?;
-                            next_sequence += 1;
-                        }
-                    }
-                    WalkEvent::Error(error) => {
-                        had_runtime_errors = true;
-                        sink.write_diagnostic(format!("rfd: {error}"))?;
-                    }
-                }
-                Ok(OrderedWalkDirective::Continue)
+                handle_ordered_pipeline_walk_event(
+                    event,
+                    plan,
+                    &work_tx,
+                    &mut next_sequence,
+                    &mut sink,
+                    &mut had_runtime_errors,
+                )
             },
         )?;
         drop(work_tx);
@@ -215,6 +204,39 @@ where
         had_runtime_errors,
         had_action_failures,
     })
+}
+
+fn handle_ordered_pipeline_walk_event<W, E>(
+    event: WalkEvent,
+    plan: &ExecutionPlan,
+    work_tx: &crossbeam_channel::Sender<(u64, crate::entry::EntryContext)>,
+    next_sequence: &mut u64,
+    sink: &mut crate::exec::OrderedActionSink<'_, W, E>,
+    had_runtime_errors: &mut bool,
+) -> Result<OrderedWalkDirective, Diagnostic>
+where
+    W: Write,
+    E: Write,
+{
+    match event {
+        WalkEvent::Entry(item) | WalkEvent::DirectoryComplete(item) => {
+            let entry = item.entry;
+            if entry.depth >= plan.traversal.min_depth {
+                work_tx.send((*next_sequence, entry)).map_err(|_| {
+                    Diagnostic::new(
+                        "internal error: ordered evaluator channel is unavailable",
+                        1,
+                    )
+                })?;
+                *next_sequence += 1;
+            }
+        }
+        WalkEvent::Error(error) => {
+            *had_runtime_errors = true;
+            sink.write_diagnostic(format!("rfd: {error}"))?;
+        }
+    }
+    Ok(OrderedWalkDirective::Continue)
 }
 
 pub(crate) fn ordered_evaluator_workers(plan: &ExecutionPlan) -> usize {

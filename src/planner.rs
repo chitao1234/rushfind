@@ -544,6 +544,67 @@ fn lower_predicate(
     capabilities: &PlatformCapabilities,
 ) -> Result<RuntimeExpr, Diagnostic> {
     match predicate {
+        predicate @ (Predicate::MaxDepth(_)
+        | Predicate::MinDepth(_)
+        | Predicate::Depth
+        | Predicate::Prune
+        | Predicate::XDev) => lower_traversal_predicate(predicate, traversal, state, capabilities),
+        predicate @ (Predicate::Readable | Predicate::Writable | Predicate::Executable) => {
+            lower_access_predicate(predicate, state, capabilities)
+        }
+        predicate @ (Predicate::Name { .. }
+        | Predicate::Path { .. }
+        | Predicate::Regex { .. }
+        | Predicate::RegexType(_)
+        | Predicate::FsType(_)
+        | Predicate::LName { .. }) => {
+            lower_pattern_predicate(predicate, runtime, state, capabilities)
+        }
+        predicate @ (Predicate::Inum(_) | Predicate::Links(_) | Predicate::SameFile(_)) => {
+            lower_identity_predicate(predicate, follow_mode)
+        }
+        predicate @ (Predicate::Uid(_)
+        | Predicate::Gid(_)
+        | Predicate::User(_)
+        | Predicate::Group(_)
+        | Predicate::Owner(_)
+        | Predicate::OwnerSid(_)
+        | Predicate::GroupSid(_)
+        | Predicate::NoUser
+        | Predicate::NoGroup) => lower_ownership_predicate(predicate, state, capabilities),
+        predicate @ (Predicate::Perm(_)
+        | Predicate::Flags(_)
+        | Predicate::ReparseType(_)
+        | Predicate::Size(_)
+        | Predicate::Empty) => lower_metadata_predicate(predicate, state, capabilities),
+        predicate @ (Predicate::Used(_)
+        | Predicate::ATime(_)
+        | Predicate::CTime(_)
+        | Predicate::MTime(_)
+        | Predicate::AMin(_)
+        | Predicate::CMin(_)
+        | Predicate::MMin(_)
+        | Predicate::DayStart) => lower_temporal_predicate(predicate, state),
+        predicate @ (Predicate::Newer(_)
+        | Predicate::ANewer(_)
+        | Predicate::CNewer(_)
+        | Predicate::NewerXY { .. }) => {
+            lower_newer_predicate(predicate, follow_mode, state, capabilities)
+        }
+        Predicate::Type(kind) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Type(kind))),
+        Predicate::XType(kind) => Ok(RuntimeExpr::Predicate(RuntimePredicate::XType(kind))),
+        Predicate::True => Ok(RuntimeExpr::Predicate(RuntimePredicate::True)),
+        Predicate::False => Ok(RuntimeExpr::Predicate(RuntimePredicate::False)),
+    }
+}
+
+fn lower_traversal_predicate(
+    predicate: Predicate,
+    traversal: &mut TraversalOptions,
+    state: &mut PlanningState,
+    capabilities: &PlatformCapabilities,
+) -> Result<RuntimeExpr, Diagnostic> {
+    match predicate {
         Predicate::MaxDepth(value) => {
             traversal.max_depth = Some(value as usize);
             Ok(RuntimeExpr::Barrier)
@@ -562,59 +623,55 @@ fn lower_predicate(
             traversal.same_file_system = true;
             Ok(RuntimeExpr::Barrier)
         }
-        Predicate::Readable => {
-            require_platform_feature(capabilities, PlatformFeature::AccessPredicates, state)?;
-            Ok(RuntimeExpr::Predicate(RuntimePredicate::Readable))
-        }
-        Predicate::Writable => {
-            require_platform_feature(capabilities, PlatformFeature::AccessPredicates, state)?;
-            Ok(RuntimeExpr::Predicate(RuntimePredicate::Writable))
-        }
-        Predicate::Executable => {
-            require_platform_feature(capabilities, PlatformFeature::AccessPredicates, state)?;
-            Ok(RuntimeExpr::Predicate(RuntimePredicate::Executable))
-        }
+        _ => unreachable!("predicate dispatch guarantees traversal predicate"),
+    }
+}
+
+fn lower_access_predicate(
+    predicate: Predicate,
+    state: &mut PlanningState,
+    capabilities: &PlatformCapabilities,
+) -> Result<RuntimeExpr, Diagnostic> {
+    require_platform_feature(capabilities, PlatformFeature::AccessPredicates, state)?;
+    Ok(RuntimeExpr::Predicate(match predicate {
+        Predicate::Readable => RuntimePredicate::Readable,
+        Predicate::Writable => RuntimePredicate::Writable,
+        Predicate::Executable => RuntimePredicate::Executable,
+        _ => unreachable!("predicate dispatch guarantees access predicate"),
+    }))
+}
+
+fn lower_pattern_predicate(
+    predicate: Predicate,
+    runtime: &mut RuntimeRequirements,
+    state: &mut PlanningState,
+    capabilities: &PlatformCapabilities,
+) -> Result<RuntimeExpr, Diagnostic> {
+    match predicate {
         Predicate::Name {
             pattern,
             case_insensitive,
-        } => {
-            if case_insensitive {
-                require_platform_feature(
-                    capabilities,
-                    PlatformFeature::CaseInsensitiveGlob,
-                    state,
-                )?;
-            }
-            Ok(RuntimeExpr::Predicate(RuntimePredicate::Name(
-                compile_glob(
-                    if case_insensitive { "-iname" } else { "-name" },
-                    pattern.as_os_str(),
-                    case_insensitive,
-                    GlobSlashMode::Literal,
-                )?,
-            )))
-        }
+        } => Ok(RuntimeExpr::Predicate(RuntimePredicate::Name(
+            compile_case_glob(
+                if case_insensitive { "-iname" } else { "-name" },
+                pattern.as_os_str(),
+                case_insensitive,
+                state,
+                capabilities,
+            )?,
+        ))),
         Predicate::Path {
             pattern,
             case_insensitive,
-        } => {
-            if case_insensitive {
-                require_platform_feature(
-                    capabilities,
-                    PlatformFeature::CaseInsensitiveGlob,
-                    state,
-                )?;
-            }
-            let normalized_pattern = normalize_match_pattern(pattern.as_os_str());
-            Ok(RuntimeExpr::Predicate(RuntimePredicate::Path(
-                compile_glob(
-                    if case_insensitive { "-ipath" } else { "-path" },
-                    normalized_pattern.as_ref(),
-                    case_insensitive,
-                    GlobSlashMode::Literal,
-                )?,
-            )))
-        }
+        } => Ok(RuntimeExpr::Predicate(RuntimePredicate::Path(
+            compile_normalized_glob(
+                if case_insensitive { "-ipath" } else { "-path" },
+                pattern.as_os_str(),
+                case_insensitive,
+                state,
+                capabilities,
+            )?,
+        ))),
         Predicate::Regex {
             pattern,
             case_insensitive,
@@ -639,58 +696,82 @@ fn lower_predicate(
             runtime.mount_snapshot = true;
             Ok(RuntimeExpr::Predicate(RuntimePredicate::FsType(type_name)))
         }
-        Predicate::Inum(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Inum(
-            parse_numeric_argument("-inum", raw.as_os_str())?,
-        ))),
-        Predicate::Links(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Links(
-            parse_numeric_argument("-links", raw.as_os_str())?,
-        ))),
-        Predicate::SameFile(path) => Ok(RuntimeExpr::Predicate(RuntimePredicate::SameFile(
-            resolve_samefile_reference(&path, follow_mode)?,
-        ))),
         Predicate::LName {
             pattern,
             case_insensitive,
-        } => {
-            if case_insensitive {
-                require_platform_feature(
-                    capabilities,
-                    PlatformFeature::CaseInsensitiveGlob,
-                    state,
-                )?;
-            }
-            let normalized_pattern = normalize_match_pattern(pattern.as_os_str());
-            Ok(RuntimeExpr::Predicate(RuntimePredicate::LName(
-                compile_glob(
-                    if case_insensitive {
-                        "-ilname"
-                    } else {
-                        "-lname"
-                    },
-                    normalized_pattern.as_ref(),
-                    case_insensitive,
-                    GlobSlashMode::Literal,
-                )?,
-            )))
+        } => Ok(RuntimeExpr::Predicate(RuntimePredicate::LName(
+            compile_normalized_glob(
+                if case_insensitive {
+                    "-ilname"
+                } else {
+                    "-lname"
+                },
+                pattern.as_os_str(),
+                case_insensitive,
+                state,
+                capabilities,
+            )?,
+        ))),
+        _ => unreachable!("predicate dispatch guarantees pattern predicate"),
+    }
+}
+
+fn compile_case_glob(
+    flag: &'static str,
+    pattern: &std::ffi::OsStr,
+    case_insensitive: bool,
+    state: &mut PlanningState,
+    capabilities: &PlatformCapabilities,
+) -> Result<CompiledGlob, Diagnostic> {
+    if case_insensitive {
+        require_platform_feature(capabilities, PlatformFeature::CaseInsensitiveGlob, state)?;
+    }
+    compile_glob(flag, pattern, case_insensitive, GlobSlashMode::Literal)
+}
+
+fn compile_normalized_glob(
+    flag: &'static str,
+    pattern: &std::ffi::OsStr,
+    case_insensitive: bool,
+    state: &mut PlanningState,
+    capabilities: &PlatformCapabilities,
+) -> Result<CompiledGlob, Diagnostic> {
+    let normalized_pattern = normalize_match_pattern(pattern);
+    compile_case_glob(
+        flag,
+        normalized_pattern.as_ref(),
+        case_insensitive,
+        state,
+        capabilities,
+    )
+}
+
+fn lower_identity_predicate(
+    predicate: Predicate,
+    follow_mode: FollowMode,
+) -> Result<RuntimeExpr, Diagnostic> {
+    Ok(RuntimeExpr::Predicate(match predicate {
+        Predicate::Inum(raw) => {
+            RuntimePredicate::Inum(parse_numeric_argument("-inum", raw.as_os_str())?)
         }
-        Predicate::Uid(raw) => {
-            if let Some(error) = unsupported_windows_numeric_ownership("-uid", capabilities) {
-                return Err(error);
-            }
-            require_platform_feature(capabilities, PlatformFeature::NumericOwnership, state)?;
-            Ok(RuntimeExpr::Predicate(RuntimePredicate::Uid(
-                parse_numeric_argument("-uid", raw.as_os_str())?,
-            )))
+        Predicate::Links(raw) => {
+            RuntimePredicate::Links(parse_numeric_argument("-links", raw.as_os_str())?)
         }
-        Predicate::Gid(raw) => {
-            if let Some(error) = unsupported_windows_numeric_ownership("-gid", capabilities) {
-                return Err(error);
-            }
-            require_platform_feature(capabilities, PlatformFeature::NumericOwnership, state)?;
-            Ok(RuntimeExpr::Predicate(RuntimePredicate::Gid(
-                parse_numeric_argument("-gid", raw.as_os_str())?,
-            )))
+        Predicate::SameFile(path) => {
+            RuntimePredicate::SameFile(resolve_samefile_reference(&path, follow_mode)?)
         }
+        _ => unreachable!("predicate dispatch guarantees identity predicate"),
+    }))
+}
+
+fn lower_ownership_predicate(
+    predicate: Predicate,
+    state: &mut PlanningState,
+    capabilities: &PlatformCapabilities,
+) -> Result<RuntimeExpr, Diagnostic> {
+    match predicate {
+        Predicate::Uid(raw) => lower_numeric_owner("-uid", raw, state, capabilities),
+        Predicate::Gid(raw) => lower_numeric_owner("-gid", raw, state, capabilities),
         Predicate::User(raw) => {
             require_platform_feature(capabilities, PlatformFeature::NamedOwnership, state)?;
             Ok(RuntimeExpr::Predicate(RuntimePredicate::User(
@@ -729,6 +810,34 @@ fn lower_predicate(
             require_platform_feature(capabilities, PlatformFeature::NamedOwnership, state)?;
             Ok(RuntimeExpr::Predicate(RuntimePredicate::NoGroup))
         }
+        _ => unreachable!("predicate dispatch guarantees ownership predicate"),
+    }
+}
+
+fn lower_numeric_owner(
+    flag: &'static str,
+    raw: std::ffi::OsString,
+    state: &mut PlanningState,
+    capabilities: &PlatformCapabilities,
+) -> Result<RuntimeExpr, Diagnostic> {
+    if let Some(error) = unsupported_windows_numeric_ownership(flag, capabilities) {
+        return Err(error);
+    }
+    require_platform_feature(capabilities, PlatformFeature::NumericOwnership, state)?;
+    let comparison = parse_numeric_argument(flag, raw.as_os_str())?;
+    Ok(RuntimeExpr::Predicate(match flag {
+        "-uid" => RuntimePredicate::Uid(comparison),
+        "-gid" => RuntimePredicate::Gid(comparison),
+        _ => unreachable!("only uid and gid numeric ownership flags are supported"),
+    }))
+}
+
+fn lower_metadata_predicate(
+    predicate: Predicate,
+    state: &mut PlanningState,
+    capabilities: &PlatformCapabilities,
+) -> Result<RuntimeExpr, Diagnostic> {
+    match predicate {
         Predicate::Perm(raw) => {
             require_platform_feature(capabilities, PlatformFeature::ModeBits, state)?;
             Ok(RuntimeExpr::Predicate(RuntimePredicate::Perm(
@@ -751,80 +860,91 @@ fn lower_predicate(
             parse_size_argument(raw.as_os_str())?,
         ))),
         Predicate::Empty => Ok(RuntimeExpr::Predicate(RuntimePredicate::Empty)),
+        _ => unreachable!("predicate dispatch guarantees metadata predicate"),
+    }
+}
+
+fn lower_temporal_predicate(
+    predicate: Predicate,
+    state: &mut PlanningState,
+) -> Result<RuntimeExpr, Diagnostic> {
+    match predicate {
         Predicate::Used(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Used(
             UsedMatcher {
                 comparison: parse_time_comparison("-used", raw.as_os_str())?,
             },
         ))),
-        Predicate::ATime(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(
-            parse_relative_time_argument(
-                "-atime",
-                raw.as_os_str(),
-                TimestampKind::Access,
-                RelativeTimeUnit::Days,
-                state.temporal.relative_baseline()?,
-                state.temporal.daystart_active,
-            )?,
-        ))),
-        Predicate::CTime(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(
-            parse_relative_time_argument(
-                "-ctime",
-                raw.as_os_str(),
-                TimestampKind::Change,
-                RelativeTimeUnit::Days,
-                state.temporal.relative_baseline()?,
-                state.temporal.daystart_active,
-            )?,
-        ))),
-        Predicate::MTime(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(
-            parse_relative_time_argument(
-                "-mtime",
-                raw.as_os_str(),
-                TimestampKind::Modification,
-                RelativeTimeUnit::Days,
-                state.temporal.relative_baseline()?,
-                state.temporal.daystart_active,
-            )?,
-        ))),
-        Predicate::AMin(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(
-            parse_relative_time_argument(
-                "-amin",
-                raw.as_os_str(),
-                TimestampKind::Access,
-                RelativeTimeUnit::Minutes,
-                state.temporal.relative_baseline()?,
-                state.temporal.daystart_active,
-            )?,
-        ))),
-        Predicate::CMin(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(
-            parse_relative_time_argument(
-                "-cmin",
-                raw.as_os_str(),
-                TimestampKind::Change,
-                RelativeTimeUnit::Minutes,
-                state.temporal.relative_baseline()?,
-                state.temporal.daystart_active,
-            )?,
-        ))),
-        Predicate::MMin(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(
-            parse_relative_time_argument(
-                "-mmin",
-                raw.as_os_str(),
-                TimestampKind::Modification,
-                RelativeTimeUnit::Minutes,
-                state.temporal.relative_baseline()?,
-                state.temporal.daystart_active,
-            )?,
-        ))),
-        Predicate::Newer(path) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Newer(
-            resolve_reference_matcher("-newer", 'm', 'm', path.as_os_str(), follow_mode)?,
-        ))),
-        Predicate::ANewer(path) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Newer(
-            resolve_reference_matcher("-anewer", 'a', 'm', path.as_os_str(), follow_mode)?,
-        ))),
-        Predicate::CNewer(path) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Newer(
-            resolve_reference_matcher("-cnewer", 'c', 'm', path.as_os_str(), follow_mode)?,
-        ))),
+        Predicate::ATime(raw) => lower_relative_time("-atime", raw, TimestampKind::Access, state),
+        Predicate::CTime(raw) => lower_relative_time("-ctime", raw, TimestampKind::Change, state),
+        Predicate::MTime(raw) => {
+            lower_relative_time("-mtime", raw, TimestampKind::Modification, state)
+        }
+        Predicate::AMin(raw) => lower_relative_minutes("-amin", raw, TimestampKind::Access, state),
+        Predicate::CMin(raw) => lower_relative_minutes("-cmin", raw, TimestampKind::Change, state),
+        Predicate::MMin(raw) => {
+            lower_relative_minutes("-mmin", raw, TimestampKind::Modification, state)
+        }
+        Predicate::DayStart => {
+            state.temporal.daystart_active = true;
+            Ok(RuntimeExpr::Barrier)
+        }
+        _ => unreachable!("predicate dispatch guarantees temporal predicate"),
+    }
+}
+
+fn lower_relative_time(
+    flag: &'static str,
+    raw: std::ffi::OsString,
+    timestamp_kind: TimestampKind,
+    state: &PlanningState,
+) -> Result<RuntimeExpr, Diagnostic> {
+    lower_relative_time_with_unit(flag, raw, timestamp_kind, RelativeTimeUnit::Days, state)
+}
+
+fn lower_relative_minutes(
+    flag: &'static str,
+    raw: std::ffi::OsString,
+    timestamp_kind: TimestampKind,
+    state: &PlanningState,
+) -> Result<RuntimeExpr, Diagnostic> {
+    lower_relative_time_with_unit(flag, raw, timestamp_kind, RelativeTimeUnit::Minutes, state)
+}
+
+fn lower_relative_time_with_unit(
+    flag: &'static str,
+    raw: std::ffi::OsString,
+    timestamp_kind: TimestampKind,
+    unit: RelativeTimeUnit,
+    state: &PlanningState,
+) -> Result<RuntimeExpr, Diagnostic> {
+    Ok(RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(
+        parse_relative_time_argument(
+            flag,
+            raw.as_os_str(),
+            timestamp_kind,
+            unit,
+            state.temporal.relative_baseline()?,
+            state.temporal.daystart_active,
+        )?,
+    )))
+}
+
+fn lower_newer_predicate(
+    predicate: Predicate,
+    follow_mode: FollowMode,
+    state: &mut PlanningState,
+    capabilities: &PlatformCapabilities,
+) -> Result<RuntimeExpr, Diagnostic> {
+    let matcher = match predicate {
+        Predicate::Newer(path) => {
+            resolve_reference_matcher("-newer", 'm', 'm', path.as_os_str(), follow_mode)?
+        }
+        Predicate::ANewer(path) => {
+            resolve_reference_matcher("-anewer", 'a', 'm', path.as_os_str(), follow_mode)?
+        }
+        Predicate::CNewer(path) => {
+            resolve_reference_matcher("-cnewer", 'c', 'm', path.as_os_str(), follow_mode)?
+        }
         Predicate::NewerXY {
             current,
             reference,
@@ -833,25 +953,17 @@ fn lower_predicate(
             if current == 'B' || reference == 'B' {
                 require_platform_feature(capabilities, PlatformFeature::BirthTime, state)?;
             }
-            Ok(RuntimeExpr::Predicate(RuntimePredicate::Newer(
-                resolve_reference_matcher(
-                    "-newerXY",
-                    current,
-                    reference,
-                    reference_arg.as_os_str(),
-                    follow_mode,
-                )?,
-            )))
+            resolve_reference_matcher(
+                "-newerXY",
+                current,
+                reference,
+                reference_arg.as_os_str(),
+                follow_mode,
+            )?
         }
-        Predicate::DayStart => {
-            state.temporal.daystart_active = true;
-            Ok(RuntimeExpr::Barrier)
-        }
-        Predicate::Type(kind) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Type(kind))),
-        Predicate::XType(kind) => Ok(RuntimeExpr::Predicate(RuntimePredicate::XType(kind))),
-        Predicate::True => Ok(RuntimeExpr::Predicate(RuntimePredicate::True)),
-        Predicate::False => Ok(RuntimeExpr::Predicate(RuntimePredicate::False)),
-    }
+        _ => unreachable!("predicate dispatch guarantees newer predicate"),
+    };
+    Ok(RuntimeExpr::Predicate(RuntimePredicate::Newer(matcher)))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -938,22 +1050,86 @@ fn lower_action(
     state.saw_action = true;
 
     match action {
-        Action::Print => Ok(RuntimeExpr::Action(RuntimeAction::Output(
-            OutputAction::Print,
-        ))),
-        Action::Print0 => Ok(RuntimeExpr::Action(RuntimeAction::Output(
-            OutputAction::Print0,
-        ))),
-        Action::Printf { format } => {
-            let compiled = compile_printf_program("-printf", format.as_os_str())?;
-            if compiled.program.requires_mount_snapshot() {
-                require_platform_feature(capabilities, PlatformFeature::FsType, state)?;
-                runtime.mount_snapshot = true;
-            }
-            validate_platform_printf_program("-printf", &compiled.program, capabilities, state)?;
-            state.startup_warnings.extend(compiled.warnings);
-            Ok(RuntimeExpr::Action(RuntimeAction::Printf(compiled.program)))
+        action @ (Action::Print | Action::Print0 | Action::Quit | Action::Delete) => {
+            lower_simple_action(action, state)
         }
+        action @ (Action::Printf { .. } | Action::FPrintf { .. }) => {
+            lower_printf_action(action, runtime, state, capabilities)
+        }
+        action @ (Action::FPrint { .. }
+        | Action::FPrint0 { .. }
+        | Action::Ls
+        | Action::Fls { .. }) => lower_output_action(action, state, capabilities),
+        action @ (Action::Exec { .. } | Action::ExecDir { .. }) => {
+            lower_exec_action(action, runtime, state)
+        }
+        action @ (Action::Ok { .. } | Action::OkDir { .. }) => {
+            lower_prompt_action(action, runtime, state, capabilities)
+        }
+    }
+}
+
+fn lower_simple_action(
+    action: Action,
+    state: &mut PlanningState,
+) -> Result<RuntimeExpr, Diagnostic> {
+    Ok(RuntimeExpr::Action(match action {
+        Action::Print => RuntimeAction::Output(OutputAction::Print),
+        Action::Print0 => RuntimeAction::Output(OutputAction::Print0),
+        Action::Quit => RuntimeAction::Quit,
+        Action::Delete => {
+            state.saw_delete = true;
+            RuntimeAction::Delete
+        }
+        _ => unreachable!("action dispatch guarantees simple action"),
+    }))
+}
+
+fn lower_printf_action(
+    action: Action,
+    runtime: &mut RuntimeRequirements,
+    state: &mut PlanningState,
+    capabilities: &PlatformCapabilities,
+) -> Result<RuntimeExpr, Diagnostic> {
+    match action {
+        Action::Printf { format } => {
+            let program = compile_action_printf("-printf", format, runtime, state, capabilities)?;
+            Ok(RuntimeExpr::Action(RuntimeAction::Printf(program)))
+        }
+        Action::FPrintf { path, format } => {
+            let program = compile_action_printf("-fprintf", format, runtime, state, capabilities)?;
+            Ok(RuntimeExpr::Action(RuntimeAction::FilePrintf {
+                destination: register_file_output(state, path),
+                program,
+            }))
+        }
+        _ => unreachable!("action dispatch guarantees printf action"),
+    }
+}
+
+fn compile_action_printf(
+    flag: &'static str,
+    format: OsString,
+    runtime: &mut RuntimeRequirements,
+    state: &mut PlanningState,
+    capabilities: &PlatformCapabilities,
+) -> Result<PrintfProgram, Diagnostic> {
+    let compiled = compile_printf_program(flag, format.as_os_str())?;
+    if compiled.program.requires_mount_snapshot() {
+        require_platform_feature(capabilities, PlatformFeature::FsType, state)?;
+        runtime.mount_snapshot = true;
+    }
+    validate_platform_printf_program(flag, &compiled.program, capabilities, state)?;
+    state.startup_warnings.extend(compiled.warnings);
+    Ok(compiled.program)
+}
+
+fn lower_output_action(
+    action: Action,
+    state: &mut PlanningState,
+    capabilities: &PlatformCapabilities,
+) -> Result<RuntimeExpr, Diagnostic> {
+    match action {
         Action::FPrint { path } => Ok(RuntimeExpr::Action(RuntimeAction::FilePrint {
             destination: register_file_output(state, path),
             terminator: FileOutputTerminator::Newline,
@@ -962,71 +1138,85 @@ fn lower_action(
             destination: register_file_output(state, path),
             terminator: FileOutputTerminator::Nul,
         })),
-        Action::FPrintf { path, format } => {
-            let compiled = compile_printf_program("-fprintf", format.as_os_str())?;
-            if compiled.program.requires_mount_snapshot() {
-                require_platform_feature(capabilities, PlatformFeature::FsType, state)?;
-                runtime.mount_snapshot = true;
-            }
-            validate_platform_printf_program("-fprintf", &compiled.program, capabilities, state)?;
-            state.startup_warnings.extend(compiled.warnings);
-            Ok(RuntimeExpr::Action(RuntimeAction::FilePrintf {
-                destination: register_file_output(state, path),
-                program: compiled.program,
-            }))
-        }
         Action::Ls => {
-            if !capabilities.uses_windows_native_output_contract() {
-                require_platform_feature(capabilities, PlatformFeature::ModeBits, state)?;
-            }
+            require_ls_mode_bits_if_needed(capabilities, state)?;
             Ok(RuntimeExpr::Action(RuntimeAction::Ls))
         }
-        Action::Fls { path } => Ok(RuntimeExpr::Action(RuntimeAction::FileLs {
-            destination: {
-                if !capabilities.uses_windows_native_output_contract() {
-                    require_platform_feature(capabilities, PlatformFeature::ModeBits, state)?;
-                }
-                register_file_output(state, path)
-            },
-        })),
-        Action::Quit => Ok(RuntimeExpr::Action(RuntimeAction::Quit)),
-        Action::Exec { argv, batch: false } => Ok(RuntimeExpr::Action(
-            RuntimeAction::ExecImmediate(compile_immediate_exec(ExecSemantics::Normal, &argv)),
-        )),
-        Action::Exec { argv, batch: true } => {
-            let id = state.next_exec_batch_id;
-            state.next_exec_batch_id += 1;
-            Ok(RuntimeExpr::Action(RuntimeAction::ExecBatched(
-                compile_batched_exec(id, ExecSemantics::Normal, &argv)?,
-            )))
+        Action::Fls { path } => {
+            require_ls_mode_bits_if_needed(capabilities, state)?;
+            Ok(RuntimeExpr::Action(RuntimeAction::FileLs {
+                destination: register_file_output(state, path),
+            }))
         }
-        Action::ExecDir { argv, batch: false } => {
-            runtime.execdir_requires_safe_path = true;
-            Ok(RuntimeExpr::Action(RuntimeAction::ExecImmediate(
-                compile_immediate_exec(ExecSemantics::DirLocal, &argv),
-            )))
+        _ => unreachable!("action dispatch guarantees output action"),
+    }
+}
+
+fn require_ls_mode_bits_if_needed(
+    capabilities: &PlatformCapabilities,
+    state: &mut PlanningState,
+) -> Result<(), Diagnostic> {
+    if !capabilities.uses_windows_native_output_contract() {
+        require_platform_feature(capabilities, PlatformFeature::ModeBits, state)?;
+    }
+    Ok(())
+}
+
+fn lower_exec_action(
+    action: Action,
+    runtime: &mut RuntimeRequirements,
+    state: &mut PlanningState,
+) -> Result<RuntimeExpr, Diagnostic> {
+    match action {
+        Action::Exec { argv, batch } => {
+            lower_exec_with_semantics(argv, batch, ExecSemantics::Normal, false, runtime, state)
         }
-        Action::ExecDir { argv, batch: true } => {
-            runtime.execdir_requires_safe_path = true;
-            let id = state.next_exec_batch_id;
-            state.next_exec_batch_id += 1;
-            Ok(RuntimeExpr::Action(RuntimeAction::ExecBatched(
-                compile_batched_exec(id, ExecSemantics::DirLocal, &argv)?,
-            )))
+        Action::ExecDir { argv, batch } => {
+            lower_exec_with_semantics(argv, batch, ExecSemantics::DirLocal, true, runtime, state)
         }
-        Action::Ok { argv, batch: false } => {
-            require_platform_feature(capabilities, PlatformFeature::MessagesLocale, state)?;
-            runtime.messages_locale_required = true;
-            Ok(RuntimeExpr::Action(RuntimeAction::ExecPrompt(
-                compile_immediate_exec(ExecSemantics::Normal, &argv),
-            )))
-        }
+        _ => unreachable!("action dispatch guarantees exec action"),
+    }
+}
+
+fn lower_exec_with_semantics(
+    argv: Vec<OsString>,
+    batch: bool,
+    semantics: ExecSemantics,
+    requires_safe_path: bool,
+    runtime: &mut RuntimeRequirements,
+    state: &mut PlanningState,
+) -> Result<RuntimeExpr, Diagnostic> {
+    if requires_safe_path {
+        runtime.execdir_requires_safe_path = true;
+    }
+
+    let action = if batch {
+        let id = state.next_exec_batch_id;
+        state.next_exec_batch_id += 1;
+        RuntimeAction::ExecBatched(compile_batched_exec(id, semantics, &argv)?)
+    } else {
+        RuntimeAction::ExecImmediate(compile_immediate_exec(semantics, &argv))
+    };
+    Ok(RuntimeExpr::Action(action))
+}
+
+fn lower_prompt_action(
+    action: Action,
+    runtime: &mut RuntimeRequirements,
+    state: &mut PlanningState,
+    capabilities: &PlatformCapabilities,
+) -> Result<RuntimeExpr, Diagnostic> {
+    require_platform_feature(capabilities, PlatformFeature::MessagesLocale, state)?;
+    runtime.messages_locale_required = true;
+
+    match action {
+        Action::Ok { argv, batch: false } => Ok(RuntimeExpr::Action(RuntimeAction::ExecPrompt(
+            compile_immediate_exec(ExecSemantics::Normal, &argv),
+        ))),
         Action::Ok { batch: true, .. } => {
             Err(Diagnostic::parse("`-ok` only supports the `;` terminator"))
         }
         Action::OkDir { argv, batch: false } => {
-            require_platform_feature(capabilities, PlatformFeature::MessagesLocale, state)?;
-            runtime.messages_locale_required = true;
             runtime.execdir_requires_safe_path = true;
             Ok(RuntimeExpr::Action(RuntimeAction::ExecPrompt(
                 compile_immediate_exec(ExecSemantics::DirLocal, &argv),
@@ -1035,10 +1225,7 @@ fn lower_action(
         Action::OkDir { batch: true, .. } => Err(Diagnostic::parse(
             "`-okdir` only supports the `;` terminator",
         )),
-        Action::Delete => {
-            state.saw_delete = true;
-            Ok(RuntimeExpr::Action(RuntimeAction::Delete))
-        }
+        _ => unreachable!("action dispatch guarantees prompt action"),
     }
 }
 

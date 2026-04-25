@@ -13,6 +13,26 @@ where
     out
 }
 
+pub fn collect_action_labels(expr: &RuntimeExpr) -> Vec<&'static str> {
+    let mut labels = Vec::new();
+    walk_actions(expr, &mut |action| {
+        labels.push(match action {
+            RuntimeAction::Output(_) => "output",
+            RuntimeAction::Printf(_) => "printf",
+            RuntimeAction::FilePrint { .. } => "file-print",
+            RuntimeAction::FilePrintf { .. } => "file-printf",
+            RuntimeAction::Ls => "ls",
+            RuntimeAction::FileLs { .. } => "file-ls",
+            RuntimeAction::Quit => "quit",
+            RuntimeAction::ExecImmediate(_) => "exec-immediate",
+            RuntimeAction::ExecPrompt(_) => "exec-prompt",
+            RuntimeAction::ExecBatched(_) => "exec-batched",
+            RuntimeAction::Delete => "delete",
+        });
+    });
+    labels
+}
+
 pub fn contains_action<F>(expr: &RuntimeExpr, mut predicate: F) -> bool
 where
     F: FnMut(&RuntimeAction) -> bool,
@@ -33,6 +53,27 @@ where
         }
     });
     out
+}
+
+pub fn collect_predicate_labels(expr: &RuntimeExpr) -> Vec<&'static str> {
+    let mut labels = Vec::new();
+    walk_predicates(expr, &mut |predicate| {
+        labels.push(match predicate {
+            RuntimePredicate::True => "true",
+            RuntimePredicate::False => "false",
+            RuntimePredicate::Readable => "readable",
+            RuntimePredicate::Writable => "writable",
+            RuntimePredicate::Executable => "executable",
+            RuntimePredicate::Name(_) => "name",
+            RuntimePredicate::Path(_) => "path",
+            RuntimePredicate::Regex(_) => "regex",
+            RuntimePredicate::Type(_) => "type",
+            RuntimePredicate::XType(_) => "xtype",
+            RuntimePredicate::Prune => "prune",
+            _ => "other",
+        });
+    });
+    labels
 }
 
 pub fn contains_predicate<F>(expr: &RuntimeExpr, mut predicate: F) -> bool

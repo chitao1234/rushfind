@@ -39,7 +39,10 @@ pub use gnu::{
     assert_matches_gnu_regex_outcome, assert_matches_gnu_regex_outcome_as_sets, ensure_gnu_find,
     gnu_find_command, gnu_find_output, normalize_warning_program,
 };
-pub use planner::{action_labels, contains_action, contains_predicate, predicate_labels};
+pub use planner::{
+    action_labels, collect_action_labels, collect_predicate_labels, contains_action,
+    contains_predicate, predicate_labels,
+};
 
 pub fn argv(parts: &[&str]) -> Vec<OsString> {
     parts.iter().map(OsString::from).collect()

@@ -3,7 +3,7 @@ mod support;
 use rushfind::exec::ExecSemantics;
 use rushfind::parser::parse_command;
 use rushfind::planner::{RuntimeAction, plan_command};
-use support::{action_labels, argv, contains_action};
+use support::{argv, collect_action_labels, contains_action};
 
 #[test]
 fn lowers_exec_semicolon_and_plus_into_distinct_runtime_actions() {
@@ -25,12 +25,8 @@ fn lowers_exec_semicolon_and_plus_into_distinct_runtime_actions() {
     .unwrap();
 
     assert_eq!(
-        action_labels(&plan.expr, |action| match action {
-            RuntimeAction::ExecImmediate(_) => Some("exec:semicolon"),
-            RuntimeAction::ExecBatched(_) => Some("exec:batch"),
-            _ => None,
-        }),
-        vec!["exec:semicolon", "exec:batch"]
+        collect_action_labels(&plan.expr),
+        vec!["exec-immediate", "exec-batched"]
     );
 }
 
@@ -42,13 +38,7 @@ fn explicit_exec_suppresses_implicit_print() {
     )
     .unwrap();
 
-    assert_eq!(
-        action_labels(&plan.expr, |action| match action {
-            RuntimeAction::ExecImmediate(_) => Some("exec:semicolon"),
-            _ => None,
-        }),
-        vec!["exec:semicolon"]
-    );
+    assert_eq!(collect_action_labels(&plan.expr), vec!["exec-immediate"]);
 }
 
 #[test]

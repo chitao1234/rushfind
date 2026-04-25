@@ -2956,109 +2956,40 @@ fn gnu_hardening_invalid_regex_outcomes_match_gnu_find_in_parallel_mode() {
 fn gnu_hardening_success_ordered_matrix_matches_gnu_find() {
     let root = build_gnu_regex_hardening_tree();
 
-    for args in [
-        vec![
-            path_arg(root.path()),
-            "-maxdepth".into(),
-            "1".into(),
-            "-mindepth".into(),
-            "1".into(),
-            "-regextype".into(),
-            "posix-extended".into(),
-            "-regex".into(),
-            ".*/paren)".into(),
-        ],
-        vec![
-            path_arg(root.path()),
-            "-maxdepth".into(),
-            "1".into(),
-            "-mindepth".into(),
-            "1".into(),
-            "-regextype".into(),
-            "posix-basic".into(),
-            "-regex".into(),
-            r".*/\(\+foo\)".into(),
-        ],
-        vec![
-            path_arg(root.path()),
-            "-maxdepth".into(),
-            "1".into(),
-            "-mindepth".into(),
-            "1".into(),
-            "-regextype".into(),
-            "posix-basic".into(),
-            "-regex".into(),
-            r".*/\(\?foo\)".into(),
-        ],
-        vec![
-            path_arg(root.path()),
-            "-maxdepth".into(),
-            "1".into(),
-            "-mindepth".into(),
-            "1".into(),
-            "-regextype".into(),
-            "posix-basic".into(),
-            "-regex".into(),
-            r".*/[a\b]".into(),
-        ],
-        vec![
-            path_arg(root.path()),
-            "-maxdepth".into(),
-            "1".into(),
-            "-mindepth".into(),
-            "1".into(),
-            "-regextype".into(),
-            "posix-extended".into(),
-            "-regex".into(),
-            r".*/[a\b]".into(),
-        ],
-        vec![
-            path_arg(root.path()),
-            "-maxdepth".into(),
-            "1".into(),
-            "-mindepth".into(),
-            "1".into(),
-            "-regextype".into(),
-            "posix-extended".into(),
-            "-regex".into(),
-            r".*/(ab|cd)\1".into(),
-        ],
-        vec![
-            path_arg(root.path()),
-            "-maxdepth".into(),
-            "1".into(),
-            "-mindepth".into(),
-            "1".into(),
-            "-regextype".into(),
-            "emacs".into(),
-            "-regex".into(),
-            r".*/\(ab\|cd\)\1".into(),
-        ],
-        vec![
-            path_arg(root.path()),
-            "-maxdepth".into(),
-            "1".into(),
-            "-mindepth".into(),
-            "1".into(),
-            "-regextype".into(),
-            "posix-extended".into(),
-            "-regex".into(),
-            r".*/a{2,}".into(),
-        ],
-        vec![
-            path_arg(root.path()),
-            "-maxdepth".into(),
-            "1".into(),
-            "-mindepth".into(),
-            "1".into(),
-            "-regextype".into(),
-            "posix-basic".into(),
-            "-regex".into(),
-            r".*/a\{2,\}".into(),
-        ],
-    ] {
+    for args in gnu_hardening_success_cases(root.path()) {
         assert_matches_gnu_exact(&args);
     }
+}
+
+fn gnu_hardening_success_cases(root: &Path) -> Vec<Vec<OsString>> {
+    [
+        ("posix-extended", ".*/paren)"),
+        ("posix-basic", r".*/\(\+foo\)"),
+        ("posix-basic", r".*/\(\?foo\)"),
+        ("posix-basic", r".*/[a\b]"),
+        ("posix-extended", r".*/[a\b]"),
+        ("posix-extended", r".*/(ab|cd)\1"),
+        ("emacs", r".*/\(ab\|cd\)\1"),
+        ("posix-extended", r".*/a{2,}"),
+        ("posix-basic", r".*/a\{2,\}"),
+    ]
+    .into_iter()
+    .map(|(dialect, pattern)| gnu_hardening_success_case(root, dialect, pattern))
+    .collect()
+}
+
+fn gnu_hardening_success_case(root: &Path, dialect: &str, pattern: &str) -> Vec<OsString> {
+    vec![
+        path_arg(root),
+        "-maxdepth".into(),
+        "1".into(),
+        "-mindepth".into(),
+        "1".into(),
+        "-regextype".into(),
+        dialect.into(),
+        "-regex".into(),
+        pattern.into(),
+    ]
 }
 
 #[test]
