@@ -36,6 +36,29 @@ pub(crate) fn write_version_line<W: Write>(writer: &mut W) -> Result<(), Diagnos
         .map_err(|error| failed_to_write("stdout", error))
 }
 
+pub(crate) fn write_help<W: Write>(writer: &mut W) -> Result<(), Diagnostic> {
+    writer
+        .write_all(
+            b"Usage: rfd [-H] [-L] [-P] [-Olevel] [-D debugopts] [path...] [expression]\n\n\
+Expression operators follow GNU find precedence. Supported compatibility options include:\n\
+  --help --version -version\n\
+  -files0-from FILE -noleaf -warn -nowarn\n\
+  -ignore_readdir_race -noignore_readdir_race\n\n\
+Debug options accepted by -D: exec,opt,rates,search,stat,time,tree,all,help\n",
+        )
+        .map_err(|error| failed_to_write("stdout", error))
+}
+
+pub(crate) fn write_debug_help<W: Write>(writer: &mut W) -> Result<(), Diagnostic> {
+    writer
+        .write_all(
+            b"Debug options accepted by rfd -D:\n\
+  exec opt rates search stat time tree all help\n\n\
+Detailed GNU find debug tracing is not implemented; requested categories emit lightweight internal diagnostics.\n",
+        )
+        .map_err(|error| failed_to_write("stdout", error))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{BuildVersion, format_version_line};

@@ -1,9 +1,11 @@
-use crate::ast::GlobalOption;
+use crate::ast::{CompatibilityOptions, DebugOption, GlobalOption, WarningMode};
+use crate::diagnostics::{Diagnostic, failed_to_write};
 use crate::parser::parse_command;
 use crate::planner::plan_command;
 use crate::runner::run_plan;
-use crate::version::write_version_line;
+use crate::version::{write_debug_help, write_help, write_version_line};
 use std::ffi::OsString;
+use std::io::Write;
 
 pub fn run<I>(args: I) -> i32
 where
@@ -18,11 +20,31 @@ where
         if ast
             .global_options
             .iter()
+            .any(|option| matches!(option, GlobalOption::Help))
+        {
+            write_help(&mut stdout)?;
+            return Ok(0);
+        }
+
+        if ast
+            .global_options
+            .iter()
             .any(|option| matches!(option, GlobalOption::Version))
         {
             write_version_line(&mut stdout)?;
             return Ok(0);
         }
+
+        if ast
+            .compatibility_options
+            .debug_options
+            .contains(&DebugOption::Help)
+        {
+            write_debug_help(&mut stdout)?;
+            return Ok(0);
+        }
+
+        write_debug_diagnostics(&ast.compatibility_options, &mut stderr)?;
 
         let plan = plan_command(ast, workers)?;
         let summary = run_plan(&plan, &mut stdout, &mut stderr)?;
@@ -40,6 +62,36 @@ where
             error.exit_code
         }
     }
+}
+
+fn write_debug_diagnostics<W: Write>(
+    options: &CompatibilityOptions,
+    stderr: &mut W,
+) -> Result<(), Diagnostic> {
+    for option in options.debug_options.iter().copied() {
+        if option == DebugOption::Help {
+            continue;
+        }
+        writeln!(
+            stderr,
+            "rfd: debug[{}]: requested; detailed GNU find tracing is not implemented",
+            option.name()
+        )
+        .map_err(|error| failed_to_write("stderr", error))?;
+    }
+
+    if options.warning_mode == WarningMode::Warn {
+        for raw in &options.unknown_debug_options {
+            writeln!(
+                stderr,
+                "rfd: warning: unknown debug option `{}` ignored",
+                raw.to_string_lossy()
+            )
+            .map_err(|error| failed_to_write("stderr", error))?;
+        }
+    }
+
+    Ok(())
 }
 
 const DEFAULT_PARALLEL_WORKER_CAP: usize = 4;

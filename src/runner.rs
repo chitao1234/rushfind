@@ -162,6 +162,7 @@ mod tests {
         build_eval_context_with_loader, build_messages_locale_with, startup_warnings_enabled_from,
         validate_execdir_path_value, write_startup_warnings, write_startup_warnings_with_policy,
     };
+    use crate::ast::CompatibilityOptions;
     use crate::follow::FollowMode;
     use crate::ordered::engine::ordered_evaluator_workers;
     use crate::parser::parse_command;
@@ -179,6 +180,7 @@ mod tests {
         ExecutionPlan {
             start_paths: vec![PathBuf::from(".")],
             follow_mode: FollowMode::Physical,
+            compatibility_options: CompatibilityOptions::default(),
             traversal: TraversalOptions {
                 min_depth: 0,
                 max_depth: None,

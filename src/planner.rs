@@ -1,7 +1,9 @@
 use crate::account::{
     PrincipalId, canonicalize_sid_principal, resolve_group_principal, resolve_user_principal,
 };
-use crate::ast::{Action, CommandAst, Expr, FileTypeMatcher, GlobalOption, Predicate};
+use crate::ast::{
+    Action, CommandAst, CompatibilityOptions, Expr, FileTypeMatcher, GlobalOption, Predicate,
+};
 use crate::diagnostics::Diagnostic;
 use crate::exec::{
     BatchedExecAction, ExecBatchId, ExecSemantics, ImmediateExecAction, compile_batched_exec,
@@ -55,6 +57,7 @@ pub struct ActionProfile {
 pub struct ExecutionPlan {
     pub start_paths: Vec<PathBuf>,
     pub follow_mode: FollowMode,
+    pub compatibility_options: CompatibilityOptions,
     pub traversal: TraversalOptions,
     pub runtime: RuntimeRequirements,
     pub startup_warnings: Vec<String>,
@@ -250,7 +253,10 @@ pub(crate) fn plan_command_with_now_and_capabilities(
 ) -> Result<ExecutionPlan, Diagnostic> {
     let follow_mode = resolve_follow_mode(&ast.global_options);
     let CommandAst {
-        start_paths, expr, ..
+        start_paths,
+        compatibility_options,
+        expr,
+        ..
     } = ast;
     let mut traversal = TraversalOptions {
         min_depth: 0,
@@ -305,6 +311,7 @@ pub(crate) fn plan_command_with_now_and_capabilities(
     Ok(ExecutionPlan {
         start_paths,
         follow_mode,
+        compatibility_options,
         traversal,
         runtime,
         startup_warnings: state.startup_warnings.clone(),
