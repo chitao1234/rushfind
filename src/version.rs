@@ -39,12 +39,28 @@ pub(crate) fn write_version_line<W: Write>(writer: &mut W) -> Result<(), Diagnos
 pub(crate) fn write_help<W: Write>(writer: &mut W) -> Result<(), Diagnostic> {
     writer
         .write_all(
-            b"Usage: rfd [-H] [-L] [-P] [-Olevel] [-D debugopts] [path...] [expression]\n\n\
-Expression operators follow GNU find precedence. Supported compatibility options include:\n\
-  --help --version -version\n\
-  -files0-from FILE -noleaf -warn -nowarn\n\
-  -ignore_readdir_race -noignore_readdir_race\n\n\
-Debug options accepted by -D: exec,opt,rates,search,stat,time,tree,all,help\n",
+            b"Usage: rfd [OPTIONS] [PATH...] [EXPRESSION]\n\n\
+Find files by walking PATHs and evaluating EXPRESSION for each entry.\n\
+Default PATH is . and default EXPRESSION is -print.\n\n\
+Options:\n\
+  -H, -L, -P                 control symlink following before PATHs\n\
+  -OLEVEL                    accept GNU optimizer levels for compatibility\n\
+  -D LIST                    enable lightweight debug diagnostics; use -D help\n\
+  --help                     show this help and exit\n\
+  --version, -version         show version and exit\n\n\
+Expressions:\n\
+  Tests:      -name PATTERN, -path PATTERN, -type LIST, -size N, -mtime N, ...\n\
+  Actions:    -print, -print0, -printf FORMAT, -exec COMMAND ;, -delete, -quit\n\
+  Operators:  ( EXPR ), ! EXPR, EXPR -a EXPR, EXPR -o EXPR, EXPR , EXPR\n\
+  Controls:   -maxdepth N, -mindepth N, -depth, -prune, -xdev, -follow\n\n\
+Compatibility options:\n\
+  -files0-from FILE, -noleaf, -warn, -nowarn,\n\
+  -ignore_readdir_race, -noignore_readdir_race\n\n\
+Examples:\n\
+  rfd src -name '*.rs' -print\n\
+  rfd . -type f -size +1M -print0\n\
+  rfd . -name target -prune -o -type f -print\n\n\
+See rfd(1) for the full command reference.\n",
         )
         .map_err(|error| failed_to_write("stdout", error))
 }
@@ -52,9 +68,14 @@ Debug options accepted by -D: exec,opt,rates,search,stat,time,tree,all,help\n",
 pub(crate) fn write_debug_help<W: Write>(writer: &mut W) -> Result<(), Diagnostic> {
     writer
         .write_all(
-            b"Debug options accepted by rfd -D:\n\
-  exec opt rates search stat time tree all help\n\n\
-Detailed GNU find debug tracing is not implemented; requested categories emit lightweight internal diagnostics.\n",
+            b"Debug diagnostics for rfd -D LIST:\n\n\
+Valid names:\n\
+  exec,opt,rates,search,stat,time,tree,all,help\n\n\
+Debug options:\n\
+  Lightweight internal diagnostics are emitted for the requested categories.\n\
+  Full GNU findutils debug tracing is not implemented.\n\n\
+Example:\n\
+  rfd -D search . -maxdepth 1 -print\n",
         )
         .map_err(|error| failed_to_write("stdout", error))
 }
