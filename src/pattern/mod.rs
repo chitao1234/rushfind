@@ -1,3 +1,4 @@
+mod encoded;
 mod ir;
 mod owned;
 mod parse;
@@ -51,7 +52,9 @@ pub enum GlobSlashMode {
 struct CompiledGlobInner {
     case_mode: GlobCaseMode,
     slash_mode: GlobSlashMode,
+    original_pattern: Vec<u8>,
     program: ir::GlobProgram,
+    encoded_program: Option<encoded::EncodedGlobProgram>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,11 +71,14 @@ impl CompiledGlob {
     ) -> Result<Self, Diagnostic> {
         let original_pattern = pattern.as_encoded_bytes().to_vec();
         let parsed = parse::compile_pattern(flag, &original_pattern, case_mode, slash_mode)?;
+        let encoded_program = None;
         Ok(Self {
             inner: Arc::new(CompiledGlobInner {
                 case_mode,
                 slash_mode,
+                original_pattern,
                 program: parsed.program,
+                encoded_program,
             }),
         })
     }
@@ -84,8 +90,22 @@ impl CompiledGlob {
         slash_mode: GlobSlashMode,
         ctype: &crate::ctype::CtypeProfile,
     ) -> Result<Self, Diagnostic> {
-        let _ = ctype;
-        Self::compile(flag, pattern, case_mode, slash_mode)
+        let original_pattern = pattern.as_encoded_bytes().to_vec();
+        let parsed = parse::compile_pattern(flag, &original_pattern, case_mode, slash_mode)?;
+        let encoded_program = if ctype.is_byte_c() || ctype.is_unknown() {
+            None
+        } else {
+            Some(encoded::compile_pattern(flag, &original_pattern, ctype)?)
+        };
+        Ok(Self {
+            inner: Arc::new(CompiledGlobInner {
+                case_mode,
+                slash_mode,
+                original_pattern,
+                program: parsed.program,
+                encoded_program,
+            }),
+        })
     }
 
     pub fn is_match(&self, candidate: &OsStr) -> Result<bool, Diagnostic> {
@@ -105,7 +125,16 @@ impl CompiledGlob {
         if ctype.is_byte_c() || ctype.is_unknown() {
             return self.is_match(candidate);
         }
-        self.is_match(candidate)
+        let Some(encoded_program) = &self.inner.encoded_program else {
+            return self.is_match(candidate);
+        };
+        Ok(encoded::matches(
+            encoded_program,
+            self.inner.case_mode,
+            self.inner.slash_mode,
+            ctype,
+            candidate.as_encoded_bytes(),
+        ))
     }
 }
 
