@@ -21,7 +21,7 @@ fn plans_without_fstype_do_not_request_mount_snapshot_runtime_support() {
 
 fn contains_fstype(expr: &RuntimeExpr) -> bool {
     match expr {
-        RuntimeExpr::And(items) => items.iter().any(contains_fstype),
+        RuntimeExpr::And(items) | RuntimeExpr::Sequence(items) => items.iter().any(contains_fstype),
         RuntimeExpr::Or(left, right) => contains_fstype(left) || contains_fstype(right),
         RuntimeExpr::Not(inner) => contains_fstype(inner),
         RuntimeExpr::Predicate(RuntimePredicate::FsType(type_name)) => type_name == "tmpfs",

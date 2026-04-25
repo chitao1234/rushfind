@@ -41,7 +41,9 @@ fn delete_keeps_parallel_mode_available_when_workers_are_greater_than_one() {
 
 fn contains_depth_runtime_leaf(expr: &RuntimeExpr) -> bool {
     match expr {
-        RuntimeExpr::And(items) => items.iter().any(contains_depth_runtime_leaf),
+        RuntimeExpr::And(items) | RuntimeExpr::Sequence(items) => {
+            items.iter().any(contains_depth_runtime_leaf)
+        }
         RuntimeExpr::Or(left, right) => {
             contains_depth_runtime_leaf(left) || contains_depth_runtime_leaf(right)
         }

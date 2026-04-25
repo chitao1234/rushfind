@@ -73,7 +73,7 @@ pub(crate) fn build_traversal_control_plan(
 
 fn contains_prune(expr: &RuntimeExpr) -> bool {
     match expr {
-        RuntimeExpr::And(items) => items.iter().any(contains_prune),
+        RuntimeExpr::And(items) | RuntimeExpr::Sequence(items) => items.iter().any(contains_prune),
         RuntimeExpr::Or(left, right) => contains_prune(left) || contains_prune(right),
         RuntimeExpr::Not(inner) => contains_prune(inner),
         RuntimeExpr::Predicate(RuntimePredicate::Prune) => true,
@@ -85,6 +85,9 @@ fn project_for_traversal(expr: &RuntimeExpr) -> RuntimeExpr {
     match expr {
         RuntimeExpr::And(items) => {
             RuntimeExpr::and(items.iter().map(project_for_traversal).collect())
+        }
+        RuntimeExpr::Sequence(items) => {
+            RuntimeExpr::sequence(items.iter().map(project_for_traversal).collect())
         }
         RuntimeExpr::Or(left, right) => {
             RuntimeExpr::or(project_for_traversal(left), project_for_traversal(right))

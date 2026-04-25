@@ -91,7 +91,9 @@ fn nonexistent_samefile_reference_is_a_planning_error() {
 
 fn predicate_items(expr: &RuntimeExpr) -> Vec<&RuntimePredicate> {
     match expr {
-        RuntimeExpr::And(items) => items.iter().flat_map(predicate_items).collect(),
+        RuntimeExpr::And(items) | RuntimeExpr::Sequence(items) => {
+            items.iter().flat_map(predicate_items).collect()
+        }
         RuntimeExpr::Predicate(predicate) => vec![predicate],
         RuntimeExpr::Or(left, right) => {
             let mut items = predicate_items(left);

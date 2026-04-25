@@ -92,7 +92,9 @@ fn reparse_type_lowers_on_windows() {
 
 fn contains_flags_predicate(expr: &RuntimeExpr) -> bool {
     match expr {
-        RuntimeExpr::And(items) => items.iter().any(contains_flags_predicate),
+        RuntimeExpr::And(items) | RuntimeExpr::Sequence(items) => {
+            items.iter().any(contains_flags_predicate)
+        }
         RuntimeExpr::Predicate(RuntimePredicate::Flags(_)) => true,
         RuntimeExpr::Or(left, right) => {
             contains_flags_predicate(left) || contains_flags_predicate(right)
@@ -105,7 +107,9 @@ fn contains_flags_predicate(expr: &RuntimeExpr) -> bool {
 #[cfg(windows)]
 fn contains_reparse_predicate(expr: &RuntimeExpr) -> bool {
     match expr {
-        RuntimeExpr::And(items) => items.iter().any(contains_reparse_predicate),
+        RuntimeExpr::And(items) | RuntimeExpr::Sequence(items) => {
+            items.iter().any(contains_reparse_predicate)
+        }
         RuntimeExpr::Predicate(RuntimePredicate::ReparseType(_)) => true,
         RuntimeExpr::Or(left, right) => {
             contains_reparse_predicate(left) || contains_reparse_predicate(right)

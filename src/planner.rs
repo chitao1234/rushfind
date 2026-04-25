@@ -99,6 +99,7 @@ pub enum ExecutionMode {
 pub enum RuntimeExpr {
     And(Arc<[RuntimeExpr]>),
     Or(Arc<RuntimeExpr>, Arc<RuntimeExpr>),
+    Sequence(Arc<[RuntimeExpr]>),
     Not(Arc<RuntimeExpr>),
     Predicate(RuntimePredicate),
     Action(RuntimeAction),
@@ -112,6 +113,10 @@ impl RuntimeExpr {
 
     pub fn or(left: Self, right: Self) -> Self {
         Self::Or(Arc::new(left), Arc::new(right))
+    }
+
+    pub fn sequence(items: Vec<Self>) -> Self {
+        Self::Sequence(items.into())
     }
 
     pub fn negate(inner: Self) -> Self {
@@ -348,6 +353,11 @@ fn populate_action_profile(expr: &RuntimeExpr, profile: &mut ActionProfile) {
             populate_action_profile(left, profile);
             populate_action_profile(right, profile);
         }
+        RuntimeExpr::Sequence(items) => {
+            for item in items.iter() {
+                populate_action_profile(item, profile);
+            }
+        }
         RuntimeExpr::Not(inner) => populate_action_profile(inner, profile),
         RuntimeExpr::Action(action) => match action {
             RuntimeAction::Output(_)
@@ -515,9 +525,20 @@ fn lower_expr(
             lower_expr(*left, traversal, runtime, state, follow_mode, capabilities)?,
             lower_expr(*right, traversal, runtime, state, follow_mode, capabilities)?,
         )),
-        Expr::Sequence(_) => Err(Diagnostic::unsupported(
-            "comma expressions are parsed but not implemented",
-        )),
+        Expr::Sequence(items) => {
+            let mut lowered = Vec::with_capacity(items.len());
+            for item in items {
+                lowered.push(lower_expr(
+                    item,
+                    traversal,
+                    runtime,
+                    state,
+                    follow_mode,
+                    capabilities,
+                )?);
+            }
+            Ok(RuntimeExpr::sequence(lowered))
+        }
         Expr::Not(inner) => Ok(RuntimeExpr::negate(lower_expr(
             *inner,
             traversal,
@@ -1661,6 +1682,14 @@ mod tests {
     }
 
     #[test]
+    fn sequence_with_prune_keeps_traversal_control_plan() {
+        let ast = parse_command(&argv(&[".", "-name", "vendor", "-prune", ",", "-false"])).unwrap();
+        let plan = plan_command(ast, 4).unwrap();
+
+        assert!(plan.traversal_control.is_some());
+    }
+
+    #[test]
     fn depth_mode_derives_subtree_barrier_commit_policy() {
         let ast = parse_command(&argv(&[".", "-delete"])).unwrap();
         let plan = plan_command(ast, 4).unwrap();
@@ -1675,7 +1704,9 @@ mod tests {
     #[cfg(windows)]
     fn predicate_items(expr: &RuntimeExpr) -> Vec<&RuntimePredicate> {
         match expr {
-            RuntimeExpr::And(items) => items.iter().flat_map(predicate_items).collect(),
+            RuntimeExpr::And(items) | RuntimeExpr::Sequence(items) => {
+                items.iter().flat_map(predicate_items).collect()
+            }
             RuntimeExpr::Predicate(predicate) => vec![predicate],
             RuntimeExpr::Or(left, right) => {
                 let mut items = predicate_items(left);

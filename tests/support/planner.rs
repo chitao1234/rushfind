@@ -92,7 +92,7 @@ where
     F: FnMut(&RuntimeAction),
 {
     match expr {
-        RuntimeExpr::And(items) => {
+        RuntimeExpr::And(items) | RuntimeExpr::Sequence(items) => {
             for item in items.iter() {
                 walk_actions(item, visit);
             }
@@ -112,7 +112,7 @@ where
     F: FnMut(&RuntimePredicate),
 {
     match expr {
-        RuntimeExpr::And(items) => {
+        RuntimeExpr::And(items) | RuntimeExpr::Sequence(items) => {
             for item in items.iter() {
                 walk_predicates(item, visit);
             }

@@ -72,6 +72,18 @@ pub(crate) fn evaluate_for_traversal_with_context(
                 prune: left.prune || right.prune,
             })
         }
+        RuntimeExpr::Sequence(items) => {
+            let mut verdict = TraversalControl::allow();
+
+            for item in items.iter() {
+                let next =
+                    evaluate_for_traversal_with_context(item, entry, follow_mode, order, context)?;
+                verdict.prune |= next.prune;
+                verdict.matched = next.matched;
+            }
+
+            Ok(verdict)
+        }
         RuntimeExpr::Not(inner) => {
             let inner =
                 evaluate_for_traversal_with_context(inner, entry, follow_mode, order, context)?;
@@ -156,6 +168,28 @@ mod tests {
         let expr = RuntimeExpr::and(vec![
             RuntimeExpr::negate(RuntimeExpr::Predicate(RuntimePredicate::Prune)),
             RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print0)),
+        ]);
+
+        let verdict = evaluate_for_traversal(&expr, &entry, FollowMode::Physical).unwrap();
+        assert_eq!(
+            verdict,
+            TraversalControl {
+                matched: false,
+                prune: true,
+            }
+        );
+    }
+
+    #[test]
+    fn sequence_accumulates_prune_but_returns_last_truth() {
+        let root = tempdir().unwrap();
+        let dir = root.path().join("vendor");
+        fs::create_dir(&dir).unwrap();
+        let entry = EntryContext::new(dir, 0, true);
+
+        let expr = RuntimeExpr::sequence(vec![
+            RuntimeExpr::Predicate(RuntimePredicate::Prune),
+            RuntimeExpr::Predicate(RuntimePredicate::False),
         ]);
 
         let verdict = evaluate_for_traversal(&expr, &entry, FollowMode::Physical).unwrap();

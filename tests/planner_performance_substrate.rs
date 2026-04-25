@@ -170,7 +170,7 @@ fn linear_labels(expr: &RuntimeExpr) -> Vec<&'static str> {
 
 fn collect_linear_labels(expr: &RuntimeExpr, labels: &mut Vec<&'static str>) {
     match expr {
-        RuntimeExpr::And(items) => {
+        RuntimeExpr::And(items) | RuntimeExpr::Sequence(items) => {
             for item in items.iter() {
                 collect_linear_labels(item, labels);
             }
@@ -191,7 +191,9 @@ fn not_inner_labels(expr: &RuntimeExpr) -> Vec<&'static str> {
 fn find_not_inner(expr: &RuntimeExpr) -> Option<&RuntimeExpr> {
     match expr {
         RuntimeExpr::Not(inner) => Some(inner.as_ref()),
-        RuntimeExpr::And(items) => items.iter().find_map(find_not_inner),
+        RuntimeExpr::And(items) | RuntimeExpr::Sequence(items) => {
+            items.iter().find_map(find_not_inner)
+        }
         RuntimeExpr::Or(left, right) => find_not_inner(left).or_else(|| find_not_inner(right)),
         RuntimeExpr::Predicate(_) | RuntimeExpr::Action(_) | RuntimeExpr::Barrier => None,
     }
@@ -219,6 +221,7 @@ fn expr_label(expr: &RuntimeExpr) -> &'static str {
             rushfind::exec::ExecSemantics::DirLocal => "okdir:semicolon",
         },
         RuntimeExpr::And(_) => "and",
+        RuntimeExpr::Sequence(_) => "sequence",
         RuntimeExpr::Or(_, _) => "or",
         RuntimeExpr::Not(_) => "not",
         RuntimeExpr::Barrier => "barrier",

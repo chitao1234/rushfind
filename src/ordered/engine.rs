@@ -249,7 +249,9 @@ pub(crate) fn ordered_evaluator_workers(plan: &ExecutionPlan) -> usize {
 
 fn contains_commit_sensitive_action(expr: &RuntimeExpr) -> bool {
     match expr {
-        RuntimeExpr::And(items) => items.iter().any(contains_commit_sensitive_action),
+        RuntimeExpr::And(items) | RuntimeExpr::Sequence(items) => {
+            items.iter().any(contains_commit_sensitive_action)
+        }
         RuntimeExpr::Or(left, right) => {
             contains_commit_sensitive_action(left) || contains_commit_sensitive_action(right)
         }

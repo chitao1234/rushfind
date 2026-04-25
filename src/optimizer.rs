@@ -55,6 +55,13 @@ pub fn optimize_read_only_and_chains(expr: RuntimeExpr) -> RuntimeExpr {
             optimize_read_only_and_chains((*left).clone()),
             optimize_read_only_and_chains((*right).clone()),
         ),
+        RuntimeExpr::Sequence(items) => RuntimeExpr::sequence(
+            items
+                .iter()
+                .cloned()
+                .map(optimize_read_only_and_chains)
+                .collect(),
+        ),
         RuntimeExpr::Not(inner) => {
             RuntimeExpr::negate(optimize_read_only_and_chains((*inner).clone()))
         }
@@ -89,6 +96,7 @@ fn is_reorderable_leaf(expr: &RuntimeExpr) -> bool {
         RuntimeExpr::Predicate(predicate) => predicate_profile(predicate).reorderable,
         RuntimeExpr::And(_)
         | RuntimeExpr::Or(_, _)
+        | RuntimeExpr::Sequence(_)
         | RuntimeExpr::Not(_)
         | RuntimeExpr::Action(_)
         | RuntimeExpr::Barrier => false,

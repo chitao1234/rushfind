@@ -197,7 +197,9 @@ pub(crate) fn evaluate_outcome_with_context(
 
 fn expression_is_read_only(expr: &RuntimeExpr) -> bool {
     match expr {
-        RuntimeExpr::And(items) => items.iter().all(expression_is_read_only),
+        RuntimeExpr::And(items) | RuntimeExpr::Sequence(items) => {
+            items.iter().all(expression_is_read_only)
+        }
         RuntimeExpr::Or(left, right) => {
             expression_is_read_only(left) && expression_is_read_only(right)
         }
@@ -234,6 +236,19 @@ fn evaluate_read_only_outcome(
                 matched: true,
                 status,
             })
+        }
+        RuntimeExpr::Sequence(items) => {
+            let mut status = RuntimeStatus::default();
+            let mut matched = true;
+            for item in items.iter() {
+                let outcome = evaluate_read_only_outcome(item, entry, follow_mode, context)?;
+                status = status.merge(outcome.status);
+                matched = outcome.matched;
+                if status.is_stop_requested() {
+                    break;
+                }
+            }
+            Ok(EvalOutcome { matched, status })
         }
         RuntimeExpr::Or(left, right) => {
             let left = evaluate_read_only_outcome(left, entry, follow_mode, context)?;
@@ -524,6 +539,46 @@ mod tests {
         assert!(matches_type(matcher, EntryKind::File));
         assert!(matches_type(matcher, EntryKind::Directory));
         assert!(!matches_type(matcher, EntryKind::Symlink));
+    }
+
+    #[test]
+    fn general_evaluator_dispatches_sequence_actions_left_to_right() {
+        let entry = EntryContext::new(PathBuf::from("sample"), 0, true);
+        let context = EvalContext::default();
+        let expr = RuntimeExpr::sequence(vec![
+            RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)),
+            RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)),
+        ]);
+        let mut sink = RecordingSink::default();
+
+        let outcome =
+            evaluate_outcome_with_context(&expr, &entry, FollowMode::Physical, &context, &mut sink)
+                .expect("sequence action evaluation should dispatch through the sink");
+
+        assert!(outcome.matched);
+        assert_eq!(sink.into_utf8(), "sample\nsample\n");
+    }
+
+    #[test]
+    fn direct_read_only_evaluator_handles_sequence_truth() {
+        let entry = EntryContext::new(PathBuf::from("sample"), 0, true);
+        let context = EvalContext::default();
+        let expr = RuntimeExpr::sequence(vec![
+            RuntimeExpr::Predicate(RuntimePredicate::False),
+            RuntimeExpr::Predicate(RuntimePredicate::True),
+        ]);
+
+        let outcome = evaluate_outcome_with_context(
+            &expr,
+            &entry,
+            FollowMode::Physical,
+            &context,
+            &mut RecordingSink::default(),
+        )
+        .expect("read-only sequence should evaluate directly");
+
+        assert!(outcome.matched);
+        assert_eq!(outcome.status, RuntimeStatus::default());
     }
 
     #[test]

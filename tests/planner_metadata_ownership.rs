@@ -142,7 +142,9 @@ fn non_utf8_user_and_group_operands_reach_nss_lookup_paths() {
 
 fn predicate_items(expr: &RuntimeExpr) -> Vec<&RuntimePredicate> {
     match expr {
-        RuntimeExpr::And(items) => items.iter().flat_map(predicate_items).collect(),
+        RuntimeExpr::And(items) | RuntimeExpr::Sequence(items) => {
+            items.iter().flat_map(predicate_items).collect()
+        }
         RuntimeExpr::Predicate(predicate) => vec![predicate],
         RuntimeExpr::Or(left, right) => {
             let mut items = predicate_items(left);

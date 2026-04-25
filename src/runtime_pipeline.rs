@@ -60,6 +60,12 @@ enum EvalContinuation {
         accumulated: RuntimeStatus,
         parent: Box<EvalContinuation>,
     },
+    AfterSequence {
+        items: Arc<[RuntimeExpr]>,
+        next_index: usize,
+        accumulated: RuntimeStatus,
+        parent: Box<EvalContinuation>,
+    },
     AfterOrLeft {
         right: Arc<RuntimeExpr>,
         parent: Box<EvalContinuation>,
@@ -205,6 +211,33 @@ fn step_expr(
                 context,
             )
         }
+        RuntimeExpr::Sequence(items) => {
+            if let Some(first) = items.first() {
+                return step_expr(
+                    first,
+                    entry,
+                    follow_mode,
+                    EvalContinuation::AfterSequence {
+                        items: items.clone(),
+                        next_index: 1,
+                        accumulated: RuntimeStatus::default(),
+                        parent: Box::new(continuation),
+                    },
+                    context,
+                );
+            }
+
+            finish_with_outcome(
+                continuation,
+                entry,
+                follow_mode,
+                EvalOutcome {
+                    matched: true,
+                    status: RuntimeStatus::default(),
+                },
+                context,
+            )
+        }
         RuntimeExpr::Or(left, right) => step_expr(
             left.as_ref(),
             entry,
@@ -284,6 +317,39 @@ fn finish_with_outcome(
                 entry,
                 follow_mode,
                 EvalContinuation::AfterAnd {
+                    items: items.clone(),
+                    next_index: next_index + 1,
+                    accumulated,
+                    parent,
+                },
+                context,
+            )
+        }
+        EvalContinuation::AfterSequence {
+            items,
+            next_index,
+            accumulated,
+            parent,
+        } => {
+            let accumulated = accumulated.merge(outcome.status);
+            if accumulated.is_stop_requested() || next_index >= items.len() {
+                return finish_with_outcome(
+                    *parent,
+                    entry,
+                    follow_mode,
+                    EvalOutcome {
+                        matched: outcome.matched,
+                        status: accumulated,
+                    },
+                    context,
+                );
+            }
+
+            step_expr(
+                &items[next_index],
+                entry,
+                follow_mode,
+                EvalContinuation::AfterSequence {
                     items: items.clone(),
                     next_index: next_index + 1,
                     accumulated,
@@ -376,6 +442,79 @@ mod tests {
         .unwrap();
 
         assert!(matches!(complete, EvalStep::Complete(outcome) if outcome.matched));
+    }
+
+    #[test]
+    fn sequence_continues_after_false_and_returns_last_truth() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("file.txt");
+        fs::write(&path, "hello\n").unwrap();
+        let entry = EntryContext::new(path, 0, true);
+        let expr = RuntimeExpr::sequence(vec![
+            RuntimeExpr::Predicate(RuntimePredicate::False),
+            RuntimeExpr::Predicate(RuntimePredicate::True),
+        ]);
+
+        let step =
+            begin_entry_eval(&expr, &entry, FollowMode::Physical, &EvalContext::default()).unwrap();
+
+        assert!(matches!(step, EvalStep::Complete(outcome) if outcome.matched));
+    }
+
+    #[test]
+    fn sequence_result_comes_from_last_child() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("file.txt");
+        fs::write(&path, "hello\n").unwrap();
+        let entry = EntryContext::new(path, 0, true);
+        let expr = RuntimeExpr::sequence(vec![
+            RuntimeExpr::Predicate(RuntimePredicate::True),
+            RuntimeExpr::Predicate(RuntimePredicate::False),
+        ]);
+
+        let step =
+            begin_entry_eval(&expr, &entry, FollowMode::Physical, &EvalContext::default()).unwrap();
+
+        assert!(matches!(step, EvalStep::Complete(outcome) if !outcome.matched));
+    }
+
+    #[test]
+    fn sequence_stops_after_quit_before_later_action() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("file.txt");
+        fs::write(&path, "hello\n").unwrap();
+        let entry = EntryContext::new(path, 0, true);
+        let expr = RuntimeExpr::sequence(vec![
+            RuntimeExpr::Action(RuntimeAction::Quit),
+            RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)),
+        ]);
+
+        let step =
+            begin_entry_eval(&expr, &entry, FollowMode::Physical, &EvalContext::default()).unwrap();
+        let EvalStep::PendingAction {
+            request,
+            continuation,
+        } = step
+        else {
+            panic!("expected pending quit action");
+        };
+        assert!(matches!(request.action(), RuntimeAction::Quit));
+
+        let complete = resume_entry_eval(
+            continuation,
+            ActionOutcome {
+                matched: true,
+                status: RuntimeStatus::stop_requested(),
+            },
+            &EvalContext::default(),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            complete,
+            EvalStep::Complete(outcome)
+                if outcome.matched && outcome.status.is_stop_requested()
+        ));
     }
 
     #[test]
