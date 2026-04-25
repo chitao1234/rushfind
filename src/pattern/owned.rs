@@ -88,6 +88,9 @@ fn class_matches(class: &GlobClass, actual: u8, case_mode: GlobCaseMode) -> bool
             let folded_end = fold_byte(end, case_mode);
             folded_start <= folded_actual && folded_actual <= folded_end
         }
+        ClassItem::Posix(class) => {
+            actual.is_ascii() && crate::ctype::class::class_contains(class, actual as char)
+        }
     });
 
     if class.negated { !matched } else { matched }

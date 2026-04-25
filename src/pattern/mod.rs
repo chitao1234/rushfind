@@ -189,4 +189,32 @@ mod tests {
         .unwrap();
         assert!(glob.is_match(OsStr::new("Alpha")).unwrap());
     }
+
+    #[test]
+    fn byte_c_glob_supports_posix_character_classes() {
+        let glob = CompiledGlob::compile(
+            "-name",
+            OsStr::new("[[:alpha:]][[:digit:]]"),
+            GlobCaseMode::Sensitive,
+            GlobSlashMode::Literal,
+        )
+        .unwrap();
+
+        assert!(glob.is_match(OsStr::new("A5")).unwrap());
+        assert!(glob.is_match(OsStr::new("z9")).unwrap());
+        assert!(!glob.is_match(OsStr::new("é5")).unwrap());
+    }
+
+    #[test]
+    fn byte_c_glob_rejects_unknown_posix_class() {
+        let error = CompiledGlob::compile(
+            "-name",
+            OsStr::new("[[:emoji:]]"),
+            GlobCaseMode::Sensitive,
+            GlobSlashMode::Literal,
+        )
+        .unwrap_err();
+
+        assert!(error.message.contains("unsupported POSIX character class"));
+    }
 }

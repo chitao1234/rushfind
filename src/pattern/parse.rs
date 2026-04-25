@@ -70,6 +70,24 @@ fn try_parse_class(
             return Ok(Some((GlobClass { negated, items }, idx + 1)));
         }
 
+        if let Some(item) = try_parse_posix_class(flag, pattern, &mut idx)? {
+            saw_non_closing = true;
+            if matches!(pattern.get(idx), Some(b'-'))
+                && !matches!(pattern.get(idx + 1), None | Some(b']'))
+            {
+                idx += 1;
+                let Some(end) = consume_class_item(flag, pattern, &mut idx)? else {
+                    return Ok(None);
+                };
+                items.push(item);
+                items.push(ClassItem::Literal(b'-'));
+                items.push(end);
+            } else {
+                items.push(item);
+            }
+            continue;
+        }
+
         let Some(start) = consume_class_byte(flag, pattern, &mut idx)? else {
             return Ok(None);
         };
@@ -79,13 +97,67 @@ fn try_parse_class(
             && !matches!(pattern.get(idx + 1), None | Some(b']'))
         {
             idx += 1;
-            let Some(end) = consume_class_byte(flag, pattern, &mut idx)? else {
+            let Some(end) = consume_class_item(flag, pattern, &mut idx)? else {
                 return Ok(None);
             };
-            items.push(ClassItem::Range(start, end));
+            if let ClassItem::Literal(end) = end {
+                items.push(ClassItem::Range(start, end));
+            } else {
+                items.push(ClassItem::Literal(start));
+                items.push(ClassItem::Literal(b'-'));
+                items.push(end);
+            }
         } else {
             items.push(ClassItem::Literal(start));
         }
+    }
+
+    Ok(None)
+}
+
+fn consume_class_item(
+    flag: &str,
+    pattern: &[u8],
+    idx: &mut usize,
+) -> Result<Option<ClassItem>, Diagnostic> {
+    if let Some(item) = try_parse_posix_class(flag, pattern, idx)? {
+        Ok(Some(item))
+    } else {
+        Ok(consume_class_byte(flag, pattern, idx)?.map(ClassItem::Literal))
+    }
+}
+
+fn try_parse_posix_class(
+    flag: &str,
+    pattern: &[u8],
+    idx: &mut usize,
+) -> Result<Option<ClassItem>, Diagnostic> {
+    if pattern.get(*idx) != Some(&b'[') || pattern.get(*idx + 1) != Some(&b':') {
+        return Ok(None);
+    }
+
+    let name_start = *idx + 2;
+    let mut name_end = name_start;
+    while name_end + 1 < pattern.len() {
+        if pattern[name_end] == b':' && pattern[name_end + 1] == b']' {
+            let name = std::str::from_utf8(&pattern[name_start..name_end]).map_err(|_| {
+                Diagnostic::new(
+                    format!("unsupported POSIX character class in glob pattern for `{flag}`"),
+                    1,
+                )
+            })?;
+            let class = crate::ctype::class::PosixClass::parse(name).ok_or_else(|| {
+                Diagnostic::new(
+                    format!(
+                        "unsupported POSIX character class `[:{name}:]` in glob pattern for `{flag}`"
+                    ),
+                    1,
+                )
+            })?;
+            *idx = name_end + 2;
+            return Ok(Some(ClassItem::Posix(class)));
+        }
+        name_end += 1;
     }
 
     Ok(None)
