@@ -231,14 +231,24 @@ pub fn cargo_bin_output_with_env_and_input_timeout(
 }
 
 pub fn first_available_locale(candidates: &[&str]) -> Option<String> {
-    let output = Command::new("locale").arg("-a").output().ok()?;
-    let available = String::from_utf8_lossy(&output.stdout);
-    candidates.iter().find_map(|candidate| {
-        available
-            .lines()
-            .find(|line| *line == *candidate)
-            .map(str::to_string)
-    })
+    available_lc_ctype_locales(candidates).into_iter().next()
+}
+
+pub fn available_lc_ctype_locales(candidates: &[&str]) -> Vec<String> {
+    let output = match Command::new("locale").arg("-a").output() {
+        Ok(output) => output,
+        Err(_) => return Vec::new(),
+    };
+    let available = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::to_string)
+        .collect::<BTreeSet<_>>();
+
+    candidates
+        .iter()
+        .filter(|candidate| available.contains(**candidate))
+        .map(|candidate| (*candidate).to_string())
+        .collect()
 }
 
 pub fn resolved_messages_locale(locale: &str) -> Option<String> {
