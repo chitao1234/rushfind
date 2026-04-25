@@ -887,6 +887,37 @@ fn ordered_structural_traversal_controls_match_gnu_find_exactly() {
 }
 
 #[test]
+fn ordered_comma_operator_matches_gnu_find_exactly() {
+    let root = build_prune_tree();
+
+    for expression in [
+        vec!["-false", ",", "-print"],
+        vec!["-print", ",", "-false"],
+        vec!["-name", "vendor", "-prune", ",", "-print"],
+        vec!["-name", "vendor", "-prune", ",", "-false", "-o", "-print"],
+    ] {
+        let mut args = vec![path_arg(root.path())];
+        args.extend(expression.into_iter().map(OsString::from));
+        assert_matches_gnu_exact(&args);
+    }
+}
+
+#[test]
+fn ordered_type_lists_match_gnu_find_exactly() {
+    let root = build_tree();
+    unix_fs::symlink(root.path().join("src/lib.rs"), root.path().join("lib-link")).unwrap();
+
+    for expression in [
+        vec!["-type", "f,d", "-print"],
+        vec!["-xtype", "f,l", "-print"],
+    ] {
+        let mut args = vec![path_arg(root.path())];
+        args.extend(expression.into_iter().map(OsString::from));
+        assert_matches_gnu_exact(&args);
+    }
+}
+
+#[test]
 fn ordered_delete_matches_gnu_output_exit_and_resulting_state() {
     let expected = build_delete_tree();
     let actual = build_delete_tree();
@@ -1369,6 +1400,35 @@ fn parallel_prune_matches_gnu_as_a_set() {
     ];
 
     assert_matches_gnu_as_sets(&args);
+}
+
+#[test]
+fn parallel_comma_operator_matches_gnu_find_as_sets() {
+    let root = build_prune_tree();
+
+    for expression in [
+        vec!["-false", ",", "-print"],
+        vec!["-name", "vendor", "-prune", ",", "-print"],
+    ] {
+        let mut args = vec![path_arg(root.path())];
+        args.extend(expression.into_iter().map(OsString::from));
+        assert_matches_gnu_as_sets(&args);
+    }
+}
+
+#[test]
+fn parallel_type_lists_match_gnu_find_as_sets() {
+    let root = build_tree();
+    unix_fs::symlink(root.path().join("src/lib.rs"), root.path().join("lib-link")).unwrap();
+
+    for expression in [
+        vec!["-type", "f,d", "-print"],
+        vec!["-xtype", "f,l", "-print"],
+    ] {
+        let mut args = vec![path_arg(root.path())];
+        args.extend(expression.into_iter().map(OsString::from));
+        assert_matches_gnu_as_sets(&args);
+    }
 }
 
 #[test]

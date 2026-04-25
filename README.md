@@ -13,10 +13,11 @@ Find for the occupātus.
 
 ## Current scope
 
-- GNU-style argv parsing
+- GNU-style argv parsing, including comma expression sequencing
 - Global follow-mode and metadata options: `-P`, `-H`, `-L`, `-version`, `--version`
 - Read-only predicates: `-name`, `-iname`, `-path`, `-ipath`, `-type`, `-xtype`, `-true`,
   `-false`, `-fstype`
+- `-type` and `-xtype` accept GNU-style comma lists such as `-type f,d`
 - Identity/link predicates: `-samefile`, `-inum`, `-links`
 - Ownership/account predicates: `-uid`, `-gid`, `-user`, `-group`, `-nouser`, `-nogroup`,
   plus Windows-specific `-owner`, `-owner-sid`, and `-group-sid`
