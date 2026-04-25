@@ -19,8 +19,8 @@ Find for the occupātus.
 - Read-only predicates: `-name`, `-iname`, `-path`, `-ipath`, `-type`, `-xtype`, `-true`,
   `-false`, `-fstype`
 - `-type` and `-xtype` accept GNU-style comma lists such as `-type f,d`
-- GNU normal compatibility options: `-files0-from FILE`, `-noleaf`, `-warn`, `-nowarn`,
-  `-ignore_readdir_race`, and `-noignore_readdir_race`
+- GNU normal and positional compatibility options: `-files0-from FILE`, `-follow`, `-noleaf`,
+  `-warn`, `-nowarn`, `-ignore_readdir_race`, and `-noignore_readdir_race`
 - Identity/link predicates: `-samefile`, `-inum`, `-links`
 - Ownership/account predicates: `-uid`, `-gid`, `-user`, `-group`, `-nouser`, `-nogroup`,
   plus Windows-specific `-owner`, `-owner-sid`, and `-group-sid`
@@ -86,6 +86,9 @@ Find for the occupātus.
   GNU findutils' detailed tracing stream
 - `-ignore_readdir_race` and `-noignore_readdir_race` are accepted and recorded compatibility
   options; this implementation does not yet alter runtime race handling for disappearing entries
+- `-context`, `-type D`, and `-xtype D` are recognized for GNU compatibility but fail with
+  explicit unsupported diagnostics unless SELinux label matching or Solaris door matching is added
+  in a future platform-specific slice
 - Access predicates use kernel access checks and intentionally can differ from `-perm`
 - Access predicates use real-ID GNU `access(2)` semantics and are not mode-bit emulation
 - When available, the access predicate path uses `faccessat`, with `access(2)` as the fallback
