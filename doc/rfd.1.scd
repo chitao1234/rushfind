@@ -221,6 +221,21 @@ _LEFT_ *,* _RIGHT_
 	Accepted for compatibility and recorded. The current implementation does
 	not yet alter runtime race handling for disappearing entries.
 
+# LOCALE AND ENCODINGS
+
+*LC_CTYPE and encodings*
+	*rfd* resolves *LC_CTYPE* from *LC_ALL*, *LC_CTYPE*, then *LANG*.
+	The *C* and *POSIX* locales keep byte-oriented matching. UTF-8 and
+	supported legacy encodings use owned decoding tables for glob and GNU
+	regex predicates. Collation ordering, equivalence classes, collating
+	symbols, and locale-specific tailoring are not implemented. Case
+	insensitive matching uses single-character folding only.
+
+*LC_MESSAGES and prompts*
+	*rfd* may use *LC_MESSAGES* to select localized *-ok* and *-okdir*
+	prompt fragments. Prompt replies are parsed by a built-in ASCII
+	affirmative parser; *LC_CTYPE* does not change confirmation parsing.
+
 # PRINTF FORMAT
 
 The *-printf* and *-fprintf* actions support GNU-style field formatting:

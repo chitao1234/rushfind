@@ -129,17 +129,23 @@ The `scdoc` tool is only needed by maintainers regenerating `doc/rfd.1`; normal
 - Native Windows CI exercises both `x86_64-pc-windows-gnu` and `x86_64-pc-windows-msvc`.
 - `rushfind` prefers exact GNU-compatible behavior on non-Linux Unix when the host exposes the
   needed primitive through another code path.
-- Interactive locale handling for `-ok` and `-okdir` remains approximate on non-Linux Unix and
-  emits a startup warning when planned.
-- During the initial macOS port, case-insensitive glob matching may still differ outside the C
-  locale and emits a startup warning when planned.
+- `LC_CTYPE` is resolved from `LC_ALL`, `LC_CTYPE`, then `LANG`. `C` and `POSIX` use
+  byte-oriented matching; UTF-8 and supported legacy encodings use crate-backed character
+  decoding for glob and GNU regex predicates.
+- `LC_CTYPE` support is owned by `rushfind` rather than delegated to libc locale APIs. Unknown
+  encodings warn only when locale-sensitive matching or presentation is planned.
+- `LC_COLLATE` ordering, collating symbols, equivalence classes, and user-defined locale
+  tailoring remain out of scope.
+- Case-insensitive matching uses single-character folding. Multi-character folds such as `ß`
+  matching `ss` are intentionally not supported.
+- `LC_MESSAGES` may select localized `-ok` / `-okdir` prompt fragments where available. Prompt
+  replies use a built-in ASCII affirmative parser, so `LC_CTYPE` does not change confirmation
+  parsing.
 - The generic Unix tier keeps `-xdev` / `-mount`, ownership predicates, access predicates, mode
   bits, `-ls`, and the common print / exec surfaces working through shared Unix code.
 - The generic Unix tier does not claim GNU differential parity.
 - On the generic Unix tier, `-fstype`, `%F`, `-flags`, and birth-time predicates / `%B*` fail
   during planning with explicit diagnostics instead of panicking.
-- On the generic Unix tier, interactive locale handling and case-insensitive glob matching remain
-  approximate and emit startup warnings when planned.
 - On Windows, name and path matching accept both `/` and `\` as separators, and displayed paths
   render with backslashes.
 - On Windows, `-user`, `-group`, `-nouser`, `-nogroup`, `%u`, `%g`, `%US`, `%GS`, `-readable`,
@@ -159,8 +165,6 @@ The `scdoc` tool is only needed by maintainers regenerating `doc/rfd.1`; normal
 - On Windows, `-uid`, `-gid`, `-perm`, `%U`, `%G`, `%m`, `%M`, `%D`, `%b`, and `%k` fail during
   planning with explicit diagnostics. When raw Windows principal matching is needed, use
   `-owner-sid` or `-group-sid`.
-- On Windows, interactive locale handling and case-insensitive glob matching remain approximate
-  and emit startup warnings when planned.
 
 ## Manual verification
 

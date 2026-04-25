@@ -332,6 +332,25 @@ Accepted for compatibility and recorded.\& The current implementation does
 not yet alter runtime race handling for disappearing entries.\&
 .P
 .RE
+.SH LOCALE AND ENCODINGS
+.P
+\fBLC_CTYPE and encodings\fR
+.RS 4
+\fBrfd\fR resolves \fBLC_CTYPE\fR from \fBLC_ALL\fR, \fBLC_CTYPE\fR, then \fBLANG\fR.\&
+The \fBC\fR and \fBPOSIX\fR locales keep byte-oriented matching.\& UTF-8 and
+supported legacy encodings use owned decoding tables for glob and GNU
+regex predicates.\& Collation ordering, equivalence classes, collating
+symbols, and locale-specific tailoring are not implemented.\& Case
+insensitive matching uses single-character folding only.\&
+.P
+.RE
+\fBLC_MESSAGES and prompts\fR
+.RS 4
+\fBrfd\fR may use \fBLC_MESSAGES\fR to select localized \fB-ok\fR and \fB-okdir\fR
+prompt fragments.\& Prompt replies are parsed by a built-in ASCII
+affirmative parser; \fBLC_CTYPE\fR does not change confirmation parsing.\&
+.P
+.RE
 .SH PRINTF FORMAT
 .P
 The \fB-printf\fR and \fB-fprintf\fR actions support GNU-style field formatting:
