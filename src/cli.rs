@@ -1,11 +1,15 @@
-use crate::ast::{CompatibilityOptions, DebugOption, GlobalOption, WarningMode};
+use crate::ast::{
+    Action, CommandAst, CompatibilityOptions, DebugOption, Expr, Files0From, GlobalOption,
+    WarningMode,
+};
 use crate::diagnostics::{Diagnostic, failed_to_write};
 use crate::parser::parse_command;
 use crate::planner::plan_command;
 use crate::runner::run_plan;
 use crate::version::{write_debug_help, write_help, write_version_line};
 use std::ffi::OsString;
-use std::io::Write;
+use std::io::{Read, Write};
+use std::path::PathBuf;
 
 pub fn run<I>(args: I) -> i32
 where
@@ -46,6 +50,7 @@ where
 
         write_debug_diagnostics(&ast.compatibility_options, &mut stderr)?;
 
+        let ast = prepare_command(ast)?;
         let plan = plan_command(ast, workers)?;
         let summary = run_plan(&plan, &mut stdout, &mut stderr)?;
         Ok(
@@ -61,6 +66,109 @@ where
             eprintln!("rfd: {}", error);
             error.exit_code
         }
+    }
+}
+
+fn prepare_command(mut ast: CommandAst) -> Result<CommandAst, Diagnostic> {
+    let Some(files0_from) = ast.compatibility_options.files0_from.clone() else {
+        return Ok(ast);
+    };
+
+    if ast.start_paths_explicit {
+        return Err(Diagnostic::parse(
+            "extra operand with -files0-from: command-line paths cannot be combined with -files0-from",
+        ));
+    }
+
+    if matches!(files0_from, Files0From::Stdin) && expression_contains_prompt_action(&ast.expr) {
+        return Err(Diagnostic::parse(
+            "option -files0-from reading from standard input cannot be combined with -ok or -okdir",
+        ));
+    }
+
+    ast.start_paths = read_files0_from(files0_from)?;
+    ast.start_paths_explicit = true;
+    Ok(ast)
+}
+
+fn read_files0_from(source: Files0From) -> Result<Vec<PathBuf>, Diagnostic> {
+    let bytes = match source {
+        Files0From::Path(path) => std::fs::read(&path).map_err(|error| {
+            Diagnostic::parse(format!(
+                "failed to read -files0-from `{}`: {error}",
+                path.display()
+            ))
+        })?,
+        Files0From::Stdin => {
+            let mut bytes = Vec::new();
+            std::io::stdin().read_to_end(&mut bytes).map_err(|error| {
+                Diagnostic::parse(format!(
+                    "failed to read -files0-from standard input: {error}"
+                ))
+            })?;
+            bytes
+        }
+    };
+
+    parse_nul_paths(&bytes)
+}
+
+fn parse_nul_paths(bytes: &[u8]) -> Result<Vec<PathBuf>, Diagnostic> {
+    if bytes.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut paths = Vec::new();
+    let mut start = 0;
+    for (index, byte) in bytes.iter().enumerate() {
+        if *byte != 0 {
+            continue;
+        }
+
+        let component = &bytes[start..index];
+        if component.is_empty() {
+            return Err(Diagnostic::parse(format!(
+                "-files0-from:{}: invalid zero-length file name",
+                paths.len() + 1
+            )));
+        }
+        paths.push(path_from_nul_component(component)?);
+        start = index + 1;
+    }
+
+    if start < bytes.len() {
+        paths.push(path_from_nul_component(&bytes[start..])?);
+    }
+
+    Ok(paths)
+}
+
+#[cfg(unix)]
+fn path_from_nul_component(component: &[u8]) -> Result<PathBuf, Diagnostic> {
+    use std::os::unix::ffi::OsStringExt;
+
+    Ok(PathBuf::from(OsString::from_vec(component.to_vec())))
+}
+
+#[cfg(not(unix))]
+fn path_from_nul_component(component: &[u8]) -> Result<PathBuf, Diagnostic> {
+    let value = std::str::from_utf8(component).map_err(|_| {
+        Diagnostic::parse("-files0-from contains a path that is not valid UTF-8 on this platform")
+    })?;
+    Ok(PathBuf::from(value))
+}
+
+fn expression_contains_prompt_action(expr: &Expr) -> bool {
+    match expr {
+        Expr::And(items) | Expr::Sequence(items) => {
+            items.iter().any(expression_contains_prompt_action)
+        }
+        Expr::Or(left, right) => {
+            expression_contains_prompt_action(left) || expression_contains_prompt_action(right)
+        }
+        Expr::Not(inner) => expression_contains_prompt_action(inner),
+        Expr::Action(Action::Ok { .. } | Action::OkDir { .. }) => true,
+        Expr::Predicate(_) | Expr::Action(_) => false,
     }
 }
 
