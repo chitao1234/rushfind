@@ -171,6 +171,10 @@ pub(crate) fn evaluate_outcome_with_context(
     context: &EvalContext,
     sink: &mut dyn ActionSink,
 ) -> Result<EvalOutcome, Diagnostic> {
+    if expression_is_read_only(expr) {
+        return evaluate_read_only_outcome(expr, entry, follow_mode, context);
+    }
+
     let mut step = begin_entry_eval(expr, entry, follow_mode, context)?;
     loop {
         match step {
@@ -188,6 +192,72 @@ pub(crate) fn evaluate_outcome_with_context(
                 step = resume_entry_eval(continuation, outcome, context)?;
             }
         }
+    }
+}
+
+fn expression_is_read_only(expr: &RuntimeExpr) -> bool {
+    match expr {
+        RuntimeExpr::And(items) => items.iter().all(expression_is_read_only),
+        RuntimeExpr::Or(left, right) => {
+            expression_is_read_only(left) && expression_is_read_only(right)
+        }
+        RuntimeExpr::Not(inner) => expression_is_read_only(inner),
+        RuntimeExpr::Predicate(_) => true,
+        RuntimeExpr::Action(_) | RuntimeExpr::Barrier => false,
+    }
+}
+
+fn evaluate_read_only_outcome(
+    expr: &RuntimeExpr,
+    entry: &EntryContext,
+    follow_mode: FollowMode,
+    context: &EvalContext,
+) -> Result<EvalOutcome, Diagnostic> {
+    match expr {
+        RuntimeExpr::Predicate(predicate) => Ok(EvalOutcome {
+            matched: evaluate_predicate(predicate, entry, follow_mode, context)?,
+            status: RuntimeStatus::default(),
+        }),
+        RuntimeExpr::And(items) => {
+            let mut status = RuntimeStatus::default();
+            for item in items.iter() {
+                let outcome = evaluate_read_only_outcome(item, entry, follow_mode, context)?;
+                status = status.merge(outcome.status);
+                if !outcome.matched || status.is_stop_requested() {
+                    return Ok(EvalOutcome {
+                        matched: false,
+                        status,
+                    });
+                }
+            }
+            Ok(EvalOutcome {
+                matched: true,
+                status,
+            })
+        }
+        RuntimeExpr::Or(left, right) => {
+            let left = evaluate_read_only_outcome(left, entry, follow_mode, context)?;
+            if left.matched {
+                return Ok(left);
+            }
+
+            let right = evaluate_read_only_outcome(right, entry, follow_mode, context)?;
+            Ok(EvalOutcome {
+                matched: right.matched,
+                status: left.status.merge(right.status),
+            })
+        }
+        RuntimeExpr::Not(inner) => {
+            let outcome = evaluate_read_only_outcome(inner, entry, follow_mode, context)?;
+            Ok(EvalOutcome {
+                matched: !outcome.matched,
+                status: outcome.status,
+            })
+        }
+        RuntimeExpr::Action(_) | RuntimeExpr::Barrier => Err(Diagnostic::new(
+            "internal error: read-only evaluator received an action-capable expression",
+            1,
+        )),
     }
 }
 
@@ -334,7 +404,8 @@ fn matches_newer(
 mod tests {
     use super::{
         ActionOutcome, ActionSink, EvalContext, RuntimeStatus, evaluate,
-        evaluate_outcome_with_context, evaluate_with_context,
+        evaluate_outcome_with_context, evaluate_read_only_outcome, evaluate_with_context,
+        expression_is_read_only,
     };
     use crate::diagnostics::Diagnostic;
     use crate::entry::test_support::CountingReader;
@@ -356,6 +427,7 @@ mod tests {
     use std::ffi::OsString;
     use std::fs;
     use std::os::unix::fs as unix_fs;
+    use std::path::PathBuf;
     use tempfile::tempdir;
 
     #[test]
@@ -384,6 +456,63 @@ mod tests {
                 .pop_front()
                 .ok_or_else(|| Diagnostic::new("test sink ran out of scripted outcomes", 1))
         }
+    }
+
+    #[test]
+    fn read_only_expression_classifier_accepts_only_predicate_trees() {
+        let read_only = RuntimeExpr::and(vec![
+            RuntimeExpr::Predicate(RuntimePredicate::True),
+            RuntimeExpr::negate(RuntimeExpr::Predicate(RuntimePredicate::False)),
+            RuntimeExpr::or(
+                RuntimeExpr::Predicate(RuntimePredicate::False),
+                RuntimeExpr::Predicate(RuntimePredicate::True),
+            ),
+        ]);
+
+        let action_expr = RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print));
+        let barrier_expr = RuntimeExpr::and(vec![
+            RuntimeExpr::Predicate(RuntimePredicate::True),
+            RuntimeExpr::Barrier,
+        ]);
+
+        assert!(expression_is_read_only(&read_only));
+        assert!(!expression_is_read_only(&action_expr));
+        assert!(!expression_is_read_only(&barrier_expr));
+    }
+
+    #[test]
+    fn direct_read_only_evaluator_matches_boolean_semantics() {
+        let entry = EntryContext::new(PathBuf::from("sample"), 0, true);
+        let context = EvalContext::default();
+        let expr = RuntimeExpr::and(vec![
+            RuntimeExpr::Predicate(RuntimePredicate::True),
+            RuntimeExpr::negate(RuntimeExpr::Predicate(RuntimePredicate::False)),
+            RuntimeExpr::or(
+                RuntimeExpr::Predicate(RuntimePredicate::False),
+                RuntimeExpr::Predicate(RuntimePredicate::True),
+            ),
+        ]);
+
+        let outcome = evaluate_read_only_outcome(&expr, &entry, FollowMode::Physical, &context)
+            .expect("read-only evaluation should succeed");
+
+        assert!(outcome.matched);
+        assert_eq!(outcome.status, RuntimeStatus::default());
+    }
+
+    #[test]
+    fn general_evaluator_still_dispatches_action_expressions() {
+        let entry = EntryContext::new(PathBuf::from("sample"), 0, true);
+        let context = EvalContext::default();
+        let expr = RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print));
+        let mut sink = RecordingSink::default();
+
+        let outcome =
+            evaluate_outcome_with_context(&expr, &entry, FollowMode::Physical, &context, &mut sink)
+                .expect("action evaluation should dispatch through the sink");
+
+        assert!(outcome.matched);
+        assert_eq!(sink.into_utf8(), "sample\n");
     }
 
     #[test]
