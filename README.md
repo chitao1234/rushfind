@@ -4,6 +4,20 @@ Find for the occupātus.
 
 `rushfind` is a Rust implementation of Unix `find` that targets GNU `find` syntax while adding a parallel traversal engine. The installed binary is `rfd`.
 
+## Command documentation
+
+- Use `rfd --help` for a compact interactive quick reference.
+- Use `rfd -D help` for debug diagnostic categories.
+- Use `man ./doc/rfd.1` from a source checkout for the full first-party command reference.
+- Regenerate the checked-in manpage after editing `doc/rfd.1.scd` with:
+
+```bash
+scripts/generate_manpage.sh
+```
+
+The `scdoc` tool is only needed by maintainers regenerating `doc/rfd.1`; normal
+`cargo build` does not depend on it.
+
 ## License
 
 `rushfind` is licensed under either of the following, at your option:

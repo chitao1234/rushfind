@@ -656,10 +656,7 @@ impl<'a> Parser<'a> {
             .ok_or_else(|| Diagnostic::parse("expected predicate or action"))?;
         let token_display = token.display();
         let kind = classify_atom(token).ok_or_else(|| {
-            Diagnostic::parse(format!(
-                "unsupported token in parser subset `{}`",
-                token_display
-            ))
+            Diagnostic::parse(format!("unsupported expression token `{}`", token_display))
         })?;
         self.parse_classified_atom(kind)
     }
