@@ -39,3 +39,13 @@ fn file_print_family_renderers_preserve_non_utf8_path_bytes() {
         b"./bad-\xfe.bin\0"
     );
 }
+
+#[test]
+fn raw_print_rendering_is_independent_of_ctype_profile() {
+    let entry = entry_for(b"./accent-\xc3\xa9.txt");
+
+    assert_eq!(
+        render_output_bytes(OutputAction::Print, &entry),
+        b"./accent-\xc3\xa9.txt\n"
+    );
+}
