@@ -65,6 +65,10 @@ impl MessagesLocale {
     }
 }
 
+pub(crate) fn default_affirmative_parser(bytes: &[u8]) -> bool {
+    matches!(bytes, b"y" | b"Y" | b"yes" | b"YES" | b"Yes")
+}
+
 pub(crate) fn resolve_messages_locale() -> Result<MessagesLocale, Diagnostic> {
     crate::platform::locale::backend().resolve_messages_locale()
 }
@@ -84,10 +88,6 @@ mod tests {
                 resolved_name: "fr_CA.UTF-8".into(),
                 prompt_locale: PromptLocale::Fr,
             })
-        }
-
-        fn affirmative_parser(&self) -> fn(&[u8]) -> bool {
-            |_| false
         }
     }
 

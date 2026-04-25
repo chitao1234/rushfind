@@ -1,5 +1,5 @@
 use crate::diagnostics::Diagnostic;
-use crate::messages_locale::{MessagesLocale, PromptLocale, prompt_locale_for};
+use crate::messages_locale::{MessagesLocale, prompt_locale_for};
 use crate::platform::locale::LocaleBackend;
 use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt;
@@ -21,10 +21,6 @@ impl LocaleBackend for WindowsLocaleBackend {
             prompt_locale: prompt_locale_for(&resolved_name),
             resolved_name,
         })
-    }
-
-    fn affirmative_parser(&self) -> fn(&[u8]) -> bool {
-        windows_affirmative_is_affirmative
     }
 }
 
@@ -48,19 +44,4 @@ fn native_windows_locale_name() -> String {
         .to_string_lossy()
         .into_owned();
     locale.replace('-', "_")
-}
-
-fn windows_affirmative_is_affirmative(bytes: &[u8]) -> bool {
-    if default_ascii_yes_is_affirmative(bytes) {
-        return true;
-    }
-
-    match prompt_locale_for(&resolve_windows_messages_locale()) {
-        PromptLocale::Fr => bytes.eq_ignore_ascii_case(b"o") || bytes.eq_ignore_ascii_case(b"oui"),
-        PromptLocale::C => false,
-    }
-}
-
-fn default_ascii_yes_is_affirmative(bytes: &[u8]) -> bool {
-    bytes.eq_ignore_ascii_case(b"y") || bytes.eq_ignore_ascii_case(b"yes")
 }
