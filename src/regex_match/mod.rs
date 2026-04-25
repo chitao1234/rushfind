@@ -122,15 +122,20 @@ impl RegexMatcher {
             RegexDialect::Emacs | RegexDialect::PosixExtended | RegexDialect::PosixBasic => {
                 let compiled_gnu =
                     compile_gnu_regex(flag, dialect, &original_pattern, case_insensitive)?;
-                let encoded_gnu_ir = if ctype.is_byte_c() || ctype.is_unknown() {
+                let encoded_gnu_ir = if ctype.is_byte_c()
+                    || ctype.is_unknown()
+                    || !crate::ctype::text::decodes_without_errors(ctype, &original_pattern)
+                {
                     None
-                } else {
+                } else if locale::can_execute(&compiled_gnu.expr.expr) {
                     Some(compile_gnu_regex_with_ctype(
                         flag,
                         dialect,
                         &original_pattern,
                         ctype,
                     )?)
+                } else {
+                    None
                 };
                 (
                     compiled_gnu.backend,
@@ -468,6 +473,50 @@ mod tests {
             assert_eq!(matcher.backend_kind(), RegexBackendKind::Pcre2);
             assert!(matcher.is_match(OsStr::new("./aa")).unwrap());
         }
+    }
+
+    #[test]
+    fn locale_gnu_backreferences_fall_back_to_byte_backend() {
+        let ctype = crate::ctype::resolve_ctype_profile_from([("LC_CTYPE", "C.UTF-8")]);
+        let matcher = RegexMatcher::compile_with_ctype(
+            "-regex",
+            RegexDialect::Emacs,
+            OsStr::new(r".*/\(.\)\1"),
+            false,
+            &ctype,
+        )
+        .unwrap();
+
+        assert_eq!(matcher.backend_kind(), RegexBackendKind::Pcre2);
+        assert!(matcher.inner.encoded_gnu_ir.is_none());
+        assert!(
+            matcher
+                .is_match_with_ctype(OsStr::new("./aa"), &ctype)
+                .unwrap()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn locale_gnu_invalid_byte_patterns_fall_back_to_byte_backend() {
+        let ctype = crate::ctype::resolve_ctype_profile_from([("LC_CTYPE", "C.UTF-8")]);
+        let pattern = OsString::from_vec(vec![b'.', b'*', b'/', b'f', b'o', b'o', 0xff]);
+        let candidate = OsString::from_vec(vec![b'.', b'/', b'f', b'o', b'o', 0xff]);
+        let matcher = RegexMatcher::compile_with_ctype(
+            "-regex",
+            RegexDialect::Emacs,
+            pattern.as_os_str(),
+            false,
+            &ctype,
+        )
+        .unwrap();
+
+        assert!(matcher.inner.encoded_gnu_ir.is_none());
+        assert!(
+            matcher
+                .is_match_with_ctype(candidate.as_os_str(), &ctype)
+                .unwrap()
+        );
     }
 
     #[test]

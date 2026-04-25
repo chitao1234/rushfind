@@ -31,6 +31,22 @@ pub(crate) fn is_match(
         .any(|end| end == units.len()))
 }
 
+pub(crate) fn can_execute(expr: &GnuExpr) -> bool {
+    match expr {
+        GnuExpr::Empty
+        | GnuExpr::Literal(_)
+        | GnuExpr::LiteralChar(_)
+        | GnuExpr::Dot
+        | GnuExpr::Class(_)
+        | GnuExpr::Anchor(_)
+        | GnuExpr::Assertion(_)
+        | GnuExpr::WordByteClass { .. } => true,
+        GnuExpr::Backreference(_) => false,
+        GnuExpr::Concat(items) | GnuExpr::Alternation(items) => items.iter().all(can_execute),
+        GnuExpr::Group { expr, .. } | GnuExpr::Repeat { expr, .. } => can_execute(expr),
+    }
+}
+
 fn match_expr(
     expr: &GnuExpr,
     units: &[TextUnit<'_>],

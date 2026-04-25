@@ -92,7 +92,10 @@ impl CompiledGlob {
     ) -> Result<Self, Diagnostic> {
         let original_pattern = pattern.as_encoded_bytes().to_vec();
         let parsed = parse::compile_pattern(flag, &original_pattern, case_mode, slash_mode)?;
-        let encoded_program = if ctype.is_byte_c() || ctype.is_unknown() {
+        let encoded_program = if ctype.is_byte_c()
+            || ctype.is_unknown()
+            || !crate::ctype::text::decodes_without_errors(ctype, &original_pattern)
+        {
             None
         } else {
             Some(encoded::compile_pattern(flag, &original_pattern, ctype)?)
@@ -215,6 +218,26 @@ mod tests {
         )
         .unwrap();
         assert!(glob.is_match(candidate.as_os_str()).unwrap());
+    }
+
+    #[test]
+    fn encoded_locale_invalid_byte_patterns_fall_back_to_byte_matching() {
+        let ctype = crate::ctype::resolve_ctype_profile_from([("LC_CTYPE", "C.UTF-8")]);
+        let pattern = OsString::from_vec(vec![b'f', b'o', b'o', 0xff]);
+        let candidate = OsString::from_vec(vec![b'f', b'o', b'o', 0xff]);
+        let glob = CompiledGlob::compile_with_ctype(
+            "-name",
+            pattern.as_os_str(),
+            GlobCaseMode::Sensitive,
+            GlobSlashMode::Literal,
+            &ctype,
+        )
+        .unwrap();
+
+        assert!(
+            glob.is_match_with_ctype(candidate.as_os_str(), &ctype)
+                .unwrap()
+        );
     }
 
     #[test]

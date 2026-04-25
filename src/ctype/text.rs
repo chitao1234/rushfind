@@ -39,6 +39,10 @@ pub fn decode_units<'a>(
     }
 }
 
+pub(crate) fn decodes_without_errors(profile: &CtypeProfile, bytes: &[u8]) -> bool {
+    decode_units(profile, bytes).all(|unit| unit.as_char().is_some())
+}
+
 struct ByteUnits<'a> {
     bytes: &'a [u8],
     index: usize,

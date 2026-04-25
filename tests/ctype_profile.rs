@@ -41,5 +41,10 @@ fn ctype_profile_records_unknown_non_c_locale() {
     let profile = resolve_ctype_profile_from(env(&[("LC_CTYPE", "zz_ZZ.X-UNKNOWN")]));
 
     assert!(profile.is_unknown());
-    assert!(profile.warning().unwrap().contains("unsupported LC_CTYPE encoding"));
+    assert!(
+        profile
+            .warning()
+            .unwrap()
+            .contains("unsupported LC_CTYPE encoding")
+    );
 }
