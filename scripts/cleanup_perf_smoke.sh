@@ -40,4 +40,6 @@ run_case basename "$bin" "$root" -name 'target-17.log' -print
 run_case metadata "$bin" "$root" -type f -size +0 -print
 run_case printf "$bin" "$root" -type f -printf '%p %s %m\n'
 run_case ordered_depth "$bin" "$root" -depth -name 'file-3.txt' -print
-run_case parallel env RUSHFIND_WORKERS=4 "$bin" "$root" -type f -print
+run_case parallel_default "$bin" "$root" -type f -print
+run_case parallel_explicit_4 env RUSHFIND_WORKERS=4 "$bin" "$root" -type f -print
+run_case parallel_explicit_8 env RUSHFIND_WORKERS=8 "$bin" "$root" -type f -print
