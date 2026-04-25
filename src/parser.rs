@@ -37,7 +37,7 @@ pub fn parse_command(argv: &[OsString]) -> Result<CommandAst, Diagnostic> {
         Expr::Action(Action::Print)
     } else {
         let mut parser = Parser::new(&argv[split_index..]);
-        let expr = parser.parse_or_expression()?;
+        let expr = parser.parse_sequence_expression()?;
         parser.expect_end()?;
         expr
     };
@@ -437,6 +437,21 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
+    fn parse_sequence_expression(&mut self) -> Result<Expr, Diagnostic> {
+        let mut items = vec![self.parse_or_expression()?];
+
+        while self.peek().is_some_and(|token| token.matches(",")) {
+            self.bump();
+            items.push(self.parse_or_expression()?);
+        }
+
+        if items.len() == 1 {
+            Ok(items.remove(0))
+        } else {
+            Ok(Expr::Sequence(items))
+        }
+    }
+
     fn parse_or_expression(&mut self) -> Result<Expr, Diagnostic> {
         let mut left = self.parse_and_expression()?;
 
@@ -496,7 +511,7 @@ impl<'a> Parser<'a> {
         match self.peek() {
             Some(token) if token.matches("(") => {
                 self.bump();
-                let expr = self.parse_or_expression()?;
+                let expr = self.parse_sequence_expression()?;
                 match self.bump() {
                     Some(token) if token.matches(")") => Ok(expr),
                     _ => Err(Diagnostic::parse("expected `)` to close group")),
@@ -790,7 +805,11 @@ impl<'a> Parser<'a> {
     fn starts_primary(&self) -> bool {
         matches!(
             self.peek(),
-            Some(token) if !token.matches(")") && !token.matches("-o") && !token.matches("-or")
+            Some(token)
+                if !token.matches(")")
+                    && !token.matches(",")
+                    && !token.matches("-o")
+                    && !token.matches("-or")
         )
     }
 }

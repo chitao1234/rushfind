@@ -515,6 +515,9 @@ fn lower_expr(
             lower_expr(*left, traversal, runtime, state, follow_mode, capabilities)?,
             lower_expr(*right, traversal, runtime, state, follow_mode, capabilities)?,
         )),
+        Expr::Sequence(_) => Err(Diagnostic::unsupported(
+            "comma expressions are parsed but not implemented",
+        )),
         Expr::Not(inner) => Ok(RuntimeExpr::negate(lower_expr(
             *inner,
             traversal,

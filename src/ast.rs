@@ -19,6 +19,7 @@ pub enum GlobalOption {
 pub enum Expr {
     And(Vec<Expr>),
     Or(Box<Expr>, Box<Expr>),
+    Sequence(Vec<Expr>),
     Not(Box<Expr>),
     Predicate(Predicate),
     Action(Action),
