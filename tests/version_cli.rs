@@ -104,7 +104,10 @@ fn help_prints_human_first_quick_reference() {
         "rfd . -name target -prune -o -type f -print",
         "See rfd(1) for the full command reference.",
     ] {
-        assert!(stdout.contains(expected), "missing {expected:?} in:\n{stdout}");
+        assert!(
+            stdout.contains(expected),
+            "missing {expected:?} in:\n{stdout}"
+        );
     }
 
     assert!(
@@ -120,11 +123,7 @@ fn help_short_circuits_traversal_and_actions() {
     fs::write(&file, b"alpha").unwrap();
 
     let output = cargo_bin_output_with_timeout(
-        &[
-            "--help".into(),
-            path_arg(file.as_path()),
-            "-delete".into(),
-        ],
+        &["--help".into(), path_arg(file.as_path()), "-delete".into()],
         1,
         Duration::from_secs(5),
     );
@@ -164,6 +163,9 @@ fn debug_help_explains_lightweight_diagnostics() {
         "Example:",
         "rfd -D search . -maxdepth 1 -print",
     ] {
-        assert!(stdout.contains(expected), "missing {expected:?} in:\n{stdout}");
+        assert!(
+            stdout.contains(expected),
+            "missing {expected:?} in:\n{stdout}"
+        );
     }
 }
