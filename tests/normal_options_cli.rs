@@ -20,7 +20,13 @@ fn help_short_circuits_traversal_and_actions() {
     assert_eq!(output.status.code(), Some(0));
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("Usage:"), "{stdout}");
+    assert!(stdout.contains("Compatibility options:"), "{stdout}");
+    assert!(stdout.contains("Common tests:"), "{stdout}");
+    assert!(stdout.contains("Actions:"), "{stdout}");
+    assert!(stdout.contains("Environment:"), "{stdout}");
     assert!(stdout.contains("-files0-from"), "{stdout}");
+    assert!(stdout.contains("RUSHFIND_WORKERS"), "{stdout}");
+    assert!(stdout.contains("See rfd(1)"), "{stdout}");
     assert!(
         output.stderr.is_empty(),
         "{}",
@@ -48,9 +54,12 @@ fn debug_help_short_circuits_with_internal_debug_help() {
 
     assert_eq!(output.status.code(), Some(0));
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("Debug options"), "{stdout}");
+    assert!(stdout.contains("Debug categories"), "{stdout}");
     assert!(stdout.contains("search"), "{stdout}");
-    assert!(stdout.contains("not implemented"), "{stdout}");
+    assert!(
+        stdout.contains("lightweight rushfind diagnostics"),
+        "{stdout}"
+    );
     assert!(
         output.stderr.is_empty(),
         "{}",

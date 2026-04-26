@@ -4,6 +4,11 @@ Find for the occupātus.
 
 `rushfind` is a Rust implementation of Unix `find` that targets GNU `find` syntax while adding a parallel traversal engine. The installed binary is `rfd`.
 
+## Help and manpage
+
+`rfd --help` is the short terminal reference. The fuller reference is the
+`rfd(1)` manpage.
+
 ## License
 
 `rushfind` is licensed under either of the following, at your option:
@@ -47,40 +52,12 @@ Find for the occupātus.
 - Birth-time `-printf` directives and `B`-time predicates use exact Unix-family backend reads when
   the host exposes birth time, even on hosts where local GNU `find` does not expose equivalent
   `%B*` output
-- Ordered single-worker mode stays GNU-oriented and remains a separate engine for supported
-  structural traversal controls
-- Ordered single-worker mode renders GNU-shaped `-ls` / `-fls` records on Unix-family hosts and
-  native Windows attribute records on Windows, with a frozen evaluation timestamp so recent-time
-  classification stays deterministic within a run
-- Ordered single-worker mode matches GNU `-quit` behavior for the supported action set
-- File-backed print actions eagerly create or truncate their destinations at startup, even when
-  the action is never reached dynamically or no entry matches
-- Relaxed-order parallel mode is subtree-scheduled and worker-owned, may emit side effects out of
-  order, guarantees prune subtree boundaries in pre-order traversal, and does not promise GNU
-  sibling ordering
-- Relaxed-order parallel `-fprint*` writes are atomic per destination file but do not promise
-  traversal order within that file
-- Relaxed-order parallel `-ls` stdout emission and `-fls` destination writes are atomic per
-  rendered record but do not promise GNU sibling order
-- Relaxed-order parallel mode treats `-quit` as cancellation: no new subtree tasks are published
-  after it is observed, already granted work may still finish, and buffered `-exec ... +` and
-  `-execdir ... +` batches still flush
-- Ordered single-worker mode inherits child stdio for `-exec` and `-execdir`
-- Relaxed-order parallel mode buffers child stdout/stderr for atomic replay for `-exec` and
-  `-execdir`
-- `-execdir` uses `./basename` on Unix-family hosts and `.\basename` on Windows, and rejects
-  unsafe `PATH` entries eagerly before traversal begins
 - `-delete` implies depth-mode traversal, so directories are evaluated and removed after their
   scheduled descendants
 - In depth mode, `-prune` remains boolean-true in expression flow but does not block descendant
   traversal
-- Relaxed-order parallel mode preserves descendant-before-parent completion for depth-mode actions
 - `-fstype` uses the active platform mount snapshot backend and stays exact on Linux, macOS, the
   supported BSD targets, and Windows
-- `-fstype` type names come from `/proc/self/mountinfo` on Linux, `getmntinfo` snapshots on
-  macOS and BSD, and volume metadata on Windows
-- Requested filesystem types are resolved against the set known at command startup
-- Commands that do not use `-fstype` do not read mount-table state
 - `-Olevel` is accepted for GNU command-line compatibility but does not change optimizer behavior
 - `-D debugopts` emits lightweight `rushfind` diagnostics for requested categories rather than
   GNU findutils' detailed tracing stream
@@ -88,16 +65,11 @@ Find for the occupātus.
   options; this implementation does not yet alter runtime race handling for disappearing entries
 - Access predicates use kernel access checks and intentionally can differ from `-perm`
 - Access predicates use real-ID GNU `access(2)` semantics and are not mode-bit emulation
-- When available, the access predicate path uses `faccessat`, with `access(2)` as the fallback
 - `-xdev` and `-mount` are normalized as traversal-wide structural limits in the current
   implementation rather than GNU-style positional controls
-- Internal performance substrate: lazy entry data access and cheap-first planning for pure read-only `-a` chains
 - `-newerXY` supports exact Unix-family birth-time forms where the active backend exposes birth
   time, plus a strict literal-time subset:
   `@<unix-seconds>[.frac]`, `YYYY-MM-DD`, and `YYYY-MM-DD[ T]HH:MM[:SS][.frac][Z|±HH[:MM]]`
-- Installed GNU `find` builds can still reject `B` predicates on hosts where GNU findutils does
-  not expose birth-time support; `rushfind` keeps `B` handling enabled when the active Unix-family
-  backend can read birth time
 
 ## Platform scope
 
@@ -107,9 +79,6 @@ Find for the occupātus.
 - illumos, Solaris, and Haiku are supported in the first generic Unix fallback tier.
 - Native Windows is supported through a Windows backend for filesystem, account, locale, path,
   and access behavior.
-- macOS CI uses a cached source build of pinned GNU findutils revisions so GNU differential
-  coverage does not depend on the runner image or Homebrew's package freshness.
-- Native Windows CI exercises both `x86_64-pc-windows-gnu` and `x86_64-pc-windows-msvc`.
 - `rushfind` prefers exact GNU-compatible behavior on non-Linux Unix when the host exposes the
   needed primitive through another code path.
 - Interactive locale handling for `-ok` and `-okdir` remains approximate on non-Linux Unix and
@@ -118,7 +87,6 @@ Find for the occupātus.
   locale and emits a startup warning when planned.
 - The generic Unix tier keeps `-xdev` / `-mount`, ownership predicates, access predicates, mode
   bits, `-ls`, and the common print / exec surfaces working through shared Unix code.
-- The generic Unix tier does not claim GNU differential parity.
 - On the generic Unix tier, `-fstype`, `%F`, `-flags`, and birth-time predicates / `%B*` fail
   during planning with explicit diagnostics instead of panicking.
 - On the generic Unix tier, interactive locale handling and case-insensitive glob matching remain
@@ -145,54 +113,6 @@ Find for the occupātus.
 - On Windows, interactive locale handling and case-insensitive glob matching remain approximate
   and emit startup warnings when planned.
 
-## Manual verification
-
-Build the binary and run the Unix-family portability smoke harness locally, then repeat it on
-target hosts:
-
-The minimum supported Rust version is 1.85.0.
-
-```bash
-cargo build
-bash scripts/check_unix_portability_surface.sh target/debug/rfd
-bash scripts/check_generic_unix_target_builds.sh
-```
-
-The Unix-family smoke harness exercises `-version`, `-print`, `-print0`, optional `-fstype`
-and birth-time probes, `-xdev`, ownership/access rendering, `-ls`, and `-execdir`. It also prints
-the locale-sensitive `-ok` commands to run manually on the target host.
-
-For a compile-only generic Unix preflight from a development host, use:
-
-```bash
-bash scripts/check_generic_unix_target_builds.sh
-```
-
-The default target list is:
-
-- `x86_64-unknown-illumos`
-- `x86_64-pc-solaris`
-- `x86_64-unknown-haiku`
-
-The helper skips targets whose `rust-std` component is not shipped by the selected toolchain, or
-whose target C toolchain is not configured for `pcre2-sys`. On this Linux-host cross-preflight
-path, that currently means Haiku may need native-host validation because Rust 1.85 does not ship
-its `rust-std`, while illumos and Solaris may need explicit cross-compiler setup before the helper
-can exercise them from Linux.
-
-For a non-Windows preflight of the Windows code path, use:
-
-```bash
-cargo +1.85.0 check --tests --target x86_64-pc-windows-gnu
-```
-
-On native Windows hosts, the CI matrix covers:
-
-```powershell
-cargo test --target x86_64-pc-windows-msvc
-cargo test --target x86_64-pc-windows-gnu
-```
-
 ## Worker selection
 
 The `rfd` binary keeps the command-line syntax identical to GNU `find`.
@@ -201,19 +121,6 @@ Use the `RUSHFIND_WORKERS` environment variable to control execution mode:
 
 - `RUSHFIND_WORKERS=1` keeps traversal/output close to GNU ordering
 - `RUSHFIND_WORKERS=4` enables the worker-owned relaxed-order parallel engine by default
-
-## Current regex benchmark harness
-
-Use the regex benchmark harness when you want end-to-end ordered versus parallel comparisons on
-regex-heavy workloads:
-
-```bash
-RUSHFIND_WORKERS=8 RUSHFIND_BENCH_REPEATS=5 bash scripts/bench_regex_stage.sh cd95653
-```
-
-The script builds baseline and current release binaries outside the timed region, reuses one
-deterministic fixture tree for both trees, and prints per-case median deltas for regex-light,
-regex-heavy, and PCRE2-fallback-heavy command families.
 
 ## Follow modes
 
@@ -228,3 +135,7 @@ The current implementation supports `-exec ... ;`, `-exec ... +`, `-execdir ... 
 `-execdir ... +`, `-ok ... ;`, `-okdir ... ;`, and `-delete`.
 
 `-ok ... +` and `-okdir ... +` remain unsupported.
+
+## Development
+
+Contributor-facing documentation lives in [`docs/development.md`](docs/development.md).
