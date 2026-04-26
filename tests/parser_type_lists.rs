@@ -58,7 +58,7 @@ fn rejects_malformed_type_lists() {
 
 #[test]
 fn rejects_malformed_xtype_lists() {
-    for value in ["l,", ",l", "l,,s", "D", "l,D"] {
+    for value in ["l,", ",l", "l,,s", "z", "l,z"] {
         let error = parse_command(&argv(&[".", "-xtype", value])).unwrap_err();
         assert!(
             error.message.contains("-xtype"),
@@ -66,4 +66,22 @@ fn rejects_malformed_xtype_lists() {
             error.message
         );
     }
+}
+
+#[test]
+fn parses_door_type_filters_for_gnu_compatibility() {
+    let ast = parse_command(&argv(&[".", "-type", "D", "-xtype", "f,D"])).unwrap();
+
+    assert_eq!(
+        ast.expr,
+        Expr::And(vec![
+            Expr::Predicate(Predicate::Type(FileTypeMatcher::single(
+                FileTypeFilter::Door,
+            ))),
+            Expr::Predicate(Predicate::XType(FileTypeMatcher::from_filters([
+                FileTypeFilter::File,
+                FileTypeFilter::Door,
+            ]))),
+        ])
+    );
 }

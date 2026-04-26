@@ -4,10 +4,18 @@ Find for the occupātus.
 
 `rushfind` is a Rust implementation of Unix `find` that targets GNU `find` syntax while adding a parallel traversal engine. The installed binary is `rfd`.
 
-## Help and manpage
+## Command documentation
 
-`rfd --help` is the short terminal reference. The fuller reference is the
-`rfd(1)` manpage.
+- Use `rfd --help` for a compact interactive quick reference.
+- Use `rfd -D help` for debug diagnostic categories.
+- Use `man ./docs/rfd.1` from a source checkout for the full first-party
+  command reference.
+
+Contributor notes for regenerating the checked-in manpage and running
+development preflights live in [`docs/development.md`](docs/development.md).
+
+The `scdoc` tool is only needed by maintainers regenerating `docs/rfd.1`;
+normal `cargo build` does not depend on it.
 
 ## License
 
@@ -24,8 +32,8 @@ Find for the occupātus.
 - Read-only predicates: `-name`, `-iname`, `-path`, `-ipath`, `-type`, `-xtype`, `-true`,
   `-false`, `-fstype`
 - `-type` and `-xtype` accept GNU-style comma lists such as `-type f,d`
-- GNU normal compatibility options: `-files0-from FILE`, `-noleaf`, `-warn`, `-nowarn`,
-  `-ignore_readdir_race`, and `-noignore_readdir_race`
+- GNU normal and positional compatibility options: `-files0-from FILE`, `-follow`, `-noleaf`,
+  `-warn`, `-nowarn`, `-ignore_readdir_race`, and `-noignore_readdir_race`
 - Identity/link predicates: `-samefile`, `-inum`, `-links`
 - Ownership/account predicates: `-uid`, `-gid`, `-user`, `-group`, `-nouser`, `-nogroup`,
   plus Windows-specific `-owner`, `-owner-sid`, and `-group-sid`
@@ -63,6 +71,9 @@ Find for the occupātus.
   GNU findutils' detailed tracing stream
 - `-ignore_readdir_race` and `-noignore_readdir_race` are accepted and recorded compatibility
   options; this implementation does not yet alter runtime race handling for disappearing entries
+- `-context`, `-type D`, and `-xtype D` are recognized for GNU compatibility but fail with
+  explicit unsupported diagnostics unless SELinux label matching or Solaris door matching is added
+  in a future platform-specific slice
 - Access predicates use kernel access checks and intentionally can differ from `-perm`
 - Access predicates use real-ID GNU `access(2)` semantics and are not mode-bit emulation
 - `-xdev` and `-mount` are normalized as traversal-wide structural limits in the current

@@ -2,7 +2,8 @@ use crate::account::{
     PrincipalId, canonicalize_sid_principal, resolve_group_principal, resolve_user_principal,
 };
 use crate::ast::{
-    Action, CommandAst, CompatibilityOptions, Expr, FileTypeMatcher, GlobalOption, Predicate,
+    Action, CommandAst, CompatibilityOptions, Expr, FileTypeFilter, FileTypeMatcher, GlobalOption,
+    Predicate,
 };
 use crate::diagnostics::Diagnostic;
 use crate::exec::{
@@ -251,13 +252,14 @@ pub(crate) fn plan_command_with_now_and_capabilities(
     now: Timestamp,
     capabilities: &PlatformCapabilities,
 ) -> Result<ExecutionPlan, Diagnostic> {
-    let follow_mode = resolve_follow_mode(&ast.global_options);
     let CommandAst {
         start_paths,
+        global_options,
         compatibility_options,
         expr,
         ..
     } = ast;
+    let follow_mode = resolve_effective_follow_mode(&global_options, &compatibility_options);
     let mut traversal = TraversalOptions {
         min_depth: 0,
         max_depth: None,
@@ -391,6 +393,17 @@ fn resolve_follow_mode(global_options: &[GlobalOption]) -> FollowMode {
             GlobalOption::Follow(next) => *next,
             GlobalOption::Version | GlobalOption::Help => FollowMode::Physical,
         })
+}
+
+fn resolve_effective_follow_mode(
+    global_options: &[GlobalOption],
+    compatibility_options: &CompatibilityOptions,
+) -> FollowMode {
+    if compatibility_options.follow {
+        FollowMode::Logical
+    } else {
+        resolve_follow_mode(global_options)
+    }
 }
 
 fn require_platform_feature(
@@ -591,6 +604,7 @@ fn lower_predicate(
         | Predicate::LName { .. }) => {
             lower_pattern_predicate(predicate, runtime, state, capabilities)
         }
+        Predicate::Context(_) => reject_context_predicate(),
         predicate @ (Predicate::Inum(_) | Predicate::Links(_) | Predicate::SameFile(_)) => {
             lower_identity_predicate(predicate, follow_mode)
         }
@@ -622,12 +636,39 @@ fn lower_predicate(
         | Predicate::NewerXY { .. }) => {
             lower_newer_predicate(predicate, follow_mode, state, capabilities)
         }
-        Predicate::Type(kind) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Type(kind))),
-        Predicate::XType(kind) => Ok(RuntimeExpr::Predicate(RuntimePredicate::XType(kind))),
+        Predicate::Type(kind) => lower_type_predicate(kind, false),
+        Predicate::XType(kind) => lower_type_predicate(kind, true),
         Predicate::Compatibility(_) => Ok(RuntimeExpr::Barrier),
         Predicate::True => Ok(RuntimeExpr::Predicate(RuntimePredicate::True)),
         Predicate::False => Ok(RuntimeExpr::Predicate(RuntimePredicate::False)),
     }
+}
+
+fn reject_context_predicate() -> Result<RuntimeExpr, Diagnostic> {
+    Err(Diagnostic::unsupported(
+        "SELinux -context is not supported by this rushfind build",
+    ))
+}
+
+fn lower_type_predicate(
+    matcher: FileTypeMatcher,
+    follow_symlinks: bool,
+) -> Result<RuntimeExpr, Diagnostic> {
+    reject_solaris_door_type(matcher)?;
+    Ok(RuntimeExpr::Predicate(if follow_symlinks {
+        RuntimePredicate::XType(matcher)
+    } else {
+        RuntimePredicate::Type(matcher)
+    }))
+}
+
+fn reject_solaris_door_type(matcher: FileTypeMatcher) -> Result<(), Diagnostic> {
+    if matcher.contains(FileTypeFilter::Door) {
+        return Err(Diagnostic::unsupported(
+            "Solaris door file type is not supported by this rushfind build",
+        ));
+    }
+    Ok(())
 }
 
 fn lower_traversal_predicate(

@@ -8,12 +8,21 @@ repository README so the top-level project page can stay focused on end users.
 `rfd --help` is the short terminal reference. The fuller manual source lives at
 `docs/rfd.1.scd`.
 
+Regenerate the checked-in manpage after editing `docs/rfd.1.scd` with:
+
+```bash
+scripts/generate_manpage.sh
+```
+
 Render and preview it locally with:
 
 ```bash
 scdoc < docs/rfd.1.scd > docs/rfd.1
 man -l docs/rfd.1
 ```
+
+The `scdoc` tool is only needed when regenerating `docs/rfd.1`; normal
+`cargo build` does not depend on it.
 
 ## Detailed implementation notes
 

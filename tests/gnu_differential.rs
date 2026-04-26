@@ -1703,6 +1703,90 @@ fn ordered_follow_modes_match_gnu_find_exactly() {
 }
 
 #[test]
+fn ordered_positional_follow_matches_gnu_find_exactly() {
+    let root = build_tree();
+    unix_fs::symlink(root.path().join("src"), root.path().join("src-link")).unwrap();
+    unix_fs::symlink(root.path().join("src/lib.rs"), root.path().join("lib-link")).unwrap();
+
+    for args in [
+        vec![
+            path_arg(root.path()),
+            "-follow".into(),
+            "-maxdepth".into(),
+            "1".into(),
+            "-type".into(),
+            "d".into(),
+            "-print".into(),
+        ],
+        vec![
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-type".into(),
+            "f".into(),
+            "-print".into(),
+            "-follow".into(),
+        ],
+        vec![
+            "-P".into(),
+            path_arg(root.path()),
+            "-follow".into(),
+            "-maxdepth".into(),
+            "1".into(),
+            "-type".into(),
+            "f".into(),
+            "-print".into(),
+        ],
+    ] {
+        assert_matches_gnu_exact(&args);
+    }
+}
+
+#[test]
+fn parallel_positional_follow_matches_gnu_find_as_sets() {
+    let root = build_tree();
+    unix_fs::symlink(root.path().join("src"), root.path().join("src-link")).unwrap();
+    unix_fs::symlink(root.path().join("src/lib.rs"), root.path().join("lib-link")).unwrap();
+
+    let args = vec![
+        path_arg(root.path()),
+        "-follow".into(),
+        "-type".into(),
+        "f".into(),
+        "-print".into(),
+    ];
+
+    assert_matches_gnu_as_sets(&args);
+}
+
+#[test]
+fn unsupported_context_and_door_type_outcomes_match_gnu_find() {
+    let root = build_tree();
+
+    for args in [
+        vec![
+            path_arg(root.path()),
+            "-context".into(),
+            "system_u:object_r:tmp_t:s0".into(),
+        ],
+        vec![path_arg(root.path()), "-type".into(), "D".into()],
+        vec![path_arg(root.path()), "-xtype".into(), "D".into()],
+    ] {
+        let Some(expected) = gnu_find_output(&args, false) else {
+            return;
+        };
+        let actual = rushfind_command()
+            .env("RUSHFIND_WORKERS", "1")
+            .args(&args)
+            .output()
+            .unwrap();
+
+        assert_eq!(actual.status.code(), expected.status.code(), "{:?}", args);
+        assert!(!actual.stderr.is_empty(), "{:?}", args);
+    }
+}
+
+#[test]
 fn ordered_alias_preservation_matches_gnu_find_exactly() {
     let root = tempdir().unwrap();
     fs::create_dir(root.path().join("real")).unwrap();

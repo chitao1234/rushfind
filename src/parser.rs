@@ -172,6 +172,7 @@ enum AtomKind {
     },
     RegexType,
     FsType,
+    Context,
     LinkGlob {
         case_insensitive: bool,
         flag: &'static str,
@@ -288,6 +289,7 @@ enum ExecAtom {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CompatibilityAtom {
     Files0From,
+    Follow,
     NoLeaf,
     Warn,
     NoWarn,
@@ -379,6 +381,8 @@ fn classify_name_regex_atom(token: Arg<'_>) -> Option<AtomKind> {
         Some(AtomKind::RegexType)
     } else if token.matches("-fstype") {
         Some(AtomKind::FsType)
+    } else if token.matches("-context") {
+        Some(AtomKind::Context)
     } else if token.matches("-lname") {
         Some(AtomKind::LinkGlob {
             case_insensitive: false,
@@ -504,6 +508,8 @@ fn classify_action_atom(token: Arg<'_>) -> Option<AtomKind> {
 fn classify_compatibility_atom(token: Arg<'_>) -> Option<AtomKind> {
     if token.matches("-files0-from") {
         Some(AtomKind::Compatibility(CompatibilityAtom::Files0From))
+    } else if token.matches("-follow") {
+        Some(AtomKind::Compatibility(CompatibilityAtom::Follow))
     } else if token.matches("-noleaf") {
         Some(AtomKind::Compatibility(CompatibilityAtom::NoLeaf))
     } else if token.matches("-warn") {
@@ -650,10 +656,7 @@ impl<'a> Parser<'a> {
             .ok_or_else(|| Diagnostic::parse("expected predicate or action"))?;
         let token_display = token.display();
         let kind = classify_atom(token).ok_or_else(|| {
-            Diagnostic::parse(format!(
-                "unsupported token in parser subset `{}`",
-                token_display
-            ))
+            Diagnostic::parse(format!("unsupported expression token `{}`", token_display))
         })?;
         self.parse_classified_atom(kind)
     }
@@ -678,6 +681,9 @@ impl<'a> Parser<'a> {
                 Expr::Predicate(Predicate::RegexType(self.take_os_string("-regextype")?))
             }
             AtomKind::FsType => Expr::Predicate(Predicate::FsType(self.take_os_string("-fstype")?)),
+            AtomKind::Context => {
+                Expr::Predicate(Predicate::Context(self.take_os_string("-context")?))
+            }
             AtomKind::LinkGlob {
                 case_insensitive,
                 flag,
@@ -817,6 +823,10 @@ impl<'a> Parser<'a> {
                         Files0From::Path(PathBuf::from(value))
                     });
                 CompatibilityPredicate::Files0From
+            }
+            CompatibilityAtom::Follow => {
+                self.compatibility_options.follow = true;
+                CompatibilityPredicate::Follow
             }
             CompatibilityAtom::NoLeaf => {
                 self.compatibility_options.noleaf = true;
@@ -997,6 +1007,7 @@ fn parse_type_filter_component(
         b"c" => Ok(FileTypeFilter::Character),
         b"p" => Ok(FileTypeFilter::Fifo),
         b"s" => Ok(FileTypeFilter::Socket),
+        b"D" => Ok(FileTypeFilter::Door),
         b"" => Err(Diagnostic::parse(format!(
             "empty file type in {flag} list `{}`",
             full_value.to_string_lossy()

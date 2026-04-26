@@ -44,13 +44,14 @@ Defaults:\n\
   path defaults to . and expression defaults to -print\n\
   adjacent primaries imply -a; -a binds tighter than -o; use , to sequence actions\n\n\
 Global options:\n\
-  -P -H -L                      symlink handling (default: -P)\n\
+  -P -H -L                      symlink handling before start paths (default: -P)\n\
   --help                        show this help text\n\
   --version, -version           show build/version information\n\
   -Olevel                       GNU-compatible parser option; no optimizer effect yet\n\
   -D opts                       lightweight debug diagnostics; use -D help\n\n\
 Compatibility options:\n\
   -files0-from FILE|-           read NUL-delimited start paths from FILE or stdin\n\
+  -follow                       GNU positional compatibility option; enables logical traversal\n\
   -warn, -nowarn                control warnings for unknown -D debug options\n\
   -noleaf                       accepted for GNU compatibility; no traversal effect today\n\
   -ignore_readdir_race\n\
@@ -61,7 +62,8 @@ Common tests:\n\
   -wholename/-iwholename        GNU path aliases for -path/-ipath\n\
   -regex/-iregex PATTERN        whole-path regex match\n\
   -regextype TYPE               emacs, posix-extended, posix-basic, rust, pcre2\n\
-  -type/-xtype LIST             file type list such as f,d,l\n\
+  -type/-xtype LIST             file type list such as f,d,l; D is recognized but unsupported\n\
+  -context LABEL                recognized for GNU compatibility; unsupported in this build\n\
   -readable -writable -executable\n\
   -uid/-gid N  -user/-group NAME  -nouser -nogroup\n\
   Windows: -owner NAME  -owner-sid SID  -group-sid SID\n\

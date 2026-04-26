@@ -24,6 +24,7 @@ pub struct CompatibilityOptions {
     pub debug_options: Vec<DebugOption>,
     pub unknown_debug_options: Vec<OsString>,
     pub files0_from: Option<Files0From>,
+    pub follow: bool,
     pub warning_mode: WarningMode,
     pub noleaf: bool,
     pub ignore_readdir_race: Option<bool>,
@@ -94,6 +95,7 @@ impl DebugOption {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompatibilityPredicate {
     Files0From,
+    Follow,
     NoLeaf,
     Warn,
     NoWarn,
@@ -135,6 +137,7 @@ pub enum Predicate {
     },
     RegexType(OsString),
     FsType(OsString),
+    Context(OsString),
     Inum(OsString),
     Links(OsString),
     SameFile(PathBuf),
@@ -206,6 +209,7 @@ pub enum FileTypeFilter {
     Character,
     Fifo,
     Socket,
+    Door,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -246,6 +250,7 @@ impl FileTypeFilter {
             Self::Character => 1 << 4,
             Self::Fifo => 1 << 5,
             Self::Socket => 1 << 6,
+            Self::Door => 1 << 7,
         }
     }
 }

@@ -33,6 +33,6 @@ fn access_predicates_do_not_consume_following_tokens_as_arguments() {
     assert!(
         error
             .message
-            .contains("unsupported token in parser subset `stray-token`")
+            .contains("unsupported expression token `stray-token`")
     );
 }

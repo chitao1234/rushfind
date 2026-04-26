@@ -36,7 +36,7 @@ fn version_flags_remain_leading_only() {
         assert!(
             error
                 .message
-                .contains(&format!("unsupported token in parser subset `{raw}`")),
+                .contains(&format!("unsupported expression token `{raw}`")),
             "{raw}: {}",
             error.message
         );

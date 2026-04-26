@@ -53,6 +53,10 @@ The default symlink mode is -P.
   Read NUL-delimited start paths from _file_. Use - to read them from standard
   input.
 
+- *-follow*
+  Accepted as a GNU positional compatibility option. In the current
+  implementation it effectively enables logical traversal.
+
 - *-warn*, *-nowarn*
   Control warnings for unknown -D debug categories.
 
@@ -86,16 +90,22 @@ implementation rather than GNU's positional controls.
 - -lname, -ilname
 - -regex, -iregex
 - -regextype
+- -context
 
 The -regex and -iregex tests match the whole displayed path. Supported
 regextype values are emacs, posix-extended, posix-basic, rust, and pcre2.
+
+The -context predicate is recognized for GNU compatibility but reports an
+unsupported diagnostic in this build.
 
 ## Type and filesystem matching
 
 - -type, -xtype
 - -fstype
 
-The -type and -xtype tests accept GNU-style comma lists such as -type f,d.
+The -type and -xtype tests accept GNU-style comma lists such as -type f,d. The
+Solaris door type letter D is recognized for compatibility but reports an
+unsupported diagnostic in this build.
 
 ## Identity and ownership matching
 
