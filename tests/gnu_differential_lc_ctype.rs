@@ -5,6 +5,7 @@ mod support;
 use std::ffi::OsString;
 use std::fs;
 use std::os::unix::ffi::OsStringExt;
+use std::os::unix::fs::symlink;
 use std::process::Output;
 use support::{
     PRINTF_TIME_TZ, available_lc_ctype_locales, gnu_find_command, path_arg, rushfind_command,
@@ -142,7 +143,17 @@ fn lc_ctype_candidate_matrix_matches_gnu_for_encoded_single_characters() {
         };
 
         let root = tempdir().unwrap();
-        fs::write(root.path().join(&alpha_name), "alpha\n").unwrap();
+        match fs::write(root.path().join(&alpha_name), "alpha\n") {
+            Ok(()) => {}
+            // Some filesystems, including APFS, reject non-UTF-8 names.
+            // Keep testing the other locales and cover legacy bytes in
+            // symlink targets below, which do not need to name a real file.
+            Err(error) if error.raw_os_error() == Some(libc::EILSEQ) => {
+                eprintln!("skipping locale={locale}: temp filesystem rejects {alpha_name:?}");
+                continue;
+            }
+            Err(error) => panic!("locale={locale} cannot create {alpha_name:?}: {error}"),
+        }
         fs::write(root.path().join("5"), "digit\n").unwrap();
 
         for args in [
@@ -177,6 +188,42 @@ fn lc_ctype_candidate_matrix_matches_gnu_for_encoded_single_characters() {
             ],
         ] {
             assert_matches_gnu(&locale, &args);
+        }
+    }
+}
+
+#[test]
+fn lc_ctype_candidate_matrix_matches_gnu_for_encoded_symlink_targets() {
+    for locale in available_lc_ctype_locales(LC_CTYPE_CANDIDATES) {
+        let Some(alpha_target) = encoded_alpha_name(&locale) else {
+            continue;
+        };
+
+        let root = tempdir().unwrap();
+        symlink(&alpha_target, root.path().join("alpha-link")).unwrap();
+        symlink("5", root.path().join("digit-link")).unwrap();
+        symlink("two", root.path().join("long-link")).unwrap();
+
+        for flag in ["-lname", "-ilname"] {
+            for pattern in [
+                OsString::from("?"),
+                "[[:alpha:]]".into(),
+                "[[:digit:]]".into(),
+                alpha_target.clone(),
+            ] {
+                assert_matches_gnu(
+                    &locale,
+                    &[
+                        path_arg(root.path()),
+                        "-maxdepth".into(),
+                        "1".into(),
+                        flag.into(),
+                        pattern,
+                        "-printf".into(),
+                        "%f\n".into(),
+                    ],
+                );
+            }
         }
     }
 }

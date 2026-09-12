@@ -6,6 +6,49 @@ fn utf8() -> CtypeProfile {
     resolve_ctype_profile_from(vec![("LC_CTYPE", "en_US.UTF-8")])
 }
 
+#[cfg(unix)]
+#[test]
+fn legacy_gnu_regex_matches_encoded_characters_without_filesystem_support() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    // Raw path operands exercise every legacy encoding even on filesystems
+    // that reject these bytes as file names.
+    for (locale, name) in [
+        ("ru_RU.KOI8-R", b"\xf6".as_slice()),      // Ж
+        ("ja_JP.eucJP", b"\xa4\xa2".as_slice()),   // あ
+        ("ja_JP.SJIS", b"\x82\xa0".as_slice()),    // あ
+        ("ko_KR.eucKR", b"\xb0\xa1".as_slice()),   // 가
+        ("zh_CN.GB18030", b"\xd6\xd0".as_slice()), // 中
+    ] {
+        let ctype = resolve_ctype_profile_from([("LC_CTYPE", locale)]);
+        let candidate = OsString::from_vec([b"./".as_slice(), name].concat());
+        let literal = OsString::from_vec([b".*/".as_slice(), name].concat());
+
+        for dialect in [
+            RegexDialect::Emacs,
+            RegexDialect::PosixBasic,
+            RegexDialect::PosixExtended,
+        ] {
+            for pattern in [OsStr::new(".*/."), OsStr::new(".*/[[:alpha:]]"), &literal] {
+                let matcher =
+                    RegexMatcher::compile_with_ctype("-regex", dialect, pattern, false, &ctype)
+                        .unwrap();
+                assert!(
+                    matcher.is_match_with_ctype(&candidate, &ctype).unwrap(),
+                    "locale={locale} dialect={dialect:?} pattern={pattern:?}"
+                );
+                assert!(
+                    !matcher
+                        .is_match_with_ctype(OsStr::new("./aa"), &ctype)
+                        .unwrap(),
+                    "locale={locale} dialect={dialect:?} pattern={pattern:?}"
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn utf8_gnu_regex_dot_matches_one_multibyte_character() {
     let ctype = utf8();
