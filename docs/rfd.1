@@ -5,7 +5,7 @@
 .nh
 .ad l
 .\" Begin generated content:
-.TH "rfd" "1" "2026-04-26" "rushfind" "User Commands"
+.TH "rfd" "1" "2026-09-12" "rushfind" "User Commands"
 .P
 .SH NAME
 .P
@@ -841,6 +841,38 @@ Depth-mode actions preserve descendant-before-parent completion.\&
 .el \{\
 .IP \(bu 4
 .\}
+\fBLC_ALL\fR, \fBLC_CTYPE\fR, \fBLANG\fR
+Select the character encoding in that order.\& C and POSIX keep byte-oriented
+matching.\& UTF-8 and supported legacy encodings use owned decoding tables
+for glob and GNU regex predicates.\& Unknown encodings warn when matching or
+presentation needs them, then fall back to byte-oriented C/POSIX matching.\&
+Collation ordering, equivalence classes, collating symbols, and
+locale-specific tailoring are not implemented.\& Case-insensitive matching
+uses single-character folding only.\&
+
+.RE
+.P
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.IP \(bu 4
+.\}
+\fBLC_MESSAGES\fR
+May select localized -ok and -okdir prompt fragments.\& Prompt replies use a
+built-in ASCII affirmative parser; LC_CTYPE does not change confirmation
+parsing.\&
+
+.RE
+.P
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.IP \(bu 4
+.\}
 \fBRUSHFIND_WORKERS\fR
 Controls worker count and execution mode.\&
 
@@ -929,12 +961,6 @@ RUSHFIND_WORKERS=1 rfd \&. -type f -print
 Linux is the reference platform.\& macOS, the BSDs, a generic Unix tier, and
 native Windows are also supported, but some features are approximate or
 platform-specific.\&
-.P
-Interactive locale handling for -ok and -okdir is approximate on some
-non-Linux platforms and emits a startup warning when planned.\&
-.P
-Case-insensitive glob matching may differ outside the C locale on some
-non-Linux and Windows configurations and emits a startup warning when planned.\&
 .P
 On some generic Unix targets, -fstype, %F, -flags, and birth-time predicates
 fail during planning instead of running approximately.\&

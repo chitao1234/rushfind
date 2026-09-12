@@ -1,4 +1,7 @@
-use crate::action_output::{RenderedAction, render_action_output};
+use crate::action_output::{
+    OutputPresentation, RenderedAction, render_action_output,
+    render_action_output_with_presentation,
+};
 use crate::diagnostics::{Diagnostic, failed_to_write};
 use crate::entry::EntryContext;
 use crate::eval::{ActionOutcome, ActionSink, EvalContext};
@@ -78,7 +81,14 @@ impl<W: Write> ActionSink for StdoutSink<'_, W> {
         follow_mode: FollowMode,
         context: &EvalContext,
     ) -> Result<ActionOutcome, Diagnostic> {
-        match render_action_output(action, entry, follow_mode, context)? {
+        let presentation = OutputPresentation::raw(context.ctype_profile());
+        match render_action_output_with_presentation(
+            action,
+            entry,
+            follow_mode,
+            context,
+            &presentation,
+        )? {
             Some(RenderedAction::Stdout(bytes)) => {
                 self.write_bytes(&bytes)?;
                 Ok(ActionOutcome::matched_true())

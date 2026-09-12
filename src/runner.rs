@@ -147,12 +147,16 @@ where
     F: FnOnce() -> Result<MountSnapshot, Diagnostic>,
 {
     if !plan.runtime.mount_snapshot {
-        return Ok(EvalContext::with_now(plan.runtime.evaluation_now));
+        return Ok(EvalContext::with_now_and_ctype(
+            plan.runtime.evaluation_now,
+            plan.ctype_profile.clone(),
+        ));
     }
 
-    Ok(EvalContext::with_mount_snapshot_and_now(
+    Ok(EvalContext::with_mount_snapshot_and_now_and_ctype(
         load_mount_snapshot()?,
         plan.runtime.evaluation_now,
+        plan.ctype_profile.clone(),
     ))
 }
 
@@ -163,6 +167,7 @@ mod tests {
         validate_execdir_path_value, write_startup_warnings, write_startup_warnings_with_policy,
     };
     use crate::ast::CompatibilityOptions;
+    use crate::ctype::CtypeProfile;
     use crate::follow::FollowMode;
     use crate::ordered::engine::ordered_evaluator_workers;
     use crate::parser::parse_command;
@@ -181,6 +186,7 @@ mod tests {
             start_paths: vec![PathBuf::from(".")],
             follow_mode: FollowMode::Physical,
             compatibility_options: CompatibilityOptions::default(),
+            ctype_profile: CtypeProfile::ByteC,
             traversal: TraversalOptions {
                 min_depth: 0,
                 max_depth: None,

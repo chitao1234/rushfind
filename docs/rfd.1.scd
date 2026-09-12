@@ -227,6 +227,20 @@ In relaxed-order parallel mode:
 
 # ENVIRONMENT
 
+- *LC_ALL*, *LC_CTYPE*, *LANG*
+  Select the character encoding in that order. C and POSIX keep byte-oriented
+  matching. UTF-8 and supported legacy encodings use owned decoding tables
+  for glob and GNU regex predicates. Unknown encodings warn when matching or
+  presentation needs them, then fall back to byte-oriented C/POSIX matching.
+  Collation ordering, equivalence classes, collating symbols, and
+  locale-specific tailoring are not implemented. Case-insensitive matching
+  uses single-character folding only.
+
+- *LC_MESSAGES*
+  May select localized -ok and -okdir prompt fragments. Prompt replies use a
+  built-in ASCII affirmative parser; LC_CTYPE does not change confirmation
+  parsing.
+
 - *RUSHFIND_WORKERS*
   Controls worker count and execution mode.
 
@@ -277,12 +291,6 @@ RUSHFIND_WORKERS=1 rfd . -type f -print
 Linux is the reference platform. macOS, the BSDs, a generic Unix tier, and
 native Windows are also supported, but some features are approximate or
 platform-specific.
-
-Interactive locale handling for -ok and -okdir is approximate on some
-non-Linux platforms and emits a startup warning when planned.
-
-Case-insensitive glob matching may differ outside the C locale on some
-non-Linux and Windows configurations and emits a startup warning when planned.
 
 On some generic Unix targets, -fstype, %F, -flags, and birth-time predicates
 fail during planning instead of running approximately.

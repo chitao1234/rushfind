@@ -13,6 +13,20 @@ pub(crate) enum RenderedAction {
     },
 }
 
+pub(crate) struct OutputPresentation<'a> {
+    pub(crate) ctype_profile: &'a crate::ctype::CtypeProfile,
+    pub(crate) stdout_is_tty: bool,
+}
+
+impl<'a> OutputPresentation<'a> {
+    pub(crate) fn raw(ctype_profile: &'a crate::ctype::CtypeProfile) -> Self {
+        Self {
+            ctype_profile,
+            stdout_is_tty: false,
+        }
+    }
+}
+
 pub(crate) fn render_output_bytes(action: OutputAction, entry: &EntryContext) -> Vec<u8> {
     let mut bytes = crate::platform::path::display_bytes(&entry.path);
     match action {
@@ -76,4 +90,15 @@ pub(crate) fn render_action_output(
         | RuntimeAction::ExecPrompt(_)
         | RuntimeAction::Delete => Ok(None),
     }
+}
+
+pub(crate) fn render_action_output_with_presentation(
+    action: &RuntimeAction,
+    entry: &EntryContext,
+    follow_mode: FollowMode,
+    context: &EvalContext,
+    presentation: &OutputPresentation<'_>,
+) -> Result<Option<RenderedAction>, Diagnostic> {
+    let _ = (presentation.ctype_profile, presentation.stdout_is_tty);
+    render_action_output(action, entry, follow_mode, context)
 }

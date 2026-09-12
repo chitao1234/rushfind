@@ -6,8 +6,8 @@ use std::fs;
 use std::time::Duration;
 use support::{
     cargo_bin_output_with_env_and_input_timeout, cargo_bin_output_with_input_timeout,
-    cargo_bin_output_with_timeout, first_available_locale, locale_affirmative_accepts, path_arg,
-    resolved_messages_locale, rushfind_command,
+    cargo_bin_output_with_timeout, first_available_locale, path_arg, resolved_messages_locale,
+    rushfind_command,
 };
 use tempfile::tempdir;
 
@@ -473,7 +473,7 @@ fn invalid_lc_messages_falls_back_to_c_for_ok_prompts() {
 }
 
 #[test]
-fn ok_accepts_oui_when_french_locale_is_available() {
+fn ok_uses_french_prompt_but_accepts_owned_ascii_yes_when_french_locale_is_available() {
     let Some(locale) =
         first_available_locale(&["fr_FR.UTF-8", "fr_FR.utf8", "fr_FR", "fr.UTF-8", "fr"])
     else {
@@ -485,10 +485,6 @@ fn ok_accepts_oui_when_french_locale_is_available() {
     if !resolved.to_ascii_lowercase().starts_with("fr") {
         return;
     }
-    if !locale_affirmative_accepts(locale.as_str(), "oui") {
-        return;
-    }
-
     let root = tempdir().unwrap();
     fs::write(root.path().join("bonjour.txt"), "salut\n").unwrap();
 
@@ -505,12 +501,13 @@ fn ok_accepts_oui_when_french_locale_is_available() {
         ],
         1,
         &[("LANG", "C"), ("LC_MESSAGES", locale.as_str())],
-        b"oui\n",
+        b"yes\n",
         Duration::from_secs(5),
     );
 
     assert_eq!(output.status.code(), Some(0));
     assert!(String::from_utf8(output.stdout).unwrap().contains("RUN:"));
+    assert!(String::from_utf8(output.stderr).unwrap().contains("? "));
 }
 
 #[test]

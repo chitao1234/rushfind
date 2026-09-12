@@ -2,7 +2,7 @@
 
 use crate::diagnostics::Diagnostic;
 use crate::exec::PreparedExecCommand;
-use crate::messages_locale::{MessagesLocale, PromptLocale};
+use crate::messages_locale::{MessagesLocale, PromptLocale, default_affirmative_parser};
 use std::ffi::OsString;
 use std::io::{BufRead, Stderr, Stdin, Write, stderr, stdin};
 use std::sync::{Arc, Mutex};
@@ -118,7 +118,7 @@ impl PromptCoordinator {
                 ProcessPromptSession::open(),
             ))),
             locale,
-            affirmative_parser: crate::platform::locale::backend().affirmative_parser(),
+            affirmative_parser: default_affirmative_parser,
         }
     }
 
@@ -127,7 +127,7 @@ impl PromptCoordinator {
         Self::for_tests_with(
             scripted_replies,
             default_messages_locale(),
-            ascii_c_locale_yes_is_affirmative,
+            default_affirmative_parser,
         )
     }
 
@@ -178,11 +178,6 @@ fn trim_reply_line(bytes: &[u8]) -> &[u8] {
     bytes.strip_suffix(b"\r").unwrap_or(bytes)
 }
 
-#[cfg(test)]
-fn ascii_c_locale_yes_is_affirmative(bytes: &[u8]) -> bool {
-    bytes.eq_ignore_ascii_case(b"y") || bytes.eq_ignore_ascii_case(b"yes")
-}
-
 fn default_messages_locale() -> MessagesLocale {
     MessagesLocale {
         resolved_name: "C".into(),
@@ -213,7 +208,7 @@ fn io_error(error: std::io::Error) -> Diagnostic {
 
 #[cfg(all(test, unix))]
 mod tests {
-    use super::{ConfirmOutcome, PromptCoordinator, render_prompt};
+    use super::{ConfirmOutcome, PromptCoordinator, default_messages_locale, render_prompt};
     use crate::exec::PreparedExecCommand;
     use crate::messages_locale::{MessagesLocale, PromptLocale};
     use std::ffi::OsString;
@@ -283,6 +278,25 @@ mod tests {
             .unwrap();
 
         assert!(matches!(outcome, ConfirmOutcome::Accepted(true)));
+    }
+
+    #[test]
+    fn default_affirmative_parser_accepts_ascii_yes_without_platform_locale() {
+        let coordinator = PromptCoordinator::for_tests_with(
+            vec![b"yes\n".to_vec()],
+            default_messages_locale(),
+            crate::messages_locale::default_affirmative_parser,
+        );
+        let prepared = PreparedExecCommand {
+            cwd: None,
+            argv: vec![OsString::from("true")],
+        };
+
+        let outcome = coordinator
+            .confirm_prepared(&[OsString::from("true")], &prepared, |_| Ok("ran"))
+            .unwrap();
+
+        assert!(matches!(outcome, ConfirmOutcome::Accepted("ran")));
     }
 
     #[test]

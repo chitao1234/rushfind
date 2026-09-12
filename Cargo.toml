@@ -17,6 +17,7 @@ path = "src/main.rs"
 [dependencies]
 crossbeam-channel = "0.5"
 crossbeam-deque = "0.8"
+encoding_rs = "0.8.35"
 libc = "0.2"
 pcre2 = "0.2.11"
 regex = "1.12"

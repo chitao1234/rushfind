@@ -15,6 +15,7 @@ impl GnuRegex {
 pub enum GnuExpr {
     Empty,
     Literal(u8),
+    LiteralChar(char),
     Dot,
     Concat(Vec<GnuExpr>),
     Alternation(Vec<GnuExpr>),
@@ -44,7 +45,9 @@ pub struct ClassExpr {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClassItem {
     Byte(u8),
+    Char(char),
     Range(u8, u8),
+    CharRange(char, char),
     PosixClass(&'static str),
 }
 

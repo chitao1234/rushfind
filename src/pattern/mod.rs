@@ -1,3 +1,4 @@
+mod encoded;
 mod ir;
 mod owned;
 mod parse;
@@ -51,7 +52,9 @@ pub enum GlobSlashMode {
 struct CompiledGlobInner {
     case_mode: GlobCaseMode,
     slash_mode: GlobSlashMode,
+    original_pattern: Vec<u8>,
     program: ir::GlobProgram,
+    encoded_program: Option<encoded::EncodedGlobProgram>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,11 +71,42 @@ impl CompiledGlob {
     ) -> Result<Self, Diagnostic> {
         let original_pattern = pattern.as_encoded_bytes().to_vec();
         let parsed = parse::compile_pattern(flag, &original_pattern, case_mode, slash_mode)?;
+        let encoded_program = None;
         Ok(Self {
             inner: Arc::new(CompiledGlobInner {
                 case_mode,
                 slash_mode,
+                original_pattern,
                 program: parsed.program,
+                encoded_program,
+            }),
+        })
+    }
+
+    pub fn compile_with_ctype(
+        flag: &'static str,
+        pattern: &OsStr,
+        case_mode: GlobCaseMode,
+        slash_mode: GlobSlashMode,
+        ctype: &crate::ctype::CtypeProfile,
+    ) -> Result<Self, Diagnostic> {
+        let original_pattern = pattern.as_encoded_bytes().to_vec();
+        let parsed = parse::compile_pattern(flag, &original_pattern, case_mode, slash_mode)?;
+        let encoded_program = if ctype.is_byte_c()
+            || ctype.is_unknown()
+            || !crate::ctype::text::decodes_without_errors(ctype, &original_pattern)
+        {
+            None
+        } else {
+            Some(encoded::compile_pattern(flag, &original_pattern, ctype)?)
+        };
+        Ok(Self {
+            inner: Arc::new(CompiledGlobInner {
+                case_mode,
+                slash_mode,
+                original_pattern,
+                program: parsed.program,
+                encoded_program,
             }),
         })
     }
@@ -84,6 +118,26 @@ impl CompiledGlob {
             self.inner.slash_mode,
             candidate.as_encoded_bytes(),
         )
+    }
+
+    pub fn is_match_with_ctype(
+        &self,
+        candidate: &OsStr,
+        ctype: &crate::ctype::CtypeProfile,
+    ) -> Result<bool, Diagnostic> {
+        if ctype.is_byte_c() || ctype.is_unknown() {
+            return self.is_match(candidate);
+        }
+        let Some(encoded_program) = &self.inner.encoded_program else {
+            return self.is_match(candidate);
+        };
+        Ok(encoded::matches(
+            encoded_program,
+            self.inner.case_mode,
+            self.inner.slash_mode,
+            ctype,
+            candidate.as_encoded_bytes(),
+        ))
     }
 }
 
@@ -167,6 +221,26 @@ mod tests {
     }
 
     #[test]
+    fn encoded_locale_invalid_byte_patterns_fall_back_to_byte_matching() {
+        let ctype = crate::ctype::resolve_ctype_profile_from([("LC_CTYPE", "C.UTF-8")]);
+        let pattern = OsString::from_vec(vec![b'f', b'o', b'o', 0xff]);
+        let candidate = OsString::from_vec(vec![b'f', b'o', b'o', 0xff]);
+        let glob = CompiledGlob::compile_with_ctype(
+            "-name",
+            pattern.as_os_str(),
+            GlobCaseMode::Sensitive,
+            GlobSlashMode::Literal,
+            &ctype,
+        )
+        .unwrap();
+
+        assert!(
+            glob.is_match_with_ctype(candidate.as_os_str(), &ctype)
+                .unwrap()
+        );
+    }
+
+    #[test]
     fn case_insensitive_patterns_match_directly() {
         let glob = CompiledGlob::compile(
             "-iname",
@@ -188,5 +262,33 @@ mod tests {
         )
         .unwrap();
         assert!(glob.is_match(OsStr::new("Alpha")).unwrap());
+    }
+
+    #[test]
+    fn byte_c_glob_supports_posix_character_classes() {
+        let glob = CompiledGlob::compile(
+            "-name",
+            OsStr::new("[[:alpha:]][[:digit:]]"),
+            GlobCaseMode::Sensitive,
+            GlobSlashMode::Literal,
+        )
+        .unwrap();
+
+        assert!(glob.is_match(OsStr::new("A5")).unwrap());
+        assert!(glob.is_match(OsStr::new("z9")).unwrap());
+        assert!(!glob.is_match(OsStr::new("é5")).unwrap());
+    }
+
+    #[test]
+    fn byte_c_glob_rejects_unknown_posix_class() {
+        let error = CompiledGlob::compile(
+            "-name",
+            OsStr::new("[[:emoji:]]"),
+            GlobCaseMode::Sensitive,
+            GlobSlashMode::Literal,
+        )
+        .unwrap_err();
+
+        assert!(error.message.contains("unsupported POSIX character class"));
     }
 }
