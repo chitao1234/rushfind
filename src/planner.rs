@@ -267,8 +267,12 @@ pub(crate) fn plan_command_with_now_and_capabilities(
     let mut traversal = TraversalOptions {
         min_depth: 0,
         max_depth: None,
-        same_file_system: false,
-        order: TraversalOrder::PreOrder,
+        same_file_system: compatibility_options.same_file_system,
+        order: if compatibility_options.depth {
+            TraversalOrder::DepthFirstPostOrder
+        } else {
+            TraversalOrder::PreOrder
+        },
     };
     let mut runtime = RuntimeRequirements {
         mount_snapshot: false,
@@ -277,6 +281,9 @@ pub(crate) fn plan_command_with_now_and_capabilities(
         messages_locale_required: false,
     };
     let mut state = PlanningState::new(now, CtypeProfile::current());
+    if compatibility_options.regex_extended {
+        state.regex_dialect = RegexDialect::PosixExtended;
+    }
     let lowered = lower_expr(
         expr,
         &mut traversal,

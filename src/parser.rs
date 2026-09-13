@@ -13,9 +13,18 @@ use std::path::PathBuf;
 pub fn parse_command(argv: &[OsString]) -> Result<CommandAst, Diagnostic> {
     let mut global_options = Vec::new();
     let mut compatibility_options = CompatibilityOptions::default();
+    let mut bsd_start_paths = Vec::new();
     let mut index = 0;
 
     while index < argv.len() {
+        if Arg::new(argv[index].as_os_str()).matches("-f") {
+            let path = argv
+                .get(index + 1)
+                .ok_or_else(|| Diagnostic::parse("missing argument for `-f`"))?;
+            bsd_start_paths.push(PathBuf::from(path));
+            index += 2;
+            continue;
+        }
         let consumed =
             parse_leading_option(argv, index, &mut global_options, &mut compatibility_options)?;
         if consumed == 0 {
@@ -29,10 +38,13 @@ pub fn parse_command(argv: &[OsString]) -> Result<CommandAst, Diagnostic> {
         .position(|arg| is_expression_start(Arg::new(arg.as_os_str())))
         .unwrap_or(argv[index..].len());
     let split_index = index + path_count;
-    let start_paths_explicit = path_count > 0;
+    let start_paths_explicit = path_count > 0 || !bsd_start_paths.is_empty();
 
     let start_paths = if start_paths_explicit {
-        argv[index..split_index].iter().map(PathBuf::from).collect()
+        bsd_start_paths.extend(argv[index..split_index].iter().map(PathBuf::from));
+        bsd_start_paths
+    } else if !bsd_start_paths.is_empty() {
+        bsd_start_paths
     } else {
         vec![PathBuf::from(".")]
     };
@@ -75,6 +87,8 @@ fn parse_global_option(arg: Arg<'_>) -> Option<GlobalOption> {
         Some(GlobalOption::Follow(FollowMode::CommandLineOnly))
     } else if arg.matches("-L") {
         Some(GlobalOption::Follow(FollowMode::Logical))
+    } else if arg.matches("-h") {
+        Some(GlobalOption::Follow(FollowMode::CommandLineOnly))
     } else if arg.matches("-version") || arg.matches("--version") {
         Some(GlobalOption::Version)
     } else if arg.matches("--help") {
@@ -108,6 +122,19 @@ fn parse_leading_option(
             .ok_or_else(|| Diagnostic::parse("missing argument for `-D`"))?;
         parse_debug_options(raw, compatibility_options);
         return Ok(2);
+    }
+
+    if arg.matches("-E") {
+        compatibility_options.regex_extended = true;
+        return Ok(1);
+    }
+    if arg.matches("-d") {
+        compatibility_options.depth = true;
+        return Ok(1);
+    }
+    if arg.matches("-x") {
+        compatibility_options.same_file_system = true;
+        return Ok(1);
     }
 
     Ok(0)

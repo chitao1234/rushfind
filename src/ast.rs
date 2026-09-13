@@ -28,6 +28,9 @@ pub struct CompatibilityOptions {
     pub warning_mode: WarningMode,
     pub noleaf: bool,
     pub ignore_readdir_race: Option<bool>,
+    pub regex_extended: bool,
+    pub depth: bool,
+    pub same_file_system: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
