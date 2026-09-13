@@ -218,6 +218,24 @@ where
             }
         };
 
+        // Traversal-level failures such as a filesystem loop make GNU skip the
+        // entry altogether: it reports the error and evaluates nothing for that
+        // path, so the decision has to be made before the entry is emitted.
+        let descend = match should_descend_directory(
+            &pending,
+            &entry,
+            follow_mode,
+            options,
+            control,
+            backend.as_ref(),
+        ) {
+            Ok(result) => result,
+            Err(error) => {
+                emit(WalkEvent::Error(error))?;
+                continue;
+            }
+        };
+
         if !xargs_illegal
             && emit_ordered_visit_for_order(
                 &mut emit,
@@ -231,32 +249,18 @@ where
             return Ok(());
         }
 
-        let (child_ancestry, root_device) = match should_descend_directory(
-            &pending,
-            &entry,
-            follow_mode,
-            options,
-            control,
-            backend.as_ref(),
-        ) {
-            Ok(Some(result)) => result,
-            Ok(None) => {
-                if emit_postorder_completion_if_needed(
-                    &mut emit,
-                    options.order,
-                    is_directory,
-                    entry.clone(),
-                    &mut next_sequence,
-                    pending.ancestor_barriers.clone(),
-                )? {
-                    return Ok(());
-                }
-                continue;
+        let Some((child_ancestry, root_device)) = descend else {
+            if emit_postorder_completion_if_needed(
+                &mut emit,
+                options.order,
+                is_directory,
+                entry.clone(),
+                &mut next_sequence,
+                pending.ancestor_barriers.clone(),
+            )? {
+                return Ok(());
             }
-            Err(error) => {
-                emit(WalkEvent::Error(error))?;
-                continue;
-            }
+            continue;
         };
 
         let (children, diagnostics) = match backend.read_children(&pending.path) {

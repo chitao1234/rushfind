@@ -442,19 +442,9 @@ fn run_preorder_pending_batch(
             }
         };
 
-        if !xargs_illegal && pending.depth >= plan.traversal.min_depth {
-            status = status.merge(process_entry_preorder_fast_path(
-                plan,
-                &entry,
-                plan.follow_mode,
-                context,
-                sink,
-            )?);
-            if status.is_stop_requested() {
-                break;
-            }
-        }
-
+        // The descend decision comes first: a traversal-level failure such as a
+        // filesystem loop means GNU skips the entry, so it must not be
+        // evaluated before the decision is known.
         let descend = match should_descend_directory(
             &pending,
             &entry,
@@ -470,6 +460,19 @@ fn run_preorder_pending_batch(
                 continue;
             }
         };
+
+        if !xargs_illegal && pending.depth >= plan.traversal.min_depth {
+            status = status.merge(process_entry_preorder_fast_path(
+                plan,
+                &entry,
+                plan.follow_mode,
+                context,
+                sink,
+            )?);
+            if status.is_stop_requested() {
+                break;
+            }
+        }
 
         let Some((child_ancestry, root_device)) = descend else {
             continue;
