@@ -181,7 +181,7 @@ where
         let entry = match backend.load_entry(&pending) {
             Ok(entry) => entry,
             Err(error) => {
-                emit(WalkEvent::Error(error))?;
+                report_traversal_error(&mut emit, error, options, !pending.is_command_line_root)?;
                 continue;
             }
         };
@@ -200,7 +200,7 @@ where
         } {
             Ok(control) => control,
             Err(error) => {
-                emit(WalkEvent::Error(error))?;
+                report_traversal_error(&mut emit, error, options, !pending.is_command_line_root)?;
                 continue;
             }
         };
@@ -208,7 +208,7 @@ where
         let is_directory = match backend.active_directory_identity(&entry, follow_mode) {
             Ok(identity) => identity.is_some(),
             Err(error) => {
-                emit(WalkEvent::Error(error))?;
+                report_traversal_error(&mut emit, error, options, !pending.is_command_line_root)?;
                 continue;
             }
         };
@@ -226,7 +226,7 @@ where
         ) {
             Ok(result) => result,
             Err(error) => {
-                emit(WalkEvent::Error(error))?;
+                report_traversal_error(&mut emit, error, options, !pending.is_command_line_root)?;
                 continue;
             }
         };
@@ -252,7 +252,12 @@ where
         let (children, diagnostics) = match backend.read_children(&pending.path) {
             Ok(result) => result,
             Err(error) => {
-                emit(WalkEvent::Error(error))?;
+                report_traversal_error(
+                    &mut emit,
+                    error,
+                    options,
+                    !pending.is_command_line_root,
+                )?;
                 if emit_postorder_completion_if_needed(
                     &mut emit,
                     options.order,
@@ -265,7 +270,7 @@ where
             }
         };
 
-        emit_ordered_errors(&mut emit, diagnostics)?;
+        emit_ordered_errors(&mut emit, diagnostics, options)?;
         push_postorder_completion_frame(&mut stack, options.order, is_directory, entry);
         push_ordered_child_visits(&mut stack, children, &pending, child_ancestry, root_device);
     }
@@ -346,12 +351,17 @@ where
     }
 }
 
-fn emit_ordered_errors<F>(emit: &mut F, diagnostics: Vec<Diagnostic>) -> Result<(), Diagnostic>
+fn emit_ordered_errors<F>(
+    emit: &mut F,
+    diagnostics: Vec<Diagnostic>,
+    options: TraversalOptions,
+) -> Result<(), Diagnostic>
 where
     F: FnMut(WalkEvent) -> Result<OrderedWalkDirective, Diagnostic>,
 {
     for error in diagnostics {
-        emit(WalkEvent::Error(error))?;
+        // Directory children always come from a listing, so they can race.
+        report_traversal_error(emit, error, options, true)?;
     }
     Ok(())
 }
@@ -467,6 +477,27 @@ fn should_descend(depth: usize, max_depth: Option<usize>) -> bool {
 
 fn path_error(path: &Path, error: std::io::Error) -> Diagnostic {
     Diagnostic::new(format!("{}: {error}", path.display()), 1)
+        .with_raw_os_error(error.raw_os_error())
+}
+
+/// Reports a traversal diagnostic, honouring `-ignore_readdir_race`.
+///
+/// A path the user named on the command line is never treated as a race: it
+/// did not come from a directory listing, so its absence is a real error.
+fn report_traversal_error<F>(
+    emit: &mut F,
+    error: Diagnostic,
+    options: TraversalOptions,
+    raced: bool,
+) -> Result<(), Diagnostic>
+where
+    F: FnMut(WalkEvent) -> Result<OrderedWalkDirective, Diagnostic>,
+{
+    if raced && options.ignore_readdir_race && error.is_readdir_race() {
+        return Ok(());
+    }
+
+    emit(WalkEvent::Error(error)).map(|_| ())
 }
 
 fn loop_error(path: &Path) -> Diagnostic {
@@ -477,7 +508,7 @@ fn loop_error(path: &Path) -> Diagnostic {
 mod tests {
     use super::{
         DiscoveredChild, FsWalkBackend, OrderedWalkDirective, PendingPath, WalkBackend, WalkEvent,
-        load_entry, walk_ordered_with_backend,
+        load_entry, walk_ordered, walk_ordered_with_backend,
     };
     use crate::diagnostics::Diagnostic;
     use crate::entry::{EntryContext, EntryKind};
@@ -578,6 +609,7 @@ mod tests {
                 same_file_system: false,
                 order: TraversalOrder::PreOrder,
                 xargs_safe: false,
+                ignore_readdir_race: false,
             },
             |entry| {
                 let prune = entry.path.file_name().is_some_and(|name| name == "skip");
@@ -617,6 +649,7 @@ mod tests {
                 same_file_system: false,
                 order: TraversalOrder::DepthFirstPostOrder,
                 xargs_safe: false,
+                ignore_readdir_race: false,
             },
             |_entry| {
                 Ok(TraversalControl {
@@ -790,6 +823,7 @@ mod tests {
                 same_file_system: false,
                 order: TraversalOrder::PreOrder,
                 xargs_safe: false,
+                ignore_readdir_race: false,
             },
             |_entry| {
                 Ok(TraversalControl {
@@ -802,6 +836,130 @@ mod tests {
         .unwrap();
 
         assert!(!backend.visited_children.load(Ordering::SeqCst));
+    }
+
+    /// Yields one child diagnostic so that `-ignore_readdir_race` handling can
+    /// be exercised without racing against a real directory.
+    struct VanishingChildBackend {
+        error: Diagnostic,
+    }
+
+    impl WalkBackend for VanishingChildBackend {
+        fn load_entry(&self, pending: &PendingPath) -> Result<EntryContext, Diagnostic> {
+            load_entry(pending)
+        }
+
+        fn visit_children(
+            &self,
+            _path: &Path,
+            visit: &mut dyn FnMut(Result<DiscoveredChild, Diagnostic>),
+        ) -> Result<(), Diagnostic> {
+            visit(Err(self.error.clone()));
+            Ok(())
+        }
+
+        fn active_directory_identity(
+            &self,
+            entry: &EntryContext,
+            follow_mode: FollowMode,
+        ) -> Result<Option<FileIdentity>, Diagnostic> {
+            entry.active_directory_identity(follow_mode)
+        }
+    }
+
+    fn walk_vanishing_child(vanished: &Diagnostic, ignore_readdir_race: bool) -> Vec<String> {
+        let root = tempdir().unwrap();
+        let backend = Arc::new(VanishingChildBackend {
+            error: vanished.clone(),
+        });
+        let mut seen = Vec::new();
+
+        walk_ordered_with_backend(
+            backend,
+            &[root.path().to_path_buf()],
+            FollowMode::Physical,
+            TraversalOptions {
+                min_depth: 0,
+                max_depth: None,
+                same_file_system: false,
+                order: TraversalOrder::PreOrder,
+                xargs_safe: false,
+                ignore_readdir_race,
+            },
+            |_entry| {
+                Ok(TraversalControl {
+                    matched: true,
+                    prune: false,
+                })
+            },
+            |event| {
+                if let WalkEvent::Error(error) = event {
+                    seen.push(error.message);
+                }
+                Ok(OrderedWalkDirective::Continue)
+            },
+        )
+        .unwrap();
+
+        seen
+    }
+
+    #[test]
+    fn ignore_readdir_race_hides_vanished_entries() {
+        let vanished = Diagnostic::new("child: No such file or directory", 1)
+            .with_raw_os_error(Some(libc::ENOENT));
+
+        assert_eq!(walk_vanishing_child(&vanished, false).len(), 1);
+        assert!(walk_vanishing_child(&vanished, true).is_empty());
+    }
+
+    #[test]
+    fn ignore_readdir_race_keeps_permission_errors() {
+        let denied =
+            Diagnostic::new("child: Permission denied", 1).with_raw_os_error(Some(libc::EACCES));
+
+        assert_eq!(walk_vanishing_child(&denied, false).len(), 1);
+        assert_eq!(walk_vanishing_child(&denied, true).len(), 1);
+    }
+
+    #[test]
+    fn command_line_roots_are_never_treated_as_a_race() {
+        let missing = Diagnostic::new("root: No such file or directory", 1)
+            .with_raw_os_error(Some(libc::ENOENT));
+
+        // A root that does not exist is a real error even with the option set.
+        let root = tempdir().unwrap();
+        let missing_root = root.path().join("absent");
+        let mut seen = Vec::new();
+
+        walk_ordered(
+            &[missing_root],
+            FollowMode::Physical,
+            TraversalOptions {
+                min_depth: 0,
+                max_depth: None,
+                same_file_system: false,
+                order: TraversalOrder::PreOrder,
+                xargs_safe: false,
+                ignore_readdir_race: true,
+            },
+            |_entry| {
+                Ok(TraversalControl {
+                    matched: true,
+                    prune: false,
+                })
+            },
+            |event| {
+                if let WalkEvent::Error(error) = event {
+                    seen.push(error.message);
+                }
+                Ok(OrderedWalkDirective::Continue)
+            },
+        )
+        .unwrap();
+
+        assert_eq!(seen.len(), 1, "expected the missing root to be reported");
+        assert!(missing.is_readdir_race());
     }
 
     struct TestBackend;

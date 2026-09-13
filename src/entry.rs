@@ -602,6 +602,7 @@ fn is_socket(_file_type: &FileType) -> bool {
 
 fn path_error(path: &Path, error: io::Error) -> Diagnostic {
     Diagnostic::new(format!("{}: {error}", path.display()), 1)
+        .with_raw_os_error(error.raw_os_error())
 }
 
 #[cfg(all(test, unix))]

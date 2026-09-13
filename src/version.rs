@@ -57,7 +57,7 @@ Compatibility options:\n\
   -warn, -nowarn                control warnings for unknown -D debug options\n\
   -noleaf                       accepted for GNU compatibility; no traversal effect today\n\
   -ignore_readdir_race\n\
-  -noignore_readdir_race        accepted for GNU compatibility; no runtime effect today\n\n\
+  -noignore_readdir_race        hide errors for entries that vanish mid-walk\n\n\
 Common tests:\n\
   -name/-iname PATTERN          match basenames\n\
   -path/-ipath PATTERN          match whole displayed paths\n\

@@ -180,6 +180,27 @@ impl ActionSink for WorkerActionSink {
     }
 }
 
+/// Reports a traversal diagnostic, honouring `-ignore_readdir_race`.
+///
+/// Entries discovered through a directory listing can race with their removal;
+/// a path the user named on the command line cannot, so its absence is always
+/// reported.
+fn report_traversal_error(
+    sink: &mut WorkerActionSink,
+    plan: &ExecutionPlan,
+    error: Diagnostic,
+    raced: bool,
+    had_runtime_errors: &mut bool,
+) -> Result<(), Diagnostic> {
+    if raced && plan.traversal.ignore_readdir_race && error.is_readdir_race() {
+        return Ok(());
+    }
+
+    sink.emit_runtime_error(error)?;
+    *had_runtime_errors = true;
+    Ok(())
+}
+
 pub(crate) fn process_entry_preorder_fast_path(
     plan: &ExecutionPlan,
     entry: &EntryContext,
@@ -409,8 +430,13 @@ fn run_preorder_pending_batch(
         let entry = match backend.load_entry(&pending) {
             Ok(entry) => entry,
             Err(error) => {
-                sink.emit_runtime_error(error)?;
-                *had_runtime_errors = true;
+                report_traversal_error(
+                    sink,
+                    plan,
+                    error,
+                    !pending.is_command_line_root,
+                    had_runtime_errors,
+                )?;
                 continue;
             }
         };
@@ -435,8 +461,13 @@ fn run_preorder_pending_batch(
         } {
             Ok(control) => control,
             Err(error) => {
-                sink.emit_runtime_error(error)?;
-                *had_runtime_errors = true;
+                report_traversal_error(
+                    sink,
+                    plan,
+                    error,
+                    !pending.is_command_line_root,
+                    had_runtime_errors,
+                )?;
                 continue;
             }
         };
@@ -454,8 +485,13 @@ fn run_preorder_pending_batch(
         ) {
             Ok(result) => result,
             Err(error) => {
-                sink.emit_runtime_error(error)?;
-                *had_runtime_errors = true;
+                report_traversal_error(
+                    sink,
+                    plan,
+                    error,
+                    !pending.is_command_line_root,
+                    had_runtime_errors,
+                )?;
                 continue;
             }
         };
@@ -495,10 +531,11 @@ fn run_preorder_pending_batch(
                 }
             }
             Err(error) => {
-                if let Err(emit_error) = sink.emit_runtime_error(error) {
+                if let Err(emit_error) =
+                    report_traversal_error(sink, plan, error, true, had_runtime_errors)
+                {
                     emitted_error = Some(emit_error);
                 }
-                *had_runtime_errors = true;
             }
         })?;
 
@@ -569,7 +606,7 @@ fn run_postorder_pending_root(
     let entry = match run.backend.load_entry(&pending) {
         Ok(entry) => entry,
         Err(error) => {
-            return emit_postorder_runtime_error(error, notify_parent, context);
+            return emit_postorder_runtime_error(error, !pending.is_command_line_root, notify_parent, context);
         }
     };
 
@@ -594,7 +631,7 @@ fn run_postorder_pending_root(
     } {
         Ok(control) => control,
         Err(error) => {
-            return emit_postorder_runtime_error(error, notify_parent, context);
+            return emit_postorder_runtime_error(error, !pending.is_command_line_root, notify_parent, context);
         }
     };
 
@@ -604,7 +641,7 @@ fn run_postorder_pending_root(
     {
         Ok(identity) => identity.is_some(),
         Err(error) => {
-            return emit_postorder_runtime_error(error, notify_parent, context);
+            return emit_postorder_runtime_error(error, !pending.is_command_line_root, notify_parent, context);
         }
     };
 
@@ -622,7 +659,7 @@ fn run_postorder_pending_root(
     ) {
         Ok(result) => result,
         Err(error) => {
-            return emit_postorder_runtime_error(error, notify_parent, context);
+            return emit_postorder_runtime_error(error, !pending.is_command_line_root, notify_parent, context);
         }
     };
 
@@ -661,16 +698,25 @@ fn collect_postorder_child_chunks(
                 context.sink.control.accepts_new_work(),
             ),
             Err(error) => {
-                if let Err(emit_error) = context.sink.emit_runtime_error(error) {
+                if let Err(emit_error) = report_traversal_error(
+                    context.sink,
+                    context.run.plan,
+                    error,
+                    true,
+                    context.had_runtime_errors,
+                ) {
                     emitted_error = Some(emit_error);
                 }
-                *context.had_runtime_errors = true;
             }
         }) {
         Ok(()) => {}
         Err(error) => {
-            context.sink.emit_runtime_error(error)?;
-            *context.had_runtime_errors = true;
+            if !(context.run.plan.traversal.ignore_readdir_race && error.is_readdir_race())
+                || pending.is_command_line_root
+            {
+                context.sink.emit_runtime_error(error)?;
+                *context.had_runtime_errors = true;
+            }
             return Ok(None);
         }
     }
@@ -790,11 +836,17 @@ fn run_postorder_resume(
 
 fn emit_postorder_runtime_error(
     error: Diagnostic,
+    raced: bool,
     notify_parent: Option<SubtreeBarrierId>,
     context: &mut PostorderRunContext<'_, '_>,
 ) -> Result<RuntimeStatus, Diagnostic> {
-    context.sink.emit_runtime_error(error)?;
-    *context.had_runtime_errors = true;
+    if !(raced
+        && context.run.plan.traversal.ignore_readdir_race
+        && error.is_readdir_race())
+    {
+        context.sink.emit_runtime_error(error)?;
+        *context.had_runtime_errors = true;
+    }
     if let Some(parent) = notify_parent {
         notify_parent_barrier(
             parent,

@@ -204,6 +204,7 @@ mod tests {
                 same_file_system: false,
                 order: TraversalOrder::PreOrder,
                 xargs_safe: false,
+                ignore_readdir_race: false,
             },
             runtime: RuntimeRequirements {
                 mount_snapshot,

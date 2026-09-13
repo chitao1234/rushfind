@@ -71,6 +71,7 @@ pub struct TraversalOptions {
     pub same_file_system: bool,
     pub order: TraversalOrder,
     pub xargs_safe: bool,
+    pub ignore_readdir_race: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -262,6 +263,7 @@ pub(crate) fn plan_command_with_now_and_capabilities(
             TraversalOrder::PreOrder
         },
         xargs_safe: compatibility_options.xargs_safe,
+        ignore_readdir_race: compatibility_options.ignore_readdir_race.unwrap_or(false),
     };
     let mut runtime = RuntimeRequirements {
         mount_snapshot: false,

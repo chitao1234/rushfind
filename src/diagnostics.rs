@@ -4,6 +4,10 @@ use std::fmt;
 pub struct Diagnostic {
     pub message: String,
     pub exit_code: i32,
+    /// Operating-system error behind this diagnostic, when there is one. The
+    /// traversal uses it to recognize the errors a directory entry race
+    /// produces, which `-ignore_readdir_race` hides.
+    raw_os_error: Option<i32>,
 }
 
 impl Diagnostic {
@@ -11,6 +15,7 @@ impl Diagnostic {
         Self {
             message: message.into(),
             exit_code,
+            raw_os_error: None,
         }
     }
 
@@ -20,6 +25,17 @@ impl Diagnostic {
 
     pub fn unsupported(message: impl Into<String>) -> Self {
         Self::new(message, 1)
+    }
+
+    pub(crate) fn with_raw_os_error(mut self, error: Option<i32>) -> Self {
+        self.raw_os_error = error;
+        self
+    }
+
+    /// A directory entry race: the entry was read but is gone (or stale) by the
+    /// time it is examined. Permission and I/O failures are not races.
+    pub(crate) fn is_readdir_race(&self) -> bool {
+        matches!(self.raw_os_error, Some(libc::ENOENT | libc::ESTALE))
     }
 }
 
