@@ -64,7 +64,7 @@ fn render_unix_ls_record(
     let group = name_or_id_bytes(group_name(group_id.clone())?.as_deref(), &group_id);
     let size = render_size_field(entry, follow_mode, kind)?;
     let timestamp = render_entry_timestamp(entry, follow_mode, context.evaluation_now()?)?;
-    let path = escape_ls_bytes(&display_bytes(&entry.path));
+    let path = escape_ls_name_bytes(&display_bytes(&entry.path));
     let suffix = render_symlink_suffix(entry, follow_mode)?;
 
     let mut out = format!("{inode:>9} {blocks_1k:>6} {mode} {links:>3} ").into_bytes();
@@ -182,7 +182,7 @@ fn render_symlink_suffix(
     match entry.active_link_target(follow_mode)? {
         Some(target) => {
             let mut bytes = b" -> ".to_vec();
-            bytes.extend_from_slice(&escape_ls_bytes(&display_os_bytes(target.as_os_str())));
+            bytes.extend_from_slice(&escape_ls_name_bytes(&display_os_bytes(target.as_os_str())));
             Ok(bytes)
         }
         None => Ok(Vec::new()),
@@ -300,6 +300,48 @@ fn format_device_field(major: u64, minor: u64) -> Vec<u8> {
     format!("{major}, {minor:>3}").into_bytes()
 }
 
+/// GNU `find -ls` escapes the printed name and the symlink target one byte at a
+/// time, with a rule that does not consult the locale: a letter escape for the
+/// backspace, tab, newline, form feed and carriage return, `\\` for a
+/// backslash, a backslash in front of a space or a double quote, printable
+/// ASCII as itself, and a three-digit octal `\NNN` for everything else. The
+/// bell and the vertical tab have no letter escape here, and a multibyte
+/// character is escaped byte by byte. That is `print_name_with_quoting` in
+/// findutils' `lib/listfile.c`.
+#[cfg(not(windows))]
+fn escape_ls_name_bytes(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len());
+    for byte in bytes {
+        // `"` and `\` are inside the printable range, so they come first.
+        match *byte {
+            b'\\' => out.extend_from_slice(br"\\"),
+            b'\n' => out.extend_from_slice(br"\n"),
+            b'\x08' => out.extend_from_slice(br"\b"),
+            b'\r' => out.extend_from_slice(br"\r"),
+            b'\t' => out.extend_from_slice(br"\t"),
+            b'\x0c' => out.extend_from_slice(br"\f"),
+            b' ' => out.extend_from_slice(br"\ "),
+            b'"' => out.extend_from_slice(br#"\""#),
+            0x21..=0x7e => out.push(*byte),
+            other => {
+                out.push(b'\\');
+                out.push(b'0' + (other >> 6));
+                out.push(b'0' + ((other >> 3) & 0x07));
+                out.push(b'0' + (other & 0x07));
+            }
+        }
+    }
+    out
+}
+
+/// The Windows record keeps its own printable-subset escaping, so the shared
+/// symlink suffix still renders the way it did before GNU parity landed.
+#[cfg(windows)]
+fn escape_ls_name_bytes(bytes: &[u8]) -> Vec<u8> {
+    escape_ls_bytes(bytes)
+}
+
+#[cfg(windows)]
 fn escape_ls_bytes(bytes: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(bytes.len());
     for byte in bytes {
@@ -320,9 +362,13 @@ fn escape_ls_bytes(bytes: &[u8]) -> Vec<u8> {
 mod tests {
     #[cfg(windows)]
     use super::allocation_kib_bytes;
+    #[cfg(windows)]
+    use super::escape_ls_bytes;
+    #[cfg(not(windows))]
+    use super::escape_ls_name_bytes;
     #[cfg(not(windows))]
     use super::format_device_field;
-    use super::{escape_ls_bytes, recent_window_contains, render_ls_time_column};
+    use super::{recent_window_contains, render_ls_time_column};
     #[cfg(not(windows))]
     use crate::account::PrincipalId;
     #[cfg(not(windows))]
@@ -357,7 +403,34 @@ mod tests {
     }
 
     #[test]
-    fn escape_ls_bytes_matches_the_gnu_subset_for_paths_and_targets() {
+    #[cfg(not(windows))]
+    fn escape_ls_name_bytes_matches_the_gnu_rule() {
+        // The named escapes, a space, a double quote, then a backslash pair:
+        // `|` separators keep the escapes readable.
+        assert_eq!(
+            escape_ls_name_bytes(b" a|\t|\n|\r|\x08|\x0c|\\\\|\"|\\"),
+            br#"\ a|\t|\n|\r|\b|\f|\\\\|\"|\\"#
+        );
+        // Control bytes without a C name are three-digit octal, not `\v`/`\a`.
+        assert_eq!(escape_ls_name_bytes(b"\x0b"), br"\013");
+        assert_eq!(escape_ls_name_bytes(b"\x07"), br"\007");
+        assert_eq!(escape_ls_name_bytes(b"\x7f"), br"\177");
+        assert_eq!(escape_ls_name_bytes(b"\x01"), br"\001");
+        // Every byte of a valid UTF-8 sequence is escaped on its own.
+        assert_eq!(
+            escape_ls_name_bytes(b"\xe6\x97\xa5.txt"),
+            br"\346\227\245.txt"
+        );
+        // Printable ASCII, including the shell metacharacters, is untouched.
+        assert_eq!(
+            escape_ls_name_bytes(b"!~-*?[]#&`|;$%^()'"),
+            b"!~-*?[]#&`|;$%^()'"
+        );
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn escape_ls_bytes_keeps_the_windows_printable_subset() {
         assert_eq!(
             escape_ls_bytes(b" a\tb\nc\rd\x0ce\\\\"),
             br"\ a\tb\nc\rd\fe\\\\"
