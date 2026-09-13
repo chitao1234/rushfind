@@ -13,7 +13,8 @@ fn injects_implicit_print_when_no_action_is_present() {
         RuntimeExpr::And(ref items) => {
             assert!(items.iter().any(|item| matches!(
                 item,
-                RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print))
+                RuntimeExpr::Action(action)
+                    if matches!(**action, RuntimeAction::Output(OutputAction::Print))
             )));
         }
         ref other => panic!("expected implicit print conjunction, got {other:?}"),
@@ -46,7 +47,8 @@ fn explicit_exec_actions_count_as_actions_for_implicit_print_suppression() {
     assert!(!matches!(plan.expr, RuntimeExpr::And(ref items)
         if items
             .iter()
-            .any(|item| matches!(item, RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print))))));
+            .any(|item| matches!(item, RuntimeExpr::Action(action)
+                if matches!(**action, RuntimeAction::Output(OutputAction::Print))))));
 }
 
 #[test]

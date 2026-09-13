@@ -202,31 +202,37 @@ fn find_not_inner(expr: &RuntimeExpr) -> Option<&RuntimeExpr> {
 fn expr_label(expr: &RuntimeExpr) -> &'static str {
     match expr {
         RuntimeExpr::Predicate(predicate) => predicate_label(predicate),
-        RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)) => "print",
-        RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print0)) => "print0",
-        RuntimeExpr::Action(RuntimeAction::Output(OutputAction::PrintX)) => "printx",
-        RuntimeExpr::Action(RuntimeAction::Printf(_)) => "printf",
-        RuntimeExpr::Action(RuntimeAction::FilePrint { terminator, .. }) => match terminator {
-            FileOutputTerminator::Newline => "fprint",
-            FileOutputTerminator::Nul => "fprint0",
-        },
-        RuntimeExpr::Action(RuntimeAction::FilePrintf { .. }) => "fprintf",
-        RuntimeExpr::Action(RuntimeAction::Ls) => "ls",
-        RuntimeExpr::Action(RuntimeAction::FileLs { .. }) => "fls",
-        RuntimeExpr::Action(RuntimeAction::Quit) => "quit",
-        RuntimeExpr::Action(RuntimeAction::Delete) => "delete",
-        RuntimeExpr::Action(RuntimeAction::Exit { .. }) => "exit",
-        RuntimeExpr::Action(RuntimeAction::ExecImmediate(_)) => "exec:semicolon",
-        RuntimeExpr::Action(RuntimeAction::ExecBatched(_)) => "exec:batch",
-        RuntimeExpr::Action(RuntimeAction::ExecPrompt(spec)) => match spec.semantics {
-            rushfind::exec::ExecSemantics::Normal => "ok:semicolon",
-            rushfind::exec::ExecSemantics::DirLocal => "okdir:semicolon",
-        },
+        RuntimeExpr::Action(action) => action_label(action),
         RuntimeExpr::And(_) => "and",
         RuntimeExpr::Sequence(_) => "sequence",
         RuntimeExpr::Or(_, _) => "or",
         RuntimeExpr::Not(_) => "not",
         RuntimeExpr::Barrier => "barrier",
+    }
+}
+
+fn action_label(action: &RuntimeAction) -> &'static str {
+    match action {
+        RuntimeAction::Output(OutputAction::Print) => "print",
+        RuntimeAction::Output(OutputAction::Print0) => "print0",
+        RuntimeAction::Output(OutputAction::PrintX) => "printx",
+        RuntimeAction::Printf(_) => "printf",
+        RuntimeAction::FilePrint { terminator, .. } => match terminator {
+            FileOutputTerminator::Newline => "fprint",
+            FileOutputTerminator::Nul => "fprint0",
+        },
+        RuntimeAction::FilePrintf { .. } => "fprintf",
+        RuntimeAction::Ls => "ls",
+        RuntimeAction::FileLs { .. } => "fls",
+        RuntimeAction::Quit => "quit",
+        RuntimeAction::Delete => "delete",
+        RuntimeAction::Exit { .. } => "exit",
+        RuntimeAction::ExecImmediate(_) => "exec:semicolon",
+        RuntimeAction::ExecBatched(_) => "exec:batch",
+        RuntimeAction::ExecPrompt(spec) => match spec.semantics {
+            rushfind::exec::ExecSemantics::Normal => "ok:semicolon",
+            rushfind::exec::ExecSemantics::DirLocal => "okdir:semicolon",
+        },
     }
 }
 

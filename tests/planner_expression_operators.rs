@@ -19,7 +19,7 @@ fn lowers_comma_expression_to_runtime_sequence() {
     ));
     assert!(matches!(
         &items[1],
-        RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print))
+        RuntimeExpr::Action(action) if matches!(**action, RuntimeAction::Output(OutputAction::Print))
     ));
 }
 
@@ -37,7 +37,8 @@ fn action_inside_sequence_suppresses_implicit_print() {
         .filter(|item| {
             matches!(
                 item,
-                RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print))
+                RuntimeExpr::Action(action)
+                    if matches!(**action, RuntimeAction::Output(OutputAction::Print))
             )
         })
         .count();

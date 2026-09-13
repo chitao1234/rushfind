@@ -214,7 +214,7 @@ mod tests {
             },
             startup_warnings: Vec::new(),
             file_outputs: Vec::new(),
-            expr: RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)),
+            expr: RuntimeExpr::action(RuntimeAction::Output(OutputAction::Print)),
             mode: ExecutionMode::OrderedSingle,
             runtime_policy: RuntimePolicy::derive(1, TraversalOrder::PreOrder, true),
             traversal_control: None,

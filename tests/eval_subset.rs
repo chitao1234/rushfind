@@ -26,7 +26,7 @@ fn matching_name_predicate_prints_the_entry_path() {
             )
             .unwrap(),
         )),
-        RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)),
+        RuntimeExpr::action(RuntimeAction::Output(OutputAction::Print)),
     ]);
     let mut sink = RecordingSink::default();
 

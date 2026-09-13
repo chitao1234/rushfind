@@ -12,13 +12,13 @@ pub(crate) struct SubtreeBarrierId(pub(crate) usize);
 
 #[derive(Debug, Clone)]
 pub(crate) struct ActionRequest {
-    action: RuntimeAction,
+    action: Arc<RuntimeAction>,
     entry: EntryContext,
     follow_mode: FollowMode,
 }
 
 impl ActionRequest {
-    pub(crate) fn new(action: RuntimeAction, entry: EntryContext, follow_mode: FollowMode) -> Self {
+    pub(crate) fn new(action: Arc<RuntimeAction>, entry: EntryContext, follow_mode: FollowMode) -> Self {
         Self {
             action,
             entry,
@@ -32,7 +32,7 @@ impl ActionRequest {
     }
 
     pub(crate) fn action(&self) -> &RuntimeAction {
-        &self.action
+        self.action.as_ref()
     }
 
     pub(crate) fn entry(&self) -> &EntryContext {
@@ -499,7 +499,7 @@ mod tests {
         let path = root.path().join("file.txt");
         fs::write(&path, "hello\n").unwrap();
         let entry = EntryContext::new(path.clone(), 0, true);
-        let expr = RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print));
+        let expr = RuntimeExpr::action(RuntimeAction::Output(OutputAction::Print));
 
         let step =
             begin_entry_eval(&expr, &entry, FollowMode::Physical, &EvalContext::default()).unwrap();
@@ -567,8 +567,8 @@ mod tests {
         fs::write(&path, "hello\n").unwrap();
         let entry = EntryContext::new(path, 0, true);
         let expr = RuntimeExpr::sequence(vec![
-            RuntimeExpr::Action(RuntimeAction::Quit),
-            RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)),
+            RuntimeExpr::action(RuntimeAction::Quit),
+            RuntimeExpr::action(RuntimeAction::Output(OutputAction::Print)),
         ]);
 
         let step =
@@ -606,7 +606,7 @@ mod tests {
         fs::write(&path, "hello\n").unwrap();
         let entry = EntryContext::new(path, 0, true);
         let expr = RuntimeExpr::and(vec![
-            RuntimeExpr::Action(RuntimeAction::ExecImmediate(compile_immediate_exec(
+            RuntimeExpr::action(RuntimeAction::ExecImmediate(compile_immediate_exec(
                 crate::exec::ExecSemantics::Normal,
                 &["false".into()],
             ))),
@@ -640,7 +640,7 @@ mod tests {
         fs::write(&path, "hello\n").unwrap();
         let entry = EntryContext::new(path, 0, true);
         let expr = RuntimeExpr::or(
-            RuntimeExpr::Action(RuntimeAction::Delete),
+            RuntimeExpr::action(RuntimeAction::Delete),
             RuntimeExpr::Predicate(RuntimePredicate::True),
         );
 
@@ -671,7 +671,7 @@ mod tests {
         fs::write(&path, "hello\n").unwrap();
         let entry = EntryContext::new(path, 0, true);
         let expr = RuntimeExpr::and(vec![
-            RuntimeExpr::Action(RuntimeAction::Quit),
+            RuntimeExpr::action(RuntimeAction::Quit),
             RuntimeExpr::Predicate(RuntimePredicate::False),
         ]);
 
@@ -698,9 +698,9 @@ mod tests {
         let entry = EntryContext::new(path.clone(), 0, true);
         let expr = RuntimeExpr::and(vec![
             RuntimeExpr::Predicate(RuntimePredicate::True),
-            RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)),
+            RuntimeExpr::action(RuntimeAction::Output(OutputAction::Print)),
             RuntimeExpr::Predicate(RuntimePredicate::True),
-            RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print0)),
+            RuntimeExpr::action(RuntimeAction::Output(OutputAction::Print0)),
         ]);
 
         let first =

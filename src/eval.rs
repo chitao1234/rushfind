@@ -536,7 +536,7 @@ mod tests {
             ),
         ]);
 
-        let action_expr = RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print));
+        let action_expr = RuntimeExpr::action(RuntimeAction::Output(OutputAction::Print));
         let barrier_expr = RuntimeExpr::and(vec![
             RuntimeExpr::Predicate(RuntimePredicate::True),
             RuntimeExpr::Barrier,
@@ -571,7 +571,7 @@ mod tests {
     fn general_evaluator_still_dispatches_action_expressions() {
         let entry = EntryContext::new(PathBuf::from("sample"), 0, true);
         let context = EvalContext::default();
-        let expr = RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print));
+        let expr = RuntimeExpr::action(RuntimeAction::Output(OutputAction::Print));
         let mut sink = RecordingSink::default();
 
         let outcome =
@@ -597,8 +597,8 @@ mod tests {
         let entry = EntryContext::new(PathBuf::from("sample"), 0, true);
         let context = EvalContext::default();
         let expr = RuntimeExpr::sequence(vec![
-            RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)),
-            RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)),
+            RuntimeExpr::action(RuntimeAction::Output(OutputAction::Print)),
+            RuntimeExpr::action(RuntimeAction::Output(OutputAction::Print)),
         ]);
         let mut sink = RecordingSink::default();
 
@@ -639,7 +639,7 @@ mod tests {
         fs::write(&path, "hello\n").unwrap();
         let entry = EntryContext::new(path, 0, true);
         let expr = RuntimeExpr::and(vec![
-            RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)),
+            RuntimeExpr::action(RuntimeAction::Output(OutputAction::Print)),
             RuntimeExpr::Predicate(RuntimePredicate::True),
         ]);
         let mut sink = ScriptedSink {
@@ -669,7 +669,7 @@ mod tests {
         fs::write(&path, "hello\n").unwrap();
         let entry = EntryContext::new(path, 0, true);
         let expr = RuntimeExpr::or(
-            RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)),
+            RuntimeExpr::action(RuntimeAction::Output(OutputAction::Print)),
             RuntimeExpr::Predicate(RuntimePredicate::True),
         );
         let mut sink = ScriptedSink {
@@ -698,7 +698,7 @@ mod tests {
         let path = root.path().join("file.txt");
         fs::write(&path, "hello\n").unwrap();
         let entry = EntryContext::new(path, 0, true);
-        let expr = RuntimeExpr::negate(RuntimeExpr::Action(RuntimeAction::Output(
+        let expr = RuntimeExpr::negate(RuntimeExpr::action(RuntimeAction::Output(
             OutputAction::Print,
         )));
         let mut sink = ScriptedSink {
@@ -921,7 +921,7 @@ mod tests {
 
         assert!(
             evaluate_with_context(
-                &RuntimeExpr::Action(RuntimeAction::Printf(program)),
+                &RuntimeExpr::action(RuntimeAction::Printf(program)),
                 &entry,
                 FollowMode::Physical,
                 &context,
@@ -944,7 +944,7 @@ mod tests {
         let mut sink = RecordingSink::default();
 
         let error = evaluate_with_context(
-            &RuntimeExpr::Action(RuntimeAction::Printf(program)),
+            &RuntimeExpr::action(RuntimeAction::Printf(program)),
             &entry,
             FollowMode::Physical,
             &EvalContext::default(),

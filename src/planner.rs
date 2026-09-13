@@ -93,11 +93,18 @@ pub enum RuntimeExpr {
     Sequence(Arc<[RuntimeExpr]>),
     Not(Arc<RuntimeExpr>),
     Predicate(RuntimePredicate),
-    Action(RuntimeAction),
+    /// The action is shared rather than owned: evaluation clones the expression
+    /// for every entry, and a `-printf` program or an `-exec` argv list is far
+    /// too expensive to deep-copy on that path.
+    Action(Arc<RuntimeAction>),
     Barrier,
 }
 
 impl RuntimeExpr {
+    pub fn action(action: RuntimeAction) -> Self {
+        Self::Action(Arc::new(action))
+    }
+
     pub fn and(items: Vec<Self>) -> Self {
         Self::And(items.into())
     }
@@ -300,7 +307,7 @@ pub(crate) fn plan_command_with_now_and_capabilities(
     } else {
         RuntimeExpr::and(vec![
             lowered,
-            RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)),
+            RuntimeExpr::action(RuntimeAction::Output(OutputAction::Print)),
         ])
     };
     if let Some(warning) = ctype_warning_for_plan(&state.ctype_profile, &expr) {
@@ -345,7 +352,7 @@ fn requires_ordered_execution(expr: &RuntimeExpr) -> bool {
             requires_ordered_execution(left) || requires_ordered_execution(right)
         }
         RuntimeExpr::Not(inner) => requires_ordered_execution(inner),
-        RuntimeExpr::Action(RuntimeAction::Exit { .. }) => true,
+        RuntimeExpr::Action(action) if matches!(**action, RuntimeAction::Exit { .. }) => true,
         RuntimeExpr::Action(_) | RuntimeExpr::Predicate(_) | RuntimeExpr::Barrier => false,
     }
 }
@@ -1136,7 +1143,7 @@ fn lower_action(
         | Action::PrintX
         | Action::Quit
         | Action::Delete) => lower_simple_action(action, state),
-        Action::Exit { status } => Ok(RuntimeExpr::Action(RuntimeAction::Exit { status })),
+        Action::Exit { status } => Ok(RuntimeExpr::action(RuntimeAction::Exit { status })),
         action @ (Action::Printf { .. } | Action::FPrintf { .. }) => {
             lower_printf_action(action, runtime, state, capabilities)
         }
@@ -1157,7 +1164,7 @@ fn lower_simple_action(
     action: Action,
     state: &mut PlanningState,
 ) -> Result<RuntimeExpr, Diagnostic> {
-    Ok(RuntimeExpr::Action(match action {
+    Ok(RuntimeExpr::action(match action {
         Action::Print => RuntimeAction::Output(OutputAction::Print),
         Action::Print0 => RuntimeAction::Output(OutputAction::Print0),
         Action::PrintX => RuntimeAction::Output(OutputAction::PrintX),
@@ -1179,11 +1186,11 @@ fn lower_printf_action(
     match action {
         Action::Printf { format } => {
             let program = compile_action_printf("-printf", format, runtime, state, capabilities)?;
-            Ok(RuntimeExpr::Action(RuntimeAction::Printf(program)))
+            Ok(RuntimeExpr::action(RuntimeAction::Printf(program)))
         }
         Action::FPrintf { path, format } => {
             let program = compile_action_printf("-fprintf", format, runtime, state, capabilities)?;
-            Ok(RuntimeExpr::Action(RuntimeAction::FilePrintf {
+            Ok(RuntimeExpr::action(RuntimeAction::FilePrintf {
                 destination: register_file_output(state, path),
                 program,
             }))
@@ -1215,21 +1222,21 @@ fn lower_output_action(
     capabilities: &PlatformCapabilities,
 ) -> Result<RuntimeExpr, Diagnostic> {
     match action {
-        Action::FPrint { path } => Ok(RuntimeExpr::Action(RuntimeAction::FilePrint {
+        Action::FPrint { path } => Ok(RuntimeExpr::action(RuntimeAction::FilePrint {
             destination: register_file_output(state, path),
             terminator: FileOutputTerminator::Newline,
         })),
-        Action::FPrint0 { path } => Ok(RuntimeExpr::Action(RuntimeAction::FilePrint {
+        Action::FPrint0 { path } => Ok(RuntimeExpr::action(RuntimeAction::FilePrint {
             destination: register_file_output(state, path),
             terminator: FileOutputTerminator::Nul,
         })),
         Action::Ls => {
             require_ls_mode_bits_if_needed(capabilities, state)?;
-            Ok(RuntimeExpr::Action(RuntimeAction::Ls))
+            Ok(RuntimeExpr::action(RuntimeAction::Ls))
         }
         Action::Fls { path } => {
             require_ls_mode_bits_if_needed(capabilities, state)?;
-            Ok(RuntimeExpr::Action(RuntimeAction::FileLs {
+            Ok(RuntimeExpr::action(RuntimeAction::FileLs {
                 destination: register_file_output(state, path),
             }))
         }
@@ -1282,7 +1289,7 @@ fn lower_exec_with_semantics(
     } else {
         RuntimeAction::ExecImmediate(compile_immediate_exec(semantics, &argv))
     };
-    Ok(RuntimeExpr::Action(action))
+    Ok(RuntimeExpr::action(action))
 }
 
 fn lower_prompt_action(
@@ -1295,7 +1302,7 @@ fn lower_prompt_action(
     runtime.messages_locale_required = true;
 
     match action {
-        Action::Ok { argv, batch: false } => Ok(RuntimeExpr::Action(RuntimeAction::ExecPrompt(
+        Action::Ok { argv, batch: false } => Ok(RuntimeExpr::action(RuntimeAction::ExecPrompt(
             compile_immediate_exec(ExecSemantics::Normal, &argv),
         ))),
         Action::Ok { batch: true, .. } => {
@@ -1303,7 +1310,7 @@ fn lower_prompt_action(
         }
         Action::OkDir { argv, batch: false } => {
             runtime.execdir_requires_safe_path = true;
-            Ok(RuntimeExpr::Action(RuntimeAction::ExecPrompt(
+            Ok(RuntimeExpr::action(RuntimeAction::ExecPrompt(
                 compile_immediate_exec(ExecSemantics::DirLocal, &argv),
             )))
         }
@@ -1553,7 +1560,7 @@ mod tests {
 
         assert!(matches!(
             plan.expr,
-            RuntimeExpr::Action(RuntimeAction::Printf(_))
+            RuntimeExpr::Action(action) if matches!(*action, RuntimeAction::Printf(_))
         ));
     }
 

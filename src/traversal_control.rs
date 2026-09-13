@@ -167,7 +167,7 @@ mod tests {
 
         let expr = RuntimeExpr::and(vec![
             RuntimeExpr::negate(RuntimeExpr::Predicate(RuntimePredicate::Prune)),
-            RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print0)),
+            RuntimeExpr::action(RuntimeAction::Output(OutputAction::Print0)),
         ]);
 
         let verdict = evaluate_for_traversal(&expr, &entry, FollowMode::Physical).unwrap();
@@ -243,7 +243,7 @@ mod tests {
         let entry = EntryContext::new(dir, 0, true);
 
         let expr = RuntimeExpr::and(vec![
-            RuntimeExpr::Action(RuntimeAction::ExecImmediate(compile_immediate_exec(
+            RuntimeExpr::action(RuntimeAction::ExecImmediate(compile_immediate_exec(
                 crate::exec::ExecSemantics::Normal,
                 &["echo".into(), "{}".into()],
             ))),

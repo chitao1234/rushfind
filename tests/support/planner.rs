@@ -103,7 +103,7 @@ where
             walk_actions(right, visit);
         }
         RuntimeExpr::Not(inner) => walk_actions(inner, visit),
-        RuntimeExpr::Action(action) => visit(action),
+        RuntimeExpr::Action(action) => visit(action.as_ref()),
         RuntimeExpr::Predicate(_) | RuntimeExpr::Barrier => {}
     }
 }

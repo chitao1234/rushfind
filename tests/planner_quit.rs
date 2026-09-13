@@ -9,7 +9,7 @@ fn quit_counts_as_an_explicit_action_for_implicit_print_suppression() {
     let plan = plan_command(parse_command(&argv(&[".", "-quit"])).unwrap(), 1).unwrap();
     assert!(matches!(
         plan.expr,
-        RuntimeExpr::Action(RuntimeAction::Quit)
+        RuntimeExpr::Action(action) if matches!(*action, RuntimeAction::Quit)
     ));
 }
 
