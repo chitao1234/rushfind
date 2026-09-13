@@ -27,6 +27,17 @@ Measured consequences (120k files in 120 directories, warm cache):
 | peak RSS, `-print` | 148 MB | 2 MB |
 | peak RSS, one 200k-entry directory | 274 MB | 33 MB |
 
+### Measured outcome
+
+After the implementation below, on the same fixtures:
+
+| observation | rfd `RUSHFIND_WORKERS=1` | GNU find |
+| --- | --- | --- |
+| peak RSS, `-print` (120k files) | 3.2 MB | 2.1 MB |
+| wall clock, `-print` (120k files) | 136 ms | 67 ms |
+| peak RSS, `-print` (one 200k-entry directory) | 40 MB | 33 MB |
+| wall clock, `-print` (one 200k-entry directory) | 296 ms | 1353 ms |
+
 Three defects follow from the same root cause:
 
 1. **No streaming.** Nothing reaches stdout until the traversal has finished,
