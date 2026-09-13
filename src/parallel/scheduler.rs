@@ -187,6 +187,7 @@ mod tests {
         ParallelTask, PostOrderResumeTask, PreOrderRootTask, SiblingChunkTask,
     };
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::thread;
     use std::time::Instant;
 
@@ -219,27 +220,35 @@ mod tests {
         let scheduler_for_publisher = scheduler.clone();
         let control_for_publisher = control.clone();
         let delay = Duration::from_millis(25);
+        // Stamped just before the push, so the assertion times the wake-up
+        // rather than however late a loaded machine ran the publisher.
+        let started = Instant::now();
+        let pushed_at = Arc::new(AtomicU64::new(0));
+        let pushed_at_for_publisher = pushed_at.clone();
         let publisher = thread::spawn(move || {
             thread::sleep(delay);
+            pushed_at_for_publisher.store(started.elapsed().as_nanos() as u64, Ordering::SeqCst);
             scheduler_for_publisher.push_inject(
                 ParallelTask::PreOrderRoot(PreOrderRootTask::for_path(PathBuf::from("child"), 1)),
                 control_for_publisher.as_ref(),
             );
         });
 
-        let started = Instant::now();
         let task = worker.pop_blocking(control.as_ref());
-        let waited = started.elapsed();
+        let woke_at = started.elapsed();
         publisher.join().unwrap();
         control.task_finished();
         control.task_finished();
 
         assert!(matches!(task, Some(ParallelTask::PreOrderRoot(_))));
         // The sleeper has to be woken by the enqueue, not by the backstop that
-        // guards against a missed wake-up.
+        // guards against a missed wake-up, so bound the wait that follows the
+        // push rather than the whole test.
+        let woke_after =
+            woke_at.saturating_sub(Duration::from_nanos(pushed_at.load(Ordering::SeqCst)));
         assert!(
-            waited < Duration::from_millis(75),
-            "woke after {waited:?}, which suggests the enqueue did not wake the sleeper"
+            woke_after < SLEEP_BACKSTOP / 2,
+            "woke {woke_after:?} after the enqueue, which suggests the push did not wake the sleeper"
         );
     }
 
