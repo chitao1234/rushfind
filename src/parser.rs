@@ -279,6 +279,8 @@ enum TimeAtom {
     AMin,
     CMin,
     MMin,
+    BTime,
+    BMin,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -487,6 +489,10 @@ fn classify_time_atom(token: Arg<'_>) -> Option<AtomKind> {
         Some(AtomKind::Time(TimeAtom::CMin))
     } else if token.matches("-mmin") {
         Some(AtomKind::Time(TimeAtom::MMin))
+    } else if token.matches("-Btime") {
+        Some(AtomKind::Time(TimeAtom::BTime))
+    } else if token.matches("-Bmin") {
+        Some(AtomKind::Time(TimeAtom::BMin))
     } else if token.matches("-newer") {
         Some(AtomKind::Newer(NewerAtom::Newer))
     } else if token.matches("-anewer") {
@@ -812,6 +818,8 @@ impl<'a> Parser<'a> {
             TimeAtom::AMin => self.parse_validated_time("-amin", Predicate::AMin)?,
             TimeAtom::CMin => self.parse_validated_time("-cmin", Predicate::CMin)?,
             TimeAtom::MMin => self.parse_validated_time("-mmin", Predicate::MMin)?,
+            TimeAtom::BTime => self.parse_validated_time("-Btime", Predicate::BTime)?,
+            TimeAtom::BMin => self.parse_validated_time("-Bmin", Predicate::BMin)?,
         };
         Ok(Expr::Predicate(predicate))
     }

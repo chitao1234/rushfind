@@ -169,6 +169,8 @@ pub enum Predicate {
     AMin(OsString),
     CMin(OsString),
     MMin(OsString),
+    BTime(OsString),
+    BMin(OsString),
     Newer(PathBuf),
     ANewer(PathBuf),
     CNewer(PathBuf),

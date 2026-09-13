@@ -669,6 +669,8 @@ fn lower_predicate(
         | Predicate::AMin(_)
         | Predicate::CMin(_)
         | Predicate::MMin(_)
+        | Predicate::BTime(_)
+        | Predicate::BMin(_)
         | Predicate::DayStart) => lower_temporal_predicate(predicate, state),
         predicate @ (Predicate::Newer(_)
         | Predicate::ANewer(_)
@@ -1004,6 +1006,8 @@ fn lower_temporal_predicate(
         Predicate::MMin(raw) => {
             lower_relative_minutes("-mmin", raw, TimestampKind::Modification, state)
         }
+        Predicate::BTime(raw) => lower_relative_time("-Btime", raw, TimestampKind::Birth, state),
+        Predicate::BMin(raw) => lower_relative_minutes("-Bmin", raw, TimestampKind::Birth, state),
         Predicate::DayStart => {
             state.temporal.daystart_active = true;
             Ok(RuntimeExpr::Barrier)
