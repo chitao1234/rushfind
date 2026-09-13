@@ -480,10 +480,8 @@ fn path_error(path: &Path, error: std::io::Error) -> Diagnostic {
         .with_raw_os_error(error.raw_os_error())
 }
 
-/// Reports a traversal diagnostic, honouring `-ignore_readdir_race`.
-///
-/// A path the user named on the command line is never treated as a race: it
-/// did not come from a directory listing, so its absence is a real error.
+/// Reports a traversal diagnostic, honouring `-ignore_readdir_race`. A path the
+/// user named on the command line is never a race: it came from no listing.
 fn report_traversal_error<F>(
     emit: &mut F,
     error: Diagnostic,

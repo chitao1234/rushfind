@@ -112,10 +112,9 @@ where
     })
 }
 
-/// Parallel ordered execution: the walker publishes sequence-numbered items
-/// into a bounded channel, evaluators process them, and a collector releases
-/// them in order. Both channels are bounded, so in-flight memory is a function
-/// of the worker count rather than of the tree size.
+/// Parallel ordered execution: the walker publishes sequence-numbered items,
+/// evaluators process them, and a collector releases them in order. Bounded
+/// channels keep in-flight memory a function of the worker count.
 fn run_ordered_streaming<W, E>(
     plan: &ExecutionPlan,
     stdout: &mut W,
@@ -134,11 +133,8 @@ where
     std::thread::scope(|scope| -> Result<RunSummary, Diagnostic> {
         let (work_tx, work_rx) = bounded::<(u64, OrderedItem)>(window);
         let (ready_tx, ready_rx) = bounded::<(u64, OrderedReady)>(window);
-        // One permit per sequence that may be in flight. The walker takes a
-        // permit before publishing and the collector returns one when it
-        // dispatches, so the number of published-but-undispatched entries can
-        // never exceed the window - which is what lets the release ring be
-        // sized to hold all of them.
+        // One permit per publishable sequence. Without it a stalled sequence
+        // lets the collector pull the whole tree into its release ring.
         let (permit_tx, permit_rx) = bounded::<()>(window);
         for _ in 0..window {
             permit_tx

@@ -134,12 +134,9 @@ impl OrderedPipelineControl {
     }
 }
 
-/// Sequence-numbered release queue for the ordered pipeline.
-///
-/// Items are released strictly in sequence order. The ring is sized so that it
-/// can hold every item that can be in flight (work channel + evaluators + ready
-/// channel), which is what keeps the collector from blocking on a full ring
-/// while the item it waits for is still upstream.
+/// Sequence-numbered release queue for the ordered pipeline; items are released
+/// strictly in order. The walker's permit window bounds what can be in flight,
+/// which is what lets the ring be sized for it.
 #[derive(Debug)]
 pub(crate) struct OrderedReadyQueue<T> {
     next_sequence: u64,

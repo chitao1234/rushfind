@@ -180,11 +180,8 @@ impl ActionSink for WorkerActionSink {
     }
 }
 
-/// Reports a traversal diagnostic, honouring `-ignore_readdir_race`.
-///
-/// Entries discovered through a directory listing can race with their removal;
-/// a path the user named on the command line cannot, so its absence is always
-/// reported.
+/// Reports a traversal diagnostic, honouring `-ignore_readdir_race`. Entries
+/// found through a listing can race with their removal; named paths cannot.
 fn report_traversal_error(
     sink: &mut WorkerActionSink,
     plan: &ExecutionPlan,

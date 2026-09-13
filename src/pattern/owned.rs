@@ -2,18 +2,13 @@ use super::ir::{ClassItem, GlobAtom, GlobClass, GlobProgram};
 use super::{GlobCaseMode, GlobSlashMode};
 use crate::diagnostics::Diagnostic;
 
-/// Greedy scan with a single backtrack point.
+/// Greedy scan with one backtrack point: on a mismatch the most recent `*`
+/// absorbs one more byte and the atoms after it are retried. Only that star
+/// needs revisiting, since an earlier one could have absorbed whatever it did,
+/// which is what keeps `*a*a*a*a*b` linear instead of exponential.
 ///
-/// When an atom fails, the most recent `*` absorbs one more byte and the atoms
-/// after it are retried from there. Remembering only that star is enough
-/// because an earlier `*` could have absorbed whatever this one did, so the
-/// latest one is the only position worth revisiting - and revisiting it instead
-/// of recursing over every split is what keeps a pattern such as
-/// `*a*a*a*a*a*a*a*b` linear rather than exponential.
-///
-/// The one case the backtrack cannot absorb is a separator in
-/// `GlobSlashMode::Pathname`, where a `*` never matches `/`: reaching one means
-/// no split of this candidate can match.
+/// A separator at the backtrack point ends the search in
+/// `GlobSlashMode::Pathname`, where `*` never matches `/`.
 pub(super) fn matches(
     program: &GlobProgram,
     case_mode: GlobCaseMode,

@@ -29,10 +29,8 @@ impl RuntimePolicy {
         host_parallelism: usize,
     ) -> Self {
         let requested_workers = workers.max(1);
-        // An ordered plan evaluates through a bounded pipeline whose collector
-        // commits results in traversal order; the requested worker count is
-        // what bounds that pipeline, so it must be honoured rather than
-        // replaced by the host's parallelism.
+        // The ordered pipeline is bounded by the requested worker count, so it
+        // must be honoured rather than replaced by the host's parallelism.
         let evaluation_workers = if ordered_mode {
             requested_workers.min(host_parallelism.max(1))
         } else {

@@ -4,10 +4,8 @@ fn main() {
     std::process::exit(rushfind::cli::run(std::env::args_os().skip(1)));
 }
 
-/// Rust ignores `SIGPIPE` for the whole process, which would turn the usual
-/// `rfd . -print | head` pipeline into a `failed to write stdout: Broken pipe`
-/// diagnostic plus a nonzero exit status. `find` exits quietly when its reader
-/// goes away, so restore the default disposition before doing any work.
+/// Rust ignores `SIGPIPE` process-wide, which turns `rfd . -print | head` into
+/// a broken-pipe diagnostic; `find` exits quietly when its reader goes away.
 #[cfg(unix)]
 fn restore_default_sigpipe() {
     // SAFETY: `signal` with `SIG_DFL` is async-signal-safe and is called before
