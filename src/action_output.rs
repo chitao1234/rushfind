@@ -14,18 +14,20 @@ pub(crate) enum RenderedAction {
 }
 
 pub(crate) fn render_output_bytes(action: OutputAction, entry: &EntryContext) -> Vec<u8> {
-    let path = crate::platform::path::display_bytes(&entry.path);
-    let mut bytes = if action == OutputAction::PrintX {
-        render_xargs_quoted(&path)
-    } else {
-        path
-    };
     match action {
-        OutputAction::Print => bytes.push(b'\n'),
-        OutputAction::Print0 => bytes.push(0),
-        OutputAction::PrintX => bytes.push(b'\n'),
+        OutputAction::Print => {
+            crate::platform::path::display_bytes_with_terminator(&entry.path, b'\n')
+        }
+        OutputAction::Print0 => {
+            crate::platform::path::display_bytes_with_terminator(&entry.path, 0)
+        }
+        OutputAction::PrintX => {
+            let path = crate::platform::path::display_bytes(&entry.path);
+            let mut bytes = render_xargs_quoted(&path);
+            bytes.push(b'\n');
+            bytes
+        }
     }
-    bytes
 }
 
 fn render_xargs_quoted(path: &[u8]) -> Vec<u8> {
@@ -46,12 +48,11 @@ pub(crate) fn render_file_print_bytes(
     entry: &EntryContext,
     terminator: FileOutputTerminator,
 ) -> Vec<u8> {
-    let mut bytes = crate::platform::path::display_bytes(&entry.path);
-    match terminator {
-        FileOutputTerminator::Newline => bytes.push(b'\n'),
-        FileOutputTerminator::Nul => bytes.push(0),
-    }
-    bytes
+    let byte = match terminator {
+        FileOutputTerminator::Newline => b'\n',
+        FileOutputTerminator::Nul => 0,
+    };
+    crate::platform::path::display_bytes_with_terminator(&entry.path, byte)
 }
 
 pub(crate) fn render_action_output(

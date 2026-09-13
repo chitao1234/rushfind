@@ -18,6 +18,27 @@ pub(crate) fn display_bytes(path: &Path) -> Vec<u8> {
     }
 }
 
+/// Display bytes with a terminator appended in the same allocation. Every
+/// `-print*` action needs exactly this shape, and building it in one pass keeps
+/// the hot output path down to a single allocation per record.
+pub(crate) fn display_bytes_with_terminator(path: &Path, terminator: u8) -> Vec<u8> {
+    #[cfg(unix)]
+    {
+        let raw = path.as_os_str().as_encoded_bytes();
+        let mut bytes = Vec::with_capacity(raw.len() + 1);
+        bytes.extend_from_slice(raw);
+        bytes.push(terminator);
+        bytes
+    }
+
+    #[cfg(windows)]
+    {
+        let mut bytes = display_bytes(path);
+        bytes.push(terminator);
+        bytes
+    }
+}
+
 pub(crate) fn display_os_bytes(value: &OsStr) -> Vec<u8> {
     display_bytes(Path::new(value))
 }
