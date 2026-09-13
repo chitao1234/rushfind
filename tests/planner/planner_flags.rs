@@ -35,7 +35,7 @@ fn lowers_supported_flags_operand_on_this_host() {
 }
 
 #[test]
-fn rejects_contradictory_flags_conditions() {
+fn contradictory_flags_conditions_are_unsatisfiable() {
     let contradictory_raw = if cfg!(windows) {
         "readonly,noreadonly"
     } else if cfg!(target_os = "linux") {
@@ -58,12 +58,43 @@ fn rejects_contradictory_flags_conditions() {
         return;
     };
 
-    let error = plan_command(
+    let plan = plan_command(
         parse_command(&argv(&[".", "-flags", contradictory_raw])).unwrap(),
         1,
     )
-    .unwrap_err();
-    assert!(error.message.contains("contradict"));
+    .unwrap();
+    assert!(contains_flags_predicate(&plan.expr));
+}
+
+#[cfg(not(windows))]
+#[test]
+fn accepts_bsd_flag_aliases_on_bsd_backends() {
+    if !cfg!(any(
+        target_os = "macos",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "dragonfly"
+    )) {
+        return;
+    }
+
+    for raw in [
+        "archived",
+        "opaque",
+        "sappnd",
+        "sappend",
+        "schg",
+        "schange",
+        "simmutable",
+        "uappnd",
+        "uappend",
+        "uchange",
+        "uimmutable",
+        "dump",
+    ] {
+        plan_command(parse_command(&argv(&[".", "-flags", raw])).unwrap(), 1).unwrap();
+    }
 }
 
 #[cfg(not(windows))]

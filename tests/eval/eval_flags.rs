@@ -29,3 +29,14 @@ fn flags_are_false_when_flag_bits_are_unknown() {
 
     assert!(!expr.matches(None));
 }
+
+#[test]
+fn exact_contradictory_conditions_are_false() {
+    let matcher = FileFlagsMatcher::new(
+        FlagMatchMode::Exact,
+        0b1,
+        vec![FlagCondition::set(0b1), FlagCondition::clear(0b1)],
+    );
+    assert!(!matcher.matches(Some(0)));
+    assert!(!matcher.matches(Some(1)));
+}

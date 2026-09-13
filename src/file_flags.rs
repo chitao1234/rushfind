@@ -42,14 +42,21 @@ pub struct FileFlagsMatcher {
     universe_mask: u64,
     mode: FlagMatchMode,
     conditions: Arc<[FlagCondition]>,
+    impossible_exact: bool,
 }
 
 impl FileFlagsMatcher {
     pub fn new(mode: FlagMatchMode, universe_mask: u64, conditions: Vec<FlagCondition>) -> Self {
+        let impossible_exact = conditions.iter().any(|condition| {
+            conditions.iter().any(|other| {
+                condition.bit == other.bit && condition.must_be_set != other.must_be_set
+            })
+        });
         Self {
             universe_mask,
             mode,
             conditions: conditions.into(),
+            impossible_exact,
         }
     }
 
@@ -57,6 +64,10 @@ impl FileFlagsMatcher {
         let Some(bits) = observed else {
             return false;
         };
+
+        if self.mode == FlagMatchMode::Exact && self.impossible_exact {
+            return false;
+        }
 
         match self.mode {
             FlagMatchMode::Exact => {
@@ -98,6 +109,9 @@ pub fn parse_flags_argument(
     }
 
     let universe_mask = specs.iter().fold(0u64, |mask, spec| mask | spec.bit);
+    if body == "none" && mode == FlagMatchMode::Exact {
+        return Ok(FileFlagsMatcher::new(mode, universe_mask, Vec::new()));
+    }
     let mut conditions = Vec::new();
 
     for token in body.split(',') {
@@ -111,8 +125,14 @@ pub fn parse_flags_argument(
             continue;
         }
 
-        let (name, must_be_set) = if token != "nodump" && token.starts_with("no") {
-            (&token[2..], false)
+        let (name, must_be_set) = if token == "dump" {
+            ("nodump", false)
+        } else if token.starts_with("no") {
+            let name = &token[2..];
+            if name == "dump" || name == "nodump" {
+                return Err(Diagnostic::new(format!("unknown -flags name `{token}`"), 1));
+            }
+            (name, false)
         } else {
             (token, true)
         };
@@ -131,18 +151,8 @@ fn push_condition(
     conditions: &mut Vec<FlagCondition>,
     bit: u64,
     must_be_set: bool,
-    label: &str,
+    _label: &str,
 ) -> Result<(), Diagnostic> {
-    if conditions
-        .iter()
-        .any(|condition| condition.bit == bit && condition.must_be_set != must_be_set)
-    {
-        return Err(Diagnostic::new(
-            format!("contradictory -flags conditions for `{label}`"),
-            1,
-        ));
-    }
-
     if !conditions
         .iter()
         .any(|condition| condition.bit == bit && condition.must_be_set == must_be_set)

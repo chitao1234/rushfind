@@ -87,12 +87,146 @@ pub(crate) static FLAG_SPECS: &[FlagSpec] = &[
         bit: libc::SF_ARCHIVED as u64,
     },
     FlagSpec {
+        name: "archived",
+        bit: libc::SF_ARCHIVED as u64,
+    },
+    FlagSpec {
         name: "nodump",
         bit: libc::UF_NODUMP as u64,
     },
     FlagSpec {
+        name: "opaque",
+        bit: libc::UF_OPAQUE as u64,
+    },
+    FlagSpec {
+        name: "sappnd",
+        bit: libc::SF_APPEND as u64,
+    },
+    FlagSpec {
+        name: "sappend",
+        bit: libc::SF_APPEND as u64,
+    },
+    FlagSpec {
+        name: "schg",
+        bit: libc::SF_IMMUTABLE as u64,
+    },
+    FlagSpec {
+        name: "schange",
+        bit: libc::SF_IMMUTABLE as u64,
+    },
+    FlagSpec {
+        name: "simmutable",
+        bit: libc::SF_IMMUTABLE as u64,
+    },
+    FlagSpec {
+        name: "uappnd",
+        bit: libc::UF_APPEND as u64,
+    },
+    FlagSpec {
+        name: "uappend",
+        bit: libc::UF_APPEND as u64,
+    },
+    FlagSpec {
         name: "uchg",
         bit: libc::UF_IMMUTABLE as u64,
+    },
+    FlagSpec {
+        name: "uchange",
+        bit: libc::UF_IMMUTABLE as u64,
+    },
+    FlagSpec {
+        name: "uimmutable",
+        bit: libc::UF_IMMUTABLE as u64,
+    },
+    #[cfg(any(target_os = "macos", target_os = "freebsd"))]
+    FlagSpec {
+        name: "hidden",
+        bit: libc::UF_HIDDEN as u64,
+    },
+    #[cfg(target_os = "freebsd")]
+    FlagSpec {
+        name: "offline",
+        bit: libc::UF_OFFLINE as u64,
+    },
+    #[cfg(target_os = "freebsd")]
+    FlagSpec {
+        name: "readonly",
+        bit: libc::UF_READONLY as u64,
+    },
+    #[cfg(target_os = "freebsd")]
+    FlagSpec {
+        name: "sparse",
+        bit: libc::UF_SPARSE as u64,
+    },
+    #[cfg(target_os = "freebsd")]
+    FlagSpec {
+        name: "system",
+        bit: libc::UF_SYSTEM as u64,
+    },
+    #[cfg(target_os = "freebsd")]
+    FlagSpec {
+        name: "reparse",
+        bit: libc::UF_REPARSE as u64,
+    },
+    #[cfg(target_os = "freebsd")]
+    FlagSpec {
+        name: "uarch",
+        bit: libc::UF_ARCHIVE as u64,
+    },
+    #[cfg(target_os = "freebsd")]
+    FlagSpec {
+        name: "uarchive",
+        bit: libc::UF_ARCHIVE as u64,
+    },
+    #[cfg(target_os = "freebsd")]
+    FlagSpec {
+        name: "uhidden",
+        bit: libc::UF_HIDDEN as u64,
+    },
+    #[cfg(target_os = "freebsd")]
+    FlagSpec {
+        name: "uoffline",
+        bit: libc::UF_OFFLINE as u64,
+    },
+    #[cfg(target_os = "freebsd")]
+    FlagSpec {
+        name: "urdonly",
+        bit: libc::UF_READONLY as u64,
+    },
+    #[cfg(target_os = "freebsd")]
+    FlagSpec {
+        name: "usparse",
+        bit: libc::UF_SPARSE as u64,
+    },
+    #[cfg(target_os = "freebsd")]
+    FlagSpec {
+        name: "usystem",
+        bit: libc::UF_SYSTEM as u64,
+    },
+    #[cfg(target_os = "freebsd")]
+    FlagSpec {
+        name: "ureparse",
+        bit: libc::UF_REPARSE as u64,
+    },
+    #[cfg(target_os = "freebsd")]
+    FlagSpec {
+        name: "uunlnk",
+        bit: libc::UF_NOUNLINK as u64,
+    },
+    #[cfg(target_os = "freebsd")]
+    FlagSpec {
+        name: "uunlink",
+        bit: libc::UF_NOUNLINK as u64,
+    },
+    #[cfg(target_os = "freebsd")]
+    FlagSpec {
+        name: "sunlnk",
+        bit: libc::SF_NOUNLINK as u64,
+    },
+    #[cfg(target_os = "freebsd")]
+    FlagSpec {
+        name: "sunlink",
+        bit: libc::SF_NOUNLINK as u64,
     },
 ];
 
