@@ -1,6 +1,10 @@
 pub fn fold_char(ch: char) -> char {
+    // The Unicode tables add nothing for ASCII, which is the common case here.
+    if ch.is_ascii() {
+        return ch.to_ascii_lowercase();
+    }
+
     match ch {
-        'A'..='Z' => ch.to_ascii_lowercase(),
         'À' => 'à',
         'Á' => 'á',
         'Â' => 'â',
@@ -43,4 +47,28 @@ pub fn fold_char(ch: char) -> char {
 
 pub fn chars_equal_folded(left: char, right: char) -> bool {
     fold_char(left) == fold_char(right)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{chars_equal_folded, fold_char};
+
+    #[test]
+    fn ascii_folds_without_consulting_the_unicode_tables() {
+        for (input, expected) in [
+            ('A', 'a'),
+            ('z', 'z'),
+            ('0', '0'),
+            ('/', '/'),
+            ('é', 'é'),
+            ('É', 'é'),
+            ('\u{212a}', 'k'),
+        ] {
+            assert_eq!(fold_char(input), expected, "{input:?}");
+        }
+
+        assert!(chars_equal_folded('K', 'k'));
+        assert!(chars_equal_folded('\u{212a}', 'k'));
+        assert!(!chars_equal_folded('k', 'g'));
+    }
 }

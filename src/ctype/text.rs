@@ -77,40 +77,41 @@ impl<'a> Iterator for Utf8Units<'a> {
     type Item = TextUnit<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index >= self.bytes.len() {
-            return None;
+        let start = self.index;
+        let first = *self.bytes.get(start)?;
+
+        // Validate only the sequence at this offset; checking the whole tail
+        // per character made decoding a candidate quadratic.
+        let end = (start + utf8_sequence_len(first)).min(self.bytes.len());
+        let decoded = std::str::from_utf8(&self.bytes[start..end])
+            .ok()
+            .and_then(|text| text.chars().next())
+            .filter(|ch| ch.len_utf8() == end - start);
+
+        if let Some(ch) = decoded {
+            self.index = end;
+            return Some(TextUnit::Char {
+                ch,
+                bytes: &self.bytes[start..end],
+            });
         }
 
-        let tail = &self.bytes[self.index..];
-        match std::str::from_utf8(tail) {
-            Ok(text) => {
-                let ch = text.chars().next().unwrap();
-                let start = self.index;
-                self.index += ch.len_utf8();
-                Some(TextUnit::Char {
-                    ch,
-                    bytes: &self.bytes[start..self.index],
-                })
-            }
-            Err(error) if error.valid_up_to() > 0 => {
-                let valid = &tail[..error.valid_up_to()];
-                let text = std::str::from_utf8(valid).unwrap();
-                let ch = text.chars().next().unwrap();
-                let start = self.index;
-                self.index += ch.len_utf8();
-                Some(TextUnit::Char {
-                    ch,
-                    bytes: &self.bytes[start..self.index],
-                })
-            }
-            Err(_) => {
-                let start = self.index;
-                self.index += 1;
-                Some(TextUnit::Invalid {
-                    bytes: &self.bytes[start..self.index],
-                })
-            }
-        }
+        self.index = start + 1;
+        Some(TextUnit::Invalid {
+            bytes: &self.bytes[start..start + 1],
+        })
+    }
+}
+
+/// Sequence length for this lead byte; anything that cannot lead a sequence
+/// reports one byte, so the caller records a single invalid unit.
+fn utf8_sequence_len(lead: u8) -> usize {
+    match lead {
+        0x00..=0x7f => 1,
+        0xc0..=0xdf => 2,
+        0xe0..=0xef => 3,
+        0xf0..=0xf7 => 4,
+        _ => 1,
     }
 }
 
@@ -156,5 +157,48 @@ impl<'a> Iterator for EncodingUnits<'a> {
         Some(TextUnit::Invalid {
             bytes: &self.bytes[start..self.index],
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TextUnit, decode_units};
+    use crate::ctype::{CtypeProfile, resolve_ctype_profile_from};
+
+    fn shape(profile: &CtypeProfile, bytes: &[u8]) -> Vec<String> {
+        decode_units(profile, bytes)
+            .map(|unit| match unit {
+                TextUnit::Char { ch, .. } => ch.to_string(),
+                TextUnit::Invalid { bytes } => format!("invalid({})", bytes.len()),
+            })
+            .collect()
+    }
+
+    /// The shapes that validating per-offset rather than per-tail can get wrong.
+    #[test]
+    fn utf8_decoding_splits_valid_and_invalid_sequences_the_same_way() {
+        let profile = resolve_ctype_profile_from([("LC_CTYPE", "en_US.UTF-8")]);
+        assert!(!profile.is_byte_c(), "the test needs an encoded profile");
+
+        for (bytes, expected) in [
+            (&b"ab"[..], vec!["a", "b"]),
+            ("\u{e9}".as_bytes(), vec!["\u{e9}"]),
+            ("\u{65e5}".as_bytes(), vec!["\u{65e5}"]),
+            ("\u{1f600}".as_bytes(), vec!["\u{1f600}"]),
+            ("a\u{e9}b".as_bytes(), vec!["a", "\u{e9}", "b"]),
+            // Truncated three-byte sequence: the lead and the stray
+            // continuation byte are each invalid on their own.
+            (&[0xe6, 0x97][..], vec!["invalid(1)", "invalid(1)"]),
+            // Overlong encoding and a surrogate are both rejected.
+            (&[0xc0, 0x80][..], vec!["invalid(1)", "invalid(1)"]),
+            (
+                &[0xed, 0xa0, 0x80][..],
+                vec!["invalid(1)", "invalid(1)", "invalid(1)"],
+            ),
+            (&[0x41, 0xff, 0x42][..], vec!["A", "invalid(1)", "B"]),
+            (&[0xf8, 0x88][..], vec!["invalid(1)", "invalid(1)"]),
+        ] {
+            assert_eq!(shape(&profile, bytes), expected, "{bytes:02x?}");
+        }
     }
 }

@@ -9,11 +9,9 @@ use std::sync::Arc;
 
 /// Compiles a pattern and matches one candidate against it.
 ///
-/// `pathname` selects pathname-mode matching, where the wildcards never match a
-/// `/`. No `find` predicate uses that mode: `-name` and `-path` are both
-/// compiled with literal slash handling, because GNU `find` lets `*` cross `/`
-/// in `-path` too. The flag is a matcher-level switch for callers that want
-/// matching confined to one path component.
+/// `pathname` selects pathname-mode matching, where wildcards do not match `/`.
+/// No predicate uses it: `-name` and `-path` both take literal slash handling,
+/// because GNU `find` lets `*` cross `/` in `-path` as well.
 pub fn matches_pattern(
     pattern: &OsStr,
     candidate: &OsStr,
@@ -138,6 +136,14 @@ impl CompiledGlob {
         let Some(encoded_program) = &self.inner.encoded_program else {
             return self.is_match(candidate);
         };
+
+        // Two ASCII sides decode to one unit per byte, so the byte matcher
+        // answers it already. The pattern must be ASCII too: a non-ASCII
+        // character can fold onto an ASCII one.
+        if encoded_program.is_ascii_only() && candidate.as_encoded_bytes().is_ascii() {
+            return self.is_match(candidate);
+        }
+
         Ok(encoded::matches(
             encoded_program,
             self.inner.case_mode,
@@ -151,9 +157,67 @@ impl CompiledGlob {
 #[cfg(all(test, unix))]
 mod tests {
     use super::{CompiledGlob, GlobCaseMode, GlobSlashMode, matches_pattern};
+    use crate::ctype::resolve_ctype_profile_from;
     use std::ffi::{OsStr, OsString};
     #[cfg(unix)]
     use std::os::unix::ffi::OsStringExt;
+
+    /// The byte matcher may only stand in while the pattern is ASCII too: a
+    /// non-ASCII character can fold onto an ASCII one.
+    #[test]
+    fn byte_matcher_does_not_stand_in_for_non_ascii_patterns() {
+        let profile = resolve_ctype_profile_from([("LC_CTYPE", "en_US.UTF-8")]);
+        assert!(!profile.is_byte_c(), "the test needs an encoded profile");
+
+        // KELVIN SIGN lowercases to `k`, so this pattern matches `kilo` in a
+        // UTF-8 locale, while byte folding cannot see the equivalence.
+        let glob = CompiledGlob::compile_with_ctype(
+            "-iname",
+            OsStr::new("\u{212a}*"),
+            GlobCaseMode::Insensitive,
+            GlobSlashMode::Literal,
+            &profile,
+        )
+        .unwrap();
+
+        assert!(
+            glob.is_match_with_ctype(OsStr::new("kilo"), &profile)
+                .unwrap()
+        );
+        assert!(!glob.is_match(OsStr::new("kilo")).unwrap());
+    }
+
+    /// While both sides are ASCII the two matchers have to agree.
+    #[test]
+    fn ascii_candidates_get_the_same_answer_from_either_matcher() {
+        let profile = resolve_ctype_profile_from([("LC_CTYPE", "en_US.UTF-8")]);
+
+        for (pattern, candidate) in [
+            ("*b", "aab"),
+            ("a?c", "abc"),
+            ("[!a]*", "bc"),
+            ("a*", "a"),
+            ("*", ""),
+            ("*", "anything"),
+            ("[a-c]*", "bzz"),
+        ] {
+            let glob = CompiledGlob::compile_with_ctype(
+                "-iname",
+                OsStr::new(pattern),
+                GlobCaseMode::Insensitive,
+                GlobSlashMode::Literal,
+                &profile,
+            )
+            .unwrap();
+
+            assert_eq!(
+                glob.is_match_with_ctype(OsStr::new(candidate), &profile)
+                    .unwrap(),
+                glob.is_match(OsStr::new(candidate)).unwrap(),
+                "{pattern:?} against {candidate:?}"
+            );
+        }
+    }
 
     #[test]
     fn matches_pattern_uses_owned_case_insensitive_semantics() {
@@ -202,10 +266,8 @@ mod tests {
         assert!(!glob.is_match(candidate.as_os_str()).unwrap());
     }
 
-    /// Many stars used to cost exponential time here: the recursive matcher
-    /// re-entered the pattern from every split point, so a 20k-character
-    /// candidate never finished. Terminating at all is half the assertion; the
-    /// other half is that the greedy backtrack still reaches the right answer.
+    /// These used to cost exponential time, so terminating at all is half the
+    /// assertion; the other half is the answer.
     #[test]
     fn many_stars_terminate_and_match_correctly() {
         let glob = CompiledGlob::compile(
@@ -226,9 +288,7 @@ mod tests {
         );
     }
 
-    /// Pathname mode is the branch the greedy backtrack cannot absorb: a `*`
-    /// never takes a separator, so a separator at the backtrack point ends the
-    /// search. The expectations are `fnmatch(3)` with `FNM_PATHNAME`.
+    /// Expectations are `fnmatch(3)` with `FNM_PATHNAME`.
     #[test]
     fn pathname_mode_backtrack_stops_at_a_separator() {
         let deep = "a".repeat(20);

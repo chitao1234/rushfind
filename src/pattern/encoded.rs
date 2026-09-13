@@ -8,6 +8,9 @@ use crate::diagnostics::Diagnostic;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct EncodedGlobProgram {
     atoms: Vec<EncodedAtom>,
+    /// True when every literal and class member is ASCII, so an ASCII candidate
+    /// decodes to exactly its bytes and the byte matcher can answer for it.
+    ascii_only: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,7 +77,23 @@ pub(super) fn compile_pattern(
         }
     }
 
-    Ok(EncodedGlobProgram { atoms })
+    let ascii_only = atoms.iter().all(|atom| match atom {
+        EncodedAtom::Literal(ch) => ch.is_ascii(),
+        EncodedAtom::AnyChar | EncodedAtom::AnySequence => true,
+        EncodedAtom::Class(class) => class.items.iter().all(|item| match item {
+            EncodedClassItem::Literal(ch) => ch.is_ascii(),
+            EncodedClassItem::Range(start, end) => start.is_ascii() && end.is_ascii(),
+            EncodedClassItem::Posix(_) => true,
+        }),
+    });
+
+    Ok(EncodedGlobProgram { atoms, ascii_only })
+}
+
+impl EncodedGlobProgram {
+    pub(super) fn is_ascii_only(&self) -> bool {
+        self.ascii_only
+    }
 }
 
 fn try_parse_class(
@@ -213,9 +232,7 @@ fn consume_class_item(
     }
 }
 
-/// Greedy scan with a single backtrack point; see the byte-level matcher in
-/// `owned.rs` for why one backtrack point is sufficient and why
-/// `GlobSlashMode::Pathname` stops the backtrack at a separator.
+/// Greedy scan with one backtrack point, matching `owned.rs` unit for unit.
 pub(super) fn matches(
     program: &EncodedGlobProgram,
     case_mode: GlobCaseMode,
