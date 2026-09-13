@@ -81,18 +81,18 @@ command-line symlinks), `-X`, `-printx`, `-rm`, `-exit [STATUS]`.
 
 ## Deferred, with rationale
 
-### Encoded matching still decodes a candidate per evaluation
+### Encoded matching still allocates for non-ASCII candidates
 
-`pattern/encoded.rs::matches` materializes the candidate's text units
-(`decode_units(..).collect::<Vec<_>>()`, plus the boxed iterator that
-`decode_units` returns) on every call. That is why `-iname` under a UTF-8
-locale costs about 15ms more than `-name` over 120k files (86.5ms against
-71.5ms); the byte path allocates nothing.
+An ASCII pattern against an ASCII candidate goes through the byte matcher, so a
+UTF-8 locale costs what the C locale costs for them (120k names, `-ipath`:
+73.0ms against 72.6ms). A candidate with any non-ASCII byte still materializes
+its text units, plus the boxed iterator `decode_units` returns, on every
+evaluation - about 0.4us per name. On 4000 names of 33 CJK characters,
+`-ipath '*/日本語*'` takes 8.2ms where GNU find takes 4.4ms.
 
-Removing it means indexing the matcher by byte offset and decoding units on
-demand, which rewrites the scan core that the current differential coverage was
-built against, so it wants its own change with the same fnmatch-based fuzzing
-this one got. The absolute cost is small and only shows up outside the C locale.
+Removing those two allocations means indexing the matcher by byte offset, which
+rewrites the scan core the differential coverage was built against. The
+remaining cost is small and confined to non-ASCII names.
 
 ### `-mtime`-family second boundary
 
