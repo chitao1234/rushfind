@@ -412,6 +412,13 @@ pub(crate) fn evaluate_predicate(
             entry.active_ctime(follow_mode)?,
         )),
         RuntimePredicate::RelativeTime(matcher) => {
+            if matcher.kind == TimestampKind::Birth {
+                return match entry.active_birth_time(follow_mode)? {
+                    Some(actual) => matcher.matches_timestamp_checked(actual),
+                    None => Ok(false),
+                };
+            }
+
             matcher.matches_timestamp_checked(entry_timestamp(entry, follow_mode, matcher.kind)?)
         }
         RuntimePredicate::Newer(matcher) => matches_newer(entry, follow_mode, *matcher),
@@ -446,7 +453,11 @@ fn entry_timestamp(
 ) -> Result<Timestamp, Diagnostic> {
     match kind {
         TimestampKind::Access => entry.active_atime(follow_mode),
-        TimestampKind::Birth => unreachable!("birth timestamps are handled separately"),
+        // Callers resolve birth times through `active_birth_time`, which also
+        // covers hosts that report no birth time at all.
+        TimestampKind::Birth => entry.active_birth_time(follow_mode)?.ok_or_else(|| {
+            crate::platform::filesystem::missing_field("birth time", &entry.path)
+        }),
         TimestampKind::Change => entry.active_ctime(follow_mode),
         TimestampKind::Modification => entry.active_mtime(follow_mode),
     }

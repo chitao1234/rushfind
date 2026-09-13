@@ -59,19 +59,40 @@ where
             let plan = plan.clone();
             let eval_context = eval_context.clone();
             let result_tx = result_tx.clone();
+            let panic_scheduler = scheduler.clone();
+            let panic_control = control.clone();
+            let panic_tx = result_tx.clone();
             workers.push(scope.spawn(move || {
-                run_parallel_worker(
-                    worker_handle,
-                    scheduler,
-                    barriers,
-                    control,
-                    broker,
-                    file_outputs,
-                    prompt,
-                    plan,
-                    eval_context,
-                    result_tx,
-                )
+                // A panicking worker would otherwise leave its task counted as
+                // outstanding, and every other worker sleeps waiting for work
+                // that will never arrive.
+                let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    run_parallel_worker(
+                        worker_handle,
+                        scheduler,
+                        barriers,
+                        control,
+                        broker,
+                        file_outputs,
+                        prompt,
+                        plan,
+                        eval_context,
+                        result_tx,
+                    )
+                }));
+
+                match ran {
+                    Ok(result) => result,
+                    Err(_) => {
+                        panic_control.request_fatal_stop();
+                        panic_scheduler.notify_sleepers();
+                        let _ = panic_tx.send(Err(Diagnostic::new(
+                            "internal error: parallel worker panicked",
+                            1,
+                        )));
+                        Ok(())
+                    }
+                }
             }));
         }
         drop(result_tx);
