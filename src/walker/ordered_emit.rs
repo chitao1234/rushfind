@@ -3,10 +3,7 @@ use crate::entry::EntryContext;
 
 use super::{OrderedWalkDirective, WalkEvent};
 
-pub(super) fn emit_ordered_entry<F>(
-    emit: &mut F,
-    entry: EntryContext,
-) -> Result<bool, Diagnostic>
+pub(super) fn emit_ordered_entry<F>(emit: &mut F, entry: EntryContext) -> Result<bool, Diagnostic>
 where
     F: FnMut(WalkEvent) -> Result<OrderedWalkDirective, Diagnostic>,
 {

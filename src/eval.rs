@@ -455,9 +455,9 @@ fn entry_timestamp(
         TimestampKind::Access => entry.active_atime(follow_mode),
         // Callers resolve birth times through `active_birth_time`, which also
         // covers hosts that report no birth time at all.
-        TimestampKind::Birth => entry.active_birth_time(follow_mode)?.ok_or_else(|| {
-            crate::platform::filesystem::missing_field("birth time", &entry.path)
-        }),
+        TimestampKind::Birth => entry
+            .active_birth_time(follow_mode)?
+            .ok_or_else(|| crate::platform::filesystem::missing_field("birth time", &entry.path)),
         TimestampKind::Change => entry.active_ctime(follow_mode),
         TimestampKind::Modification => entry.active_mtime(follow_mode),
     }

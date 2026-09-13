@@ -603,7 +603,12 @@ fn run_postorder_pending_root(
     let entry = match run.backend.load_entry(&pending) {
         Ok(entry) => entry,
         Err(error) => {
-            return emit_postorder_runtime_error(error, !pending.is_command_line_root, notify_parent, context);
+            return emit_postorder_runtime_error(
+                error,
+                !pending.is_command_line_root,
+                notify_parent,
+                context,
+            );
         }
     };
 
@@ -628,7 +633,12 @@ fn run_postorder_pending_root(
     } {
         Ok(control) => control,
         Err(error) => {
-            return emit_postorder_runtime_error(error, !pending.is_command_line_root, notify_parent, context);
+            return emit_postorder_runtime_error(
+                error,
+                !pending.is_command_line_root,
+                notify_parent,
+                context,
+            );
         }
     };
 
@@ -638,7 +648,12 @@ fn run_postorder_pending_root(
     {
         Ok(identity) => identity.is_some(),
         Err(error) => {
-            return emit_postorder_runtime_error(error, !pending.is_command_line_root, notify_parent, context);
+            return emit_postorder_runtime_error(
+                error,
+                !pending.is_command_line_root,
+                notify_parent,
+                context,
+            );
         }
     };
 
@@ -656,7 +671,12 @@ fn run_postorder_pending_root(
     ) {
         Ok(result) => result,
         Err(error) => {
-            return emit_postorder_runtime_error(error, !pending.is_command_line_root, notify_parent, context);
+            return emit_postorder_runtime_error(
+                error,
+                !pending.is_command_line_root,
+                notify_parent,
+                context,
+            );
         }
     };
 
@@ -837,10 +857,7 @@ fn emit_postorder_runtime_error(
     notify_parent: Option<SubtreeBarrierId>,
     context: &mut PostorderRunContext<'_, '_>,
 ) -> Result<RuntimeStatus, Diagnostic> {
-    if !(raced
-        && context.run.plan.traversal.ignore_readdir_race
-        && error.is_readdir_race())
-    {
+    if !(raced && context.run.plan.traversal.ignore_readdir_race && error.is_readdir_race()) {
         context.sink.emit_runtime_error(error)?;
         *context.had_runtime_errors = true;
     }

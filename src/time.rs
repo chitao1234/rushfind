@@ -1018,18 +1018,12 @@ mod tests {
             )
         };
 
-        let exact = matcher(
-            TimeComparison::Exactly("3600".parse().unwrap()),
-            false,
-        );
+        let exact = matcher(TimeComparison::Exactly("3600".parse().unwrap()), false);
         assert!(exact.matches_timestamp(at(3600)));
         assert!(!exact.matches_timestamp(at(3599)));
         assert!(!exact.matches_timestamp(at(3601)));
 
-        let greater = matcher(
-            TimeComparison::GreaterThan("3600".parse().unwrap()),
-            false,
-        );
+        let greater = matcher(TimeComparison::GreaterThan("3600".parse().unwrap()), false);
         assert!(greater.matches_timestamp(at(3601)));
         assert!(!greater.matches_timestamp(at(3600)));
 

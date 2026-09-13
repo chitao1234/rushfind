@@ -18,7 +18,11 @@ pub(crate) struct ActionRequest {
 }
 
 impl ActionRequest {
-    pub(crate) fn new(action: Arc<RuntimeAction>, entry: EntryContext, follow_mode: FollowMode) -> Self {
+    pub(crate) fn new(
+        action: Arc<RuntimeAction>,
+        entry: EntryContext,
+        follow_mode: FollowMode,
+    ) -> Self {
         Self {
             action,
             entry,

@@ -13,7 +13,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tempfile::tempdir;
 
 fn run(args: &[OsString]) -> Output {
-    rushfind_command_with_workers(1).args(args).output().unwrap()
+    rushfind_command_with_workers(1)
+        .args(args)
+        .output()
+        .unwrap()
 }
 
 fn names(output: &Output) -> Vec<String> {
@@ -125,8 +128,14 @@ fn malformed_durations_are_diagnostics_not_wildcards() {
         ("1h3", "invalid numeric argument for `-mtime`"),
         ("1.5h", "invalid numeric argument for `-mtime`"),
         ("h", "invalid numeric argument for `-mtime`"),
-        ("99999999999999999999s", "invalid numeric argument for `-mtime`"),
-        ("1h99999999999999999999s", "invalid numeric argument for `-mtime`"),
+        (
+            "99999999999999999999s",
+            "invalid numeric argument for `-mtime`",
+        ),
+        (
+            "1h99999999999999999999s",
+            "invalid numeric argument for `-mtime`",
+        ),
     ] {
         let output = run(&[
             path_arg(root.path()),
@@ -153,7 +162,9 @@ fn unit_durations_stay_out_of_the_minute_primaries() {
     ]);
 
     assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid numeric argument for `-mmin`"));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("invalid numeric argument for `-mmin`")
+    );
 }
 
 /// NetBSD's `-since DATE` is `-newermt DATE`, and the access and change forms
@@ -163,8 +174,11 @@ fn netbsd_since_aliases_match_their_newerxy_spellings() {
     let root = tempdir().unwrap();
     fs::write(root.path().join("file"), "content\n").unwrap();
 
-    for (alias, newer) in [("-since", "-newermt"), ("-asince", "-newerat"), ("-csince", "-newerct")]
-    {
+    for (alias, newer) in [
+        ("-since", "-newermt"),
+        ("-asince", "-newerat"),
+        ("-csince", "-newerct"),
+    ] {
         for date in ["2020-01-01", "@1600000000", "2999-01-01"] {
             let aliased = run(&[
                 path_arg(root.path()),
@@ -194,7 +208,10 @@ fn birth_time_predicates_find_fresh_files() {
     let path = root.path().join("file");
     fs::write(&path, "content\n").unwrap();
 
-    if rushfind::birth::read_birth_time(&path, false).unwrap().is_none() {
+    if rushfind::birth::read_birth_time(&path, false)
+        .unwrap()
+        .is_none()
+    {
         eprintln!("host reports no birth time; skipping");
         return;
     }
@@ -206,7 +223,10 @@ fn birth_time_predicates_find_fresh_files() {
         OsString::from("-Bmin"),
         OsString::from("-1"),
     ]);
-    assert_eq!(names(&matched), vec![format!("{}/file", root.path().display())]);
+    assert_eq!(
+        names(&matched),
+        vec![format!("{}/file", root.path().display())]
+    );
 
     let unmatched = run(&[
         path_arg(root.path()),
@@ -252,8 +272,12 @@ fn unit_durations_agree_with_the_platforms_bsd_find() {
     let path = root.path().join("file");
     fs::write(&path, "content\n").unwrap();
 
-    for spec in ["1s", "1m", "1h", "2h", "1h30m", "1d", "1w", "+1h", "-1h", "+1d", "-1d"] {
-        for age in [5, 55, 65, 3594, 3607, 5330, 5470, 86000, 86800, 600000, 610000] {
+    for spec in [
+        "1s", "1m", "1h", "2h", "1h30m", "1d", "1w", "+1h", "-1h", "+1d", "-1d",
+    ] {
+        for age in [
+            5, 55, 65, 3594, 3607, 5330, 5470, 86000, 86800, 600000, 610000,
+        ] {
             set_age(&path, age);
 
             let theirs = Command::new(&bsd_find)

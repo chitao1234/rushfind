@@ -189,7 +189,14 @@ where
                 )
             },
             |event| {
-                publish_ordered_event(event, plan, &work_tx, &permit_rx, &control, &mut next_sequence)
+                publish_ordered_event(
+                    event,
+                    plan,
+                    &work_tx,
+                    &permit_rx,
+                    &control,
+                    &mut next_sequence,
+                )
             },
         );
         drop(work_tx);
@@ -295,8 +302,7 @@ where
     W: Write,
     E: Write,
 {
-    let mut sink =
-        OrderedActionSink::with_prompt(stdout, stderr, &plan.file_outputs, prompt)?;
+    let mut sink = OrderedActionSink::with_prompt(stdout, stderr, &plan.file_outputs, prompt)?;
     // The window bounds how many entries can be published but not dispatched,
     // so the ring only has to hold that many.
     let mut queue = OrderedReadyQueue::with_capacity(window);

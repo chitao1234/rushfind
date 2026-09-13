@@ -252,12 +252,7 @@ where
         let (children, diagnostics) = match backend.read_children(&pending.path) {
             Ok(result) => result,
             Err(error) => {
-                report_traversal_error(
-                    &mut emit,
-                    error,
-                    options,
-                    !pending.is_command_line_root,
-                )?;
+                report_traversal_error(&mut emit, error, options, !pending.is_command_line_root)?;
                 if emit_postorder_completion_if_needed(
                     &mut emit,
                     options.order,

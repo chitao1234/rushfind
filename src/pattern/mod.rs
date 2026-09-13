@@ -278,7 +278,11 @@ mod tests {
         )
         .unwrap();
 
-        assert!(!glob.is_match(OsString::from_vec(vec![b'a'; 20_000]).as_os_str()).unwrap());
+        assert!(
+            !glob
+                .is_match(OsString::from_vec(vec![b'a'; 20_000]).as_os_str())
+                .unwrap()
+        );
 
         let mut matching = vec![b'a'; 20_000];
         matching.push(b'b');

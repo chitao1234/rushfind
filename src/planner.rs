@@ -28,9 +28,8 @@ use crate::runtime_policy::{RuntimePolicy, build_traversal_control_plan};
 use crate::size::{SizeMatcher, parse_size_argument};
 use crate::time::{
     NewerMatcher, RelativeTimeMatcher, RelativeTimeUnit, Timestamp, TimestampKind, UsedMatcher,
-    flag_accepts_bsd_duration, local_day_start, parse_bsd_duration,
-    parse_relative_time_argument, parse_time_comparison,
-    resolve_reference_matcher,
+    flag_accepts_bsd_duration, local_day_start, parse_bsd_duration, parse_relative_time_argument,
+    parse_time_comparison, resolve_reference_matcher,
 };
 use std::collections::BTreeMap;
 use std::ffi::OsString;
