@@ -12,7 +12,7 @@ use std::collections::BTreeSet;
 use std::ffi::CString;
 use std::ffi::OsString;
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 #[cfg(not(any(target_os = "solaris", target_os = "illumos")))]
 use std::mem::MaybeUninit;
 #[cfg(unix)]
@@ -158,11 +158,22 @@ pub fn cargo_bin_output_with_env_timeout(
         .spawn()
         .unwrap();
 
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let stdout_reader = std::thread::spawn(|| read_pipe(stdout));
+    let stderr_reader = std::thread::spawn(|| read_pipe(stderr));
+
     match child.wait_timeout(timeout).unwrap() {
-        Some(_) => child.wait_with_output().unwrap(),
+        Some(status) => Output {
+            status,
+            stdout: stdout_reader.join().unwrap(),
+            stderr: stderr_reader.join().unwrap(),
+        },
         None => {
             child.kill().unwrap();
             let _ = child.wait();
+            let _ = stdout_reader.join();
+            let _ = stderr_reader.join();
             panic!("rfd did not exit within {:?}", timeout);
         }
     }
@@ -183,15 +194,26 @@ pub fn cargo_bin_output_with_input_timeout(
 
     let mut child = command.spawn().unwrap();
     if !input.is_empty() {
-        child.stdin.as_mut().unwrap().write_all(input).unwrap();
+        let _ = child.stdin.as_mut().unwrap().write_all(input);
     }
     drop(child.stdin.take());
 
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let stdout_reader = std::thread::spawn(|| read_pipe(stdout));
+    let stderr_reader = std::thread::spawn(|| read_pipe(stderr));
+
     match child.wait_timeout(timeout).unwrap() {
-        Some(_) => child.wait_with_output().unwrap(),
+        Some(status) => Output {
+            status,
+            stdout: stdout_reader.join().unwrap(),
+            stderr: stderr_reader.join().unwrap(),
+        },
         None => {
             child.kill().unwrap();
             let _ = child.wait();
+            let _ = stdout_reader.join();
+            let _ = stderr_reader.join();
             panic!("rfd did not exit within {:?}", timeout);
         }
     }
@@ -216,18 +238,35 @@ pub fn cargo_bin_output_with_env_and_input_timeout(
 
     let mut child = command.spawn().unwrap();
     if !input.is_empty() {
-        child.stdin.as_mut().unwrap().write_all(input).unwrap();
+        let _ = child.stdin.as_mut().unwrap().write_all(input);
     }
     drop(child.stdin.take());
 
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let stdout_reader = std::thread::spawn(|| read_pipe(stdout));
+    let stderr_reader = std::thread::spawn(|| read_pipe(stderr));
+
     match child.wait_timeout(timeout).unwrap() {
-        Some(_) => child.wait_with_output().unwrap(),
+        Some(status) => Output {
+            status,
+            stdout: stdout_reader.join().unwrap(),
+            stderr: stderr_reader.join().unwrap(),
+        },
         None => {
             child.kill().unwrap();
             let _ = child.wait();
+            let _ = stdout_reader.join();
+            let _ = stderr_reader.join();
             panic!("rfd did not exit within {:?}", timeout);
         }
     }
+}
+
+fn read_pipe(mut pipe: impl Read) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    let _ = pipe.read_to_end(&mut bytes);
+    bytes
 }
 
 pub fn first_available_locale(candidates: &[&str]) -> Option<String> {
