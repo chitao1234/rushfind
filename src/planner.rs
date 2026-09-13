@@ -40,21 +40,6 @@ use std::time::SystemTime;
 
 pub use crate::platform::filesystem::ReparseTypeClass;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ParallelExecutionPolicy {
-    PreOrderFastPath,
-    PostOrderSubtree,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct ActionProfile {
-    pub has_local_immediate: bool,
-    pub has_local_batched: bool,
-    pub has_global_control: bool,
-    pub has_subtree_finalizer: bool,
-    pub has_ordered_only: bool,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionPlan {
     pub start_paths: Vec<PathBuf>,
@@ -67,8 +52,6 @@ pub struct ExecutionPlan {
     pub file_outputs: Vec<PlannedFileOutput>,
     pub expr: RuntimeExpr,
     pub mode: ExecutionMode,
-    pub parallel_policy: Option<ParallelExecutionPolicy>,
-    pub action_profile: ActionProfile,
     pub(crate) runtime_policy: RuntimePolicy,
     pub(crate) traversal_control: Option<RuntimeExpr>,
 }
@@ -315,14 +298,11 @@ pub(crate) fn plan_command_with_now_and_capabilities(
     if let Some(warning) = ctype_warning_for_plan(&state.ctype_profile, &expr) {
         state.startup_warnings.push(warning);
     }
-    let action_profile = compute_action_profile(&expr);
-
-    let mode = if workers <= 1 || action_profile.has_ordered_only {
+    let mode = if workers <= 1 || requires_ordered_execution(&expr) {
         ExecutionMode::OrderedSingle
     } else {
         ExecutionMode::ParallelRelaxed
     };
-    let parallel_policy = choose_parallel_policy(workers, traversal, action_profile);
     let runtime_policy = RuntimePolicy::derive(
         workers,
         traversal.order,
@@ -341,70 +321,24 @@ pub(crate) fn plan_command_with_now_and_capabilities(
         file_outputs: state.file_outputs.clone(),
         expr,
         mode,
-        parallel_policy,
-        action_profile,
         runtime_policy,
         traversal_control,
     })
 }
 
-fn choose_parallel_policy(
-    workers: usize,
-    traversal: TraversalOptions,
-    action_profile: ActionProfile,
-) -> Option<ParallelExecutionPolicy> {
-    if workers <= 1 {
-        return None;
-    }
-
-    if traversal.order == TraversalOrder::DepthFirstPostOrder
-        || action_profile.has_subtree_finalizer
-    {
-        Some(ParallelExecutionPolicy::PostOrderSubtree)
-    } else {
-        Some(ParallelExecutionPolicy::PreOrderFastPath)
-    }
-}
-
-fn compute_action_profile(expr: &RuntimeExpr) -> ActionProfile {
-    let mut profile = ActionProfile::default();
-    populate_action_profile(expr, &mut profile);
-    profile
-}
-
-fn populate_action_profile(expr: &RuntimeExpr, profile: &mut ActionProfile) {
+/// `-exit` has to stop the traversal at a well defined point, so a plan that
+/// contains it cannot use the relaxed parallel engine.
+fn requires_ordered_execution(expr: &RuntimeExpr) -> bool {
     match expr {
-        RuntimeExpr::And(items) => {
-            for item in items.iter() {
-                populate_action_profile(item, profile);
-            }
+        RuntimeExpr::And(items) | RuntimeExpr::Sequence(items) => {
+            items.iter().any(requires_ordered_execution)
         }
         RuntimeExpr::Or(left, right) => {
-            populate_action_profile(left, profile);
-            populate_action_profile(right, profile);
+            requires_ordered_execution(left) || requires_ordered_execution(right)
         }
-        RuntimeExpr::Sequence(items) => {
-            for item in items.iter() {
-                populate_action_profile(item, profile);
-            }
-        }
-        RuntimeExpr::Not(inner) => populate_action_profile(inner, profile),
-        RuntimeExpr::Action(action) => match action {
-            RuntimeAction::Output(_)
-            | RuntimeAction::Printf(_)
-            | RuntimeAction::FilePrint { .. }
-            | RuntimeAction::FilePrintf { .. }
-            | RuntimeAction::Ls
-            | RuntimeAction::FileLs { .. } => {}
-            RuntimeAction::Quit => profile.has_global_control = true,
-            RuntimeAction::Exit { .. } => profile.has_ordered_only = true,
-            RuntimeAction::ExecImmediate(_) | RuntimeAction::ExecPrompt(_) => {
-                profile.has_local_immediate = true;
-            }
-            RuntimeAction::ExecBatched(_) => profile.has_local_batched = true,
-            RuntimeAction::Delete => profile.has_subtree_finalizer = true,
-        },
-        RuntimeExpr::Predicate(_) | RuntimeExpr::Barrier => {}
+        RuntimeExpr::Not(inner) => requires_ordered_execution(inner),
+        RuntimeExpr::Action(RuntimeAction::Exit { .. }) => true,
+        RuntimeExpr::Action(_) | RuntimeExpr::Predicate(_) | RuntimeExpr::Barrier => false,
     }
 }
 

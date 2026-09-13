@@ -1,7 +1,4 @@
-use crate::action_output::{
-    OutputPresentation, RenderedAction, render_action_output,
-    render_action_output_with_presentation,
-};
+use crate::action_output::{RenderedAction, render_action_output};
 use crate::diagnostics::{Diagnostic, failed_to_write};
 use crate::entry::EntryContext;
 use crate::eval::{ActionOutcome, ActionSink, EvalContext};
@@ -53,12 +50,12 @@ fn broker_loop<W: Write, E: Write>(
     Ok(())
 }
 
-pub struct StdoutSink<'a, W: Write> {
-    writer: &'a mut W,
-}
-
 pub fn render_output_bytes(action: OutputAction, entry: &EntryContext) -> Vec<u8> {
     crate::action_output::render_output_bytes(action, entry)
+}
+
+pub struct StdoutSink<'a, W: Write> {
+    writer: &'a mut W,
 }
 
 impl<'a, W: Write> StdoutSink<'a, W> {
@@ -81,14 +78,7 @@ impl<W: Write> ActionSink for StdoutSink<'_, W> {
         follow_mode: FollowMode,
         context: &EvalContext,
     ) -> Result<ActionOutcome, Diagnostic> {
-        let presentation = OutputPresentation::raw(context.ctype_profile());
-        match render_action_output_with_presentation(
-            action,
-            entry,
-            follow_mode,
-            context,
-            &presentation,
-        )? {
+        match render_action_output(action, entry, follow_mode, context)? {
             Some(RenderedAction::Stdout(bytes)) => {
                 self.write_bytes(&bytes)?;
                 Ok(ActionOutcome::matched_true())

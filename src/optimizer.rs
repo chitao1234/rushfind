@@ -1,19 +1,5 @@
 use crate::planner::{RuntimeExpr, RuntimePredicate};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Requirement {
-    Basename,
-    FullPath,
-    FileType,
-    ActiveMetadata,
-    FilesystemInfo,
-    PathAccess,
-    BirthTime,
-    DirectoryRead,
-    LinkTarget,
-    Nss,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum CostTier {
     Constant,
@@ -28,24 +14,14 @@ enum CostTier {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct PredicateProfile {
-    pub(crate) reorderable: bool,
-    pub(crate) requirements: &'static [Requirement],
+struct PredicateProfile {
+    reorderable: bool,
     cost: CostTier,
 }
 
-const NONE: &[Requirement] = &[];
-const BASENAME: &[Requirement] = &[Requirement::Basename];
-const FULL_PATH: &[Requirement] = &[Requirement::FullPath];
-const FILE_TYPE: &[Requirement] = &[Requirement::FileType];
-const ACTIVE_METADATA: &[Requirement] = &[Requirement::ActiveMetadata];
-const FILESYSTEM_INFO: &[Requirement] = &[Requirement::FilesystemInfo];
-const PATH_ACCESS: &[Requirement] = &[Requirement::PathAccess];
-const BIRTH_TIME: &[Requirement] = &[Requirement::BirthTime];
-const DIRECTORY_READ: &[Requirement] = &[Requirement::ActiveMetadata, Requirement::DirectoryRead];
-const LINK_TARGET: &[Requirement] = &[Requirement::LinkTarget];
-const ACTIVE_METADATA_AND_NSS: &[Requirement] = &[Requirement::ActiveMetadata, Requirement::Nss];
-
+/// Reorder the side-effect-free predicates inside `-a` chains so that the
+/// cheapest checks run first. This mirrors GNU find's default optimization
+/// level, which also reorders predicates that cannot change the outcome.
 pub fn optimize_read_only_and_chains(expr: RuntimeExpr) -> RuntimeExpr {
     match expr {
         RuntimeExpr::And(items) => {
@@ -110,25 +86,18 @@ fn expr_cost(expr: &RuntimeExpr) -> CostTier {
     }
 }
 
-pub(crate) fn predicate_profile(predicate: &RuntimePredicate) -> PredicateProfile {
+fn predicate_profile(predicate: &RuntimePredicate) -> PredicateProfile {
     match predicate {
+        // `-prune` is only meaningful in its original position relative to the
+        // rest of the expression, so it never joins a reorderable segment.
         RuntimePredicate::Prune => PredicateProfile {
             reorderable: false,
-            requirements: NONE,
             cost: CostTier::Constant,
         },
-        RuntimePredicate::FsType(_) => profile(FILESYSTEM_INFO, CostTier::ActiveMetadata),
-        RuntimePredicate::Readable | RuntimePredicate::Writable | RuntimePredicate::Executable => {
-            profile(PATH_ACCESS, CostTier::PathAccess)
-        }
-        RuntimePredicate::True | RuntimePredicate::False => profile(NONE, CostTier::Constant),
-        RuntimePredicate::Name(_) => profile(BASENAME, CostTier::StringOnly),
-        RuntimePredicate::Path(_) => profile(FULL_PATH, CostTier::StringOnly),
-        RuntimePredicate::Regex(_) => profile(FULL_PATH, CostTier::RegexString),
-        RuntimePredicate::Type(_) | RuntimePredicate::XType(_) => {
-            profile(FILE_TYPE, CostTier::FileType)
-        }
-        RuntimePredicate::Empty => profile(DIRECTORY_READ, CostTier::DirectoryRead),
+        RuntimePredicate::True | RuntimePredicate::False => profile(CostTier::Constant),
+        RuntimePredicate::Name(_) | RuntimePredicate::Path(_) => profile(CostTier::StringOnly),
+        RuntimePredicate::Regex(_) => profile(CostTier::RegexString),
+        RuntimePredicate::Type(_) | RuntimePredicate::XType(_) => profile(CostTier::FileType),
         RuntimePredicate::Inum(_)
         | RuntimePredicate::Links(_)
         | RuntimePredicate::SameFile(_)
@@ -141,24 +110,27 @@ pub(crate) fn predicate_profile(predicate: &RuntimePredicate) -> PredicateProfil
         | RuntimePredicate::ReparseType(_)
         | RuntimePredicate::Size(_)
         | RuntimePredicate::Used(_)
-        | RuntimePredicate::RelativeTime(_) => profile(ACTIVE_METADATA, CostTier::ActiveMetadata),
+        | RuntimePredicate::RelativeTime(_)
+        | RuntimePredicate::FsType(_) => profile(CostTier::ActiveMetadata),
         RuntimePredicate::Newer(matcher)
             if matcher.current == crate::time::TimestampKind::Birth =>
         {
-            profile(BIRTH_TIME, CostTier::BirthTime)
+            profile(CostTier::BirthTime)
         }
-        RuntimePredicate::Newer(_) => profile(ACTIVE_METADATA, CostTier::ActiveMetadata),
-        RuntimePredicate::LName(_) => profile(LINK_TARGET, CostTier::Expensive),
-        RuntimePredicate::NoUser | RuntimePredicate::NoGroup => {
-            profile(ACTIVE_METADATA_AND_NSS, CostTier::Expensive)
+        RuntimePredicate::Newer(_) => profile(CostTier::ActiveMetadata),
+        RuntimePredicate::Readable | RuntimePredicate::Writable | RuntimePredicate::Executable => {
+            profile(CostTier::PathAccess)
+        }
+        RuntimePredicate::Empty => profile(CostTier::DirectoryRead),
+        RuntimePredicate::LName(_) | RuntimePredicate::NoUser | RuntimePredicate::NoGroup => {
+            profile(CostTier::Expensive)
         }
     }
 }
 
-fn profile(requirements: &'static [Requirement], cost: CostTier) -> PredicateProfile {
+fn profile(cost: CostTier) -> PredicateProfile {
     PredicateProfile {
         reorderable: true,
-        requirements,
         cost,
     }
 }

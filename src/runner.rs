@@ -183,7 +183,7 @@ mod tests {
     use crate::ordered::engine::ordered_evaluator_workers;
     use crate::parser::parse_command;
     use crate::planner::{
-        ActionProfile, ExecutionMode, ExecutionPlan, OutputAction, RuntimeAction, RuntimeExpr,
+        ExecutionMode, ExecutionPlan, OutputAction, RuntimeAction, RuntimeExpr,
         RuntimeRequirements, TraversalOptions, TraversalOrder, plan_command,
     };
     use crate::runtime_policy::RuntimePolicy;
@@ -215,8 +215,6 @@ mod tests {
             file_outputs: Vec::new(),
             expr: RuntimeExpr::Action(RuntimeAction::Output(OutputAction::Print)),
             mode: ExecutionMode::OrderedSingle,
-            parallel_policy: None,
-            action_profile: ActionProfile::default(),
             runtime_policy: RuntimePolicy::derive(1, TraversalOrder::PreOrder, true),
             traversal_control: None,
         }
