@@ -136,6 +136,10 @@ fn parse_leading_option(
         compatibility_options.same_file_system = true;
         return Ok(1);
     }
+    if arg.matches("-X") {
+        compatibility_options.xargs_safe = true;
+        return Ok(1);
+    }
 
     Ok(0)
 }

@@ -191,7 +191,18 @@ where
             }
         };
 
-        let control = match control(&entry) {
+        let xargs_illegal = options.xargs_safe && !crate::runner::xargs_safe_path(&entry.path);
+        if xargs_illegal {
+            emit(WalkEvent::Error(crate::runner::xargs_illegal_path(
+                &entry.path,
+            )))?;
+        }
+
+        let control = match if xargs_illegal {
+            Ok(TraversalControl::allow())
+        } else {
+            control(&entry)
+        } {
             Ok(control) => control,
             Err(error) => {
                 emit(WalkEvent::Error(error))?;
@@ -207,14 +218,16 @@ where
             }
         };
 
-        if emit_ordered_visit_for_order(
-            &mut emit,
-            options.order,
-            is_directory,
-            entry.clone(),
-            &mut next_sequence,
-            pending.ancestor_barriers.clone(),
-        )? {
+        if !xargs_illegal
+            && emit_ordered_visit_for_order(
+                &mut emit,
+                options.order,
+                is_directory,
+                entry.clone(),
+                &mut next_sequence,
+                pending.ancestor_barriers.clone(),
+            )?
+        {
             return Ok(());
         }
 
@@ -597,6 +610,7 @@ mod tests {
                 max_depth: None,
                 same_file_system: false,
                 order: TraversalOrder::PreOrder,
+                xargs_safe: false,
             },
             |entry| {
                 let prune = entry.path.file_name().is_some_and(|name| name == "skip");
@@ -635,6 +649,7 @@ mod tests {
                 max_depth: None,
                 same_file_system: false,
                 order: TraversalOrder::DepthFirstPostOrder,
+                xargs_safe: false,
             },
             |_entry| {
                 Ok(TraversalControl {
@@ -807,6 +822,7 @@ mod tests {
                 max_depth: None,
                 same_file_system: false,
                 order: TraversalOrder::PreOrder,
+                xargs_safe: false,
             },
             |_entry| {
                 Ok(TraversalControl {

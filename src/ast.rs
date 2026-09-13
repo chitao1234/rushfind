@@ -31,6 +31,7 @@ pub struct CompatibilityOptions {
     pub regex_extended: bool,
     pub depth: bool,
     pub same_file_system: bool,
+    pub xargs_safe: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

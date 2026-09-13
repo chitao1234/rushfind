@@ -111,6 +111,43 @@ fn ordered_print_and_fprint_surfaces_preserve_non_utf8_paths() {
 }
 
 #[test]
+fn xargs_safety_rejects_unsafe_entries_before_expression_evaluation() {
+    let root = tempdir().unwrap();
+    let safe = root.path().join("safe");
+    let unsafe_path = root.path().join("unsafe name");
+    fs::write(&safe, "safe\n").unwrap();
+    fs::write(&unsafe_path, "unsafe\n").unwrap();
+
+    let output = cargo_bin_output_with_timeout(
+        &[
+            "-X".into(),
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-true".into(),
+            "-print0".into(),
+        ],
+        1,
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        output
+            .stdout
+            .windows(b"safe".len())
+            .any(|window| window == b"safe")
+    );
+    assert!(
+        !output
+            .stdout
+            .windows(b"unsafe name".len())
+            .any(|window| window == b"unsafe name")
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("illegal path"));
+}
+
+#[test]
 fn name_and_path_families_accept_non_utf8_operands() {
     if !supports_non_utf8_temp_paths() {
         return;

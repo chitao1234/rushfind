@@ -19,6 +19,12 @@ fn parses_bsd_leading_aliases() {
 }
 
 #[test]
+fn parses_bsd_xargs_safety_option() {
+    let ast = parse_command(&argv(&["-X", ".", "-print"])).unwrap();
+    assert!(ast.compatibility_options.xargs_safe);
+}
+
+#[test]
 fn parses_bsd_f_paths_before_expression_paths() {
     let ast = parse_command(&argv(&["-f", "-odd", "-f", "root", "-true"])).unwrap();
 

@@ -160,6 +160,16 @@ where
     ))
 }
 
+pub(crate) fn xargs_safe_path(path: &std::path::Path) -> bool {
+    crate::platform::path::display_bytes(path)
+        .iter()
+        .all(|byte| !matches!(*byte, b' ' | b'\t' | b'\n' | b'\\' | b'\'' | b'"'))
+}
+
+pub(crate) fn xargs_illegal_path(path: &std::path::Path) -> Diagnostic {
+    Diagnostic::new(format!("{}: illegal path", path.display()), 1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -192,6 +202,7 @@ mod tests {
                 max_depth: None,
                 same_file_system: false,
                 order: TraversalOrder::PreOrder,
+                xargs_safe: false,
             },
             runtime: RuntimeRequirements {
                 mount_snapshot,

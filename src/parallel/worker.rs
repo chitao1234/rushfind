@@ -412,13 +412,24 @@ fn run_preorder_pending_batch(
             }
         };
 
-        let traversal = match traversal_control_for_entry(
-            plan.traversal_control.as_ref(),
-            plan.follow_mode,
-            plan.traversal.order,
-            &entry,
-            context,
-        ) {
+        let xargs_illegal =
+            plan.traversal.xargs_safe && !crate::runner::xargs_safe_path(&entry.path);
+        if xargs_illegal {
+            sink.emit_runtime_error(crate::runner::xargs_illegal_path(&entry.path))?;
+            *had_runtime_errors = true;
+        }
+
+        let traversal = match if xargs_illegal {
+            Ok(crate::traversal_control::TraversalControl::allow())
+        } else {
+            traversal_control_for_entry(
+                plan.traversal_control.as_ref(),
+                plan.follow_mode,
+                plan.traversal.order,
+                &entry,
+                context,
+            )
+        } {
             Ok(control) => control,
             Err(error) => {
                 sink.emit_runtime_error(error)?;
@@ -427,7 +438,7 @@ fn run_preorder_pending_batch(
             }
         };
 
-        if pending.depth >= plan.traversal.min_depth {
+        if !xargs_illegal && pending.depth >= plan.traversal.min_depth {
             status = status.merge(process_entry_preorder_fast_path(
                 plan,
                 &entry,
@@ -556,13 +567,25 @@ fn run_postorder_pending_root(
         }
     };
 
-    let traversal = match traversal_control_for_entry(
-        plan.traversal_control.as_ref(),
-        plan.follow_mode,
-        plan.traversal.order,
-        &entry,
-        run.eval_context,
-    ) {
+    let xargs_illegal = plan.traversal.xargs_safe && !crate::runner::xargs_safe_path(&entry.path);
+    if xargs_illegal {
+        context
+            .sink
+            .emit_runtime_error(crate::runner::xargs_illegal_path(&entry.path))?;
+        *context.had_runtime_errors = true;
+    }
+
+    let traversal = match if xargs_illegal {
+        Ok(crate::traversal_control::TraversalControl::allow())
+    } else {
+        traversal_control_for_entry(
+            plan.traversal_control.as_ref(),
+            plan.follow_mode,
+            plan.traversal.order,
+            &entry,
+            run.eval_context,
+        )
+    } {
         Ok(control) => control,
         Err(error) => {
             return emit_postorder_runtime_error(error, notify_parent, context);
@@ -719,7 +742,8 @@ fn complete_postorder_entry(
     let plan = context.run.plan;
     let mut status = RuntimeStatus::default();
 
-    if entry.depth >= plan.traversal.min_depth {
+    let xargs_illegal = plan.traversal.xargs_safe && !crate::runner::xargs_safe_path(&entry.path);
+    if !xargs_illegal && entry.depth >= plan.traversal.min_depth {
         status = status.merge(process_entry_preorder_fast_path(
             plan,
             &entry,
