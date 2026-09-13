@@ -518,7 +518,7 @@ fn classify_action_atom(token: Arg<'_>) -> Option<AtomKind> {
         Some(AtomKind::FileOutput(FileOutputAtom::FPrintf))
     } else if token.matches("-fls") {
         Some(AtomKind::FileOutput(FileOutputAtom::Fls))
-    } else if token.matches("-quit") {
+    } else if token.matches("-quit") || token.matches("-exit") {
         Some(AtomKind::Quit)
     } else if token.matches("-exec") {
         Some(AtomKind::Exec(ExecAtom::Exec))

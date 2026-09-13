@@ -38,10 +38,10 @@ fn parses_bsd_f_paths_before_expression_paths() {
 
 #[test]
 fn parses_bsd_printx_and_rm_aliases() {
-    let ast = parse_command(&argv(&[".", "-printx", "-rm"])).unwrap();
+    let ast = parse_command(&argv(&[".", "-printx", "-rm", "-exit"])).unwrap();
 
     assert!(matches!(
         ast.expr,
-        Expr::And(items) if matches!(items.as_slice(), [Expr::Action(Action::PrintX), Expr::Action(Action::Delete)])
+        Expr::And(items) if matches!(items.as_slice(), [Expr::Action(Action::PrintX), Expr::Action(Action::Delete), Expr::Action(Action::Quit)])
     ));
 }
