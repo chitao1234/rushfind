@@ -45,3 +45,9 @@ fn parses_bsd_printx_and_rm_aliases() {
         Expr::And(items) if matches!(items.as_slice(), [Expr::Action(Action::PrintX), Expr::Action(Action::Delete), Expr::Action(Action::Quit)])
     ));
 }
+
+#[test]
+fn parses_bsd_birth_time_aliases() {
+    let ast = parse_command(&argv(&[".", "-Bmin", "2", "-Btime", "3", "-Bnewer", "ref"])).unwrap();
+    assert!(matches!(ast.expr, Expr::And(items) if items.len() == 3));
+}

@@ -286,6 +286,8 @@ enum TimeAtom {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NewerAtom {
     Newer,
+    MNewer,
+    BNewer,
     ANewer,
     CNewer,
     NewerXY { current: char, reference: char },
@@ -495,6 +497,10 @@ fn classify_time_atom(token: Arg<'_>) -> Option<AtomKind> {
         Some(AtomKind::Time(TimeAtom::BMin))
     } else if token.matches("-newer") {
         Some(AtomKind::Newer(NewerAtom::Newer))
+    } else if token.matches("-mnewer") {
+        Some(AtomKind::Newer(NewerAtom::MNewer))
+    } else if token.matches("-Bnewer") {
+        Some(AtomKind::Newer(NewerAtom::BNewer))
     } else if token.matches("-anewer") {
         Some(AtomKind::Newer(NewerAtom::ANewer))
     } else if token.matches("-cnewer") {
@@ -827,6 +833,12 @@ impl<'a> Parser<'a> {
     fn parse_newer_atom(&mut self, atom: NewerAtom) -> Result<Expr, Diagnostic> {
         Ok(Expr::Predicate(match atom {
             NewerAtom::Newer => Predicate::Newer(PathBuf::from(self.take_os_string("-newer")?)),
+            NewerAtom::MNewer => Predicate::Newer(PathBuf::from(self.take_os_string("-mnewer")?)),
+            NewerAtom::BNewer => Predicate::NewerXY {
+                current: 'B',
+                reference: 'm',
+                reference_arg: self.take_os_string("-Bnewer")?,
+            },
             NewerAtom::ANewer => Predicate::ANewer(PathBuf::from(self.take_os_string("-anewer")?)),
             NewerAtom::CNewer => Predicate::CNewer(PathBuf::from(self.take_os_string("-cnewer")?)),
             NewerAtom::NewerXY { current, reference } => {
