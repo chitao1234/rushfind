@@ -1,13 +1,15 @@
 #![cfg(unix)]
 
 use crate::support::{
-    PRINTF_TIME_TZ, available_lc_ctype_locales, gnu_find_command, path_arg, rushfind_command,
+    PRINTF_TIME_TZ, available_lc_ctype_locales, ensure_gnu_find, gnu_find_command, path_arg,
+    rushfind_command,
 };
 use std::ffi::OsString;
 use std::fs;
 use std::os::unix::ffi::OsStringExt;
 use std::os::unix::fs::symlink;
 use std::process::Output;
+use std::sync::OnceLock;
 use tempfile::tempdir;
 
 const LC_CTYPE_CANDIDATES: &[&str] = &[
@@ -17,10 +19,14 @@ const LC_CTYPE_CANDIDATES: &[&str] = &[
     "en_US.utf8",
     "en_US.UTF-8",
     "ru_RU.KOI8-R",
+    "ru_RU.koi8r",
     "ja_JP.eucJP",
+    "ja_JP.eucjp",
     "ja_JP.SJIS",
     "ko_KR.eucKR",
+    "ko_KR.euckr",
     "zh_CN.GB18030",
+    "zh_CN.gb18030",
 ];
 
 fn os_from_encoded_text(label: &str, text: &str) -> OsString {
@@ -65,6 +71,78 @@ fn gnu_output(locale: &str, args: &[OsString]) -> Option<Output> {
     )
 }
 
+// Cache the oracle qualification once, including when the three matrix tests
+// run concurrently. C/POSIX and UTF-8 always retain their existing assertions.
+fn oracle_lc_ctype_locales() -> &'static [String] {
+    static LOCALES: OnceLock<Vec<String>> = OnceLock::new();
+    LOCALES.get_or_init(|| {
+        if !ensure_gnu_find() {
+            return Vec::new();
+        }
+        available_lc_ctype_locales(LC_CTYPE_CANDIDATES)
+            .into_iter()
+            .filter(|locale| {
+                let normalized = locale.to_ascii_lowercase().replace(['-', '_'], "");
+                if normalized.contains("utf8") || encoded_alpha_name(locale).is_none() {
+                    return true;
+                }
+                if gnu_supports_non_utf8_locale(locale) {
+                    true
+                } else {
+                    eprintln!(
+                        "skipping GNU locale oracle cases for locale={locale}: \
+                         GNU find cannot classify the encoded non-ASCII letter as one \
+                         alphabetic character; C/POSIX, UTF-8 and rushfind-owned tests remain enabled"
+                    );
+                    false
+                }
+            })
+            .collect()
+    })
+}
+
+fn gnu_supports_non_utf8_locale(locale: &str) -> bool {
+    let alpha = encoded_alpha_name(locale).unwrap();
+    let root = tempdir().unwrap();
+    let probe = root.path().join("locale-probe");
+    // The filename is ASCII. Only the symlink payload carries legacy bytes,
+    // so this also works on filesystems that reject non-UTF-8 filenames.
+    symlink(&alpha, &probe).unwrap();
+    let args = [
+        path_arg(&probe),
+        "-lname".into(),
+        "?".into(),
+        "-lname".into(),
+        "[[:alpha:]]".into(),
+        "-printf".into(),
+        "aware".into(),
+    ];
+    let probe_output = |locale: &str| {
+        let output = gnu_output(locale, &args).unwrap();
+        assert!(
+            output.status.success(),
+            "GNU locale probe failed: locale={locale} {output:?}"
+        );
+        assert!(
+            output.stderr.is_empty(),
+            "GNU locale probe diagnostic: locale={locale} {output:?}"
+        );
+        output.stdout
+    };
+    // A byte-only C matcher must not classify a legacy non-ASCII letter as
+    // alphabetic. The probe never consults rushfind's result to decide a skip.
+    assert!(
+        probe_output("C").is_empty(),
+        "invalid C-locale oracle control"
+    );
+    let encoded = probe_output(locale);
+    assert!(
+        encoded.is_empty() || encoded == b"aware",
+        "invalid GNU locale probe output: {encoded:?}"
+    );
+    encoded == b"aware"
+}
+
 fn rfd_output(locale: &str, args: &[OsString]) -> Output {
     rushfind_command()
         .env("LC_ALL", locale)
@@ -96,7 +174,7 @@ fn lc_ctype_candidate_matrix_matches_gnu_for_ascii_classes() {
     fs::write(root.path().join("alpha"), "alpha\n").unwrap();
     fs::write(root.path().join("5"), "digit\n").unwrap();
 
-    for locale in available_lc_ctype_locales(LC_CTYPE_CANDIDATES) {
+    for locale in oracle_lc_ctype_locales() {
         for args in [
             vec![
                 path_arg(root.path()),
@@ -135,7 +213,7 @@ fn lc_ctype_candidate_matrix_matches_gnu_for_ascii_classes() {
 
 #[test]
 fn lc_ctype_candidate_matrix_matches_gnu_for_encoded_single_characters() {
-    for locale in available_lc_ctype_locales(LC_CTYPE_CANDIDATES) {
+    for locale in oracle_lc_ctype_locales() {
         let Some(alpha_name) = encoded_alpha_name(&locale) else {
             continue;
         };
@@ -192,7 +270,7 @@ fn lc_ctype_candidate_matrix_matches_gnu_for_encoded_single_characters() {
 
 #[test]
 fn lc_ctype_candidate_matrix_matches_gnu_for_encoded_symlink_targets() {
-    for locale in available_lc_ctype_locales(LC_CTYPE_CANDIDATES) {
+    for locale in oracle_lc_ctype_locales() {
         let Some(alpha_target) = encoded_alpha_name(&locale) else {
             continue;
         };
