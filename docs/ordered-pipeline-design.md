@@ -86,8 +86,8 @@ Two further issues live in the same code path:
   (`EvalStep::PendingAction` → `resume_entry_eval`) already model "the result of
   an action feeds the rest of the expression", so `-exec ... \;` short-circuit
   behaviour is preserved.
-- **Cancellation is a shared flag.** `OrderedControl` (an `AtomicBool` plus an
-  optional requested exit status, mirroring `parallel::control::GlobalControl`)
+- **Cancellation is a shared flag.** `OrderedPipelineControl` (an `AtomicBool`, mirroring
+  `parallel::control::GlobalControl`)
   is checked by the walker before publishing and by the collector before
   dispatching. When the collector observes a stop request it sets the flag,
   keeps whatever its entry already committed, and drops every later result.
@@ -115,12 +115,27 @@ filtered entries never consume a sequence number or a channel slot.
 
 ### Ordered ready queue
 
-`OrderedReadyQueue` currently uses a `BTreeMap<u64, T>` with one node per
-in-flight item. Backpressure bounds the in-flight window to `K`, so the queue
-becomes a ring buffer of `K` slots indexed by `sequence % K` plus a `next`
-cursor. Insert and pop are then `O(1)` with no per-item allocation, and
-`pop_next` never has to scan. The ring stores `Option<T>`; exceeding `K`
-in-flight items is a bug, so the insert path asserts rather than growing.
+`OrderedReadyQueue` was a `BTreeMap<u64, T>` with one node per in-flight item.
+It is now a ring buffer of `K` slots indexed by `sequence % K` plus a `next`
+cursor, so insert and pop are `O(1)` with no per-item allocation and
+`pop_next` never has to scan. The ring stores `Option<T>`; reaching past the
+window is a bug in the pipeline, so the insert path reports an internal error
+rather than growing.
+
+### Backpressure comes from permits, not from the channels
+
+Bounding the two channels is not enough on its own. A sequence that stalls
+upstream lets the collector keep draining the ready channel into its ring, so
+the ring would grow with the tree no matter how small the channels are - which
+is how the first implementation ended up reporting "ordered pipeline window
+overflow" under load.
+
+The walker therefore takes a permit from a channel pre-filled with `K` before
+it publishes anything, and the collector returns one permit per dispatched
+item. That makes `published - dispatched <= K` a property of the pipeline
+rather than a hope, which is what lets the ring be sized at `K` and nothing
+more. When the collector stops, it hands the remaining permits back so a walker
+blocked on a full window can observe the stop and unwind.
 
 ### `-quit` and `-exit`
 
@@ -146,8 +161,8 @@ flushes its last batch.
 ## Sizing
 
 - `K = (evaluation_workers * 4).clamp(32, 256)` entries.
-- Work-channel and ready-channel capacities are both `K`, so in-flight memory is
-  at most `2K` entries plus the collector's ring.
+- Work-channel, ready-channel and release-ring capacities are all `K`, so
+  in-flight memory is bounded by the window rather than by the tree.
 - A worker that is slow at evaluating leaves the remaining workers busy; the
   walker blocks only when the whole window is full.
 - Sampling: `K` is a compile-time constant for the first implementation. If
@@ -213,7 +228,7 @@ predicate on the diagnostic before it is sequenced.
 
 ## Implementation order
 
-1. Add `OrderedControl`, the ring-buffer ready queue, and the sequenced
+1. Add `OrderedPipelineControl`, the ring-buffer ready queue, and the sequenced
    diagnostic item, with unit tests, without changing behaviour.
 2. Route ordered plans with `evaluation_workers == 1` through the inline engine
    (removing the commit-sensitive special case) and verify the differential
