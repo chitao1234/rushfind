@@ -1,11 +1,11 @@
-use crate::diagnostics::Diagnostic;
+use crate::diagnostics::{Diagnostic, internal_error};
 use crate::entry::EntryContext;
 use crate::eval::{ActionOutcome, EvalContext, EvalOutcome, RuntimeStatus, evaluate_predicate};
 use crate::follow::FollowMode;
 use crate::planner::{RuntimeAction, RuntimeExpr};
-use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct SubtreeBarrierId(pub(crate) usize);
@@ -105,28 +105,81 @@ pub(crate) enum EvalStep {
     },
 }
 
+/// Items that travel through the ordered pipeline. Diagnostics share the
+/// sequence space with entries so that stdout and stderr keep traversal order
+/// relative to each other.
+#[derive(Debug)]
+pub(crate) enum OrderedItem {
+    Entry(EntryContext),
+    Diagnostic(Diagnostic),
+}
+
+/// Results of the ordered pipeline: an evaluated entry, a sequenced diagnostic
+/// that bypassed evaluation, or an unrecoverable evaluator failure.
+#[derive(Debug)]
+pub(crate) enum OrderedReady {
+    Step(EvalStep),
+    Diagnostic(Diagnostic),
+    Fatal(Diagnostic),
+}
+
+/// Cancellation for the ordered pipeline. The walker stops publishing and
+/// evaluators stop starting new work once it is raised; the collector keeps
+/// draining so that worker threads can finish.
+#[derive(Debug, Default)]
+pub(crate) struct OrderedPipelineControl {
+    stopped: AtomicBool,
+}
+
+impl OrderedPipelineControl {
+    pub(crate) fn request_stop(&self) {
+        self.stopped.store(true, Ordering::SeqCst);
+    }
+
+    pub(crate) fn is_stopped(&self) -> bool {
+        self.stopped.load(Ordering::SeqCst)
+    }
+}
+
+/// Sequence-numbered release queue for the ordered pipeline.
+///
+/// Items are released strictly in sequence order. The ring is sized so that it
+/// can hold every item that can be in flight (work channel + evaluators + ready
+/// channel), which is what keeps the collector from blocking on a full ring
+/// while the item it waits for is still upstream.
 #[derive(Debug)]
 pub(crate) struct OrderedReadyQueue<T> {
     next_sequence: u64,
-    buffered: BTreeMap<u64, T>,
-}
-
-impl<T> Default for OrderedReadyQueue<T> {
-    fn default() -> Self {
-        Self {
-            next_sequence: 0,
-            buffered: BTreeMap::new(),
-        }
-    }
+    slots: Vec<Option<T>>,
 }
 
 impl<T> OrderedReadyQueue<T> {
-    pub(crate) fn insert(&mut self, sequence: u64, item: T) {
-        self.buffered.insert(sequence, item);
+    pub(crate) fn with_capacity(capacity: usize) -> Self {
+        let mut slots = Vec::new();
+        slots.resize_with(capacity.max(1), || None);
+        Self {
+            next_sequence: 0,
+            slots,
+        }
+    }
+
+    pub(crate) fn insert(&mut self, sequence: u64, item: T) -> Result<(), Diagnostic> {
+        let Some(offset) = sequence.checked_sub(self.next_sequence) else {
+            return Err(internal_error("ordered pipeline released a sequence twice"));
+        };
+
+        let index = (sequence as usize) % self.slots.len();
+        if offset as usize >= self.slots.len() || self.slots[index].is_some() {
+            return Err(internal_error("ordered pipeline window overflow"));
+        }
+
+        self.slots[index] = Some(item);
+        Ok(())
     }
 
     pub(crate) fn pop_next(&mut self) -> Option<T> {
-        let item = self.buffered.remove(&self.next_sequence)?;
+        let index = (self.next_sequence as usize) % self.slots.len();
+        let item = self.slots[index].take()?;
         self.next_sequence += 1;
         Some(item)
     }
@@ -700,15 +753,31 @@ mod tests {
 
     #[test]
     fn ordered_ready_queue_releases_only_the_next_sequence() {
-        let mut queue = super::OrderedReadyQueue::default();
-        queue.insert(2, "two");
+        let mut queue = super::OrderedReadyQueue::with_capacity(8);
+        queue.insert(2, "two").unwrap();
         assert!(queue.pop_next().is_none());
 
-        queue.insert(0, "zero");
-        queue.insert(1, "one");
+        queue.insert(0, "zero").unwrap();
+        queue.insert(1, "one").unwrap();
 
         assert_eq!(queue.pop_next(), Some("zero"));
         assert_eq!(queue.pop_next(), Some("one"));
         assert_eq!(queue.pop_next(), Some("two"));
+        assert_eq!(queue.pop_next(), None);
+    }
+
+    #[test]
+    fn ordered_ready_queue_rejects_sequences_outside_its_window() {
+        let mut queue = super::OrderedReadyQueue::with_capacity(4);
+        queue.insert(0, "zero").unwrap();
+        assert_eq!(queue.pop_next(), Some("zero"));
+
+        assert!(queue.insert(0, "stale").is_err());
+        // Sequences 1..=4 fill the window once 0 has been released.
+        assert!(queue.insert(5, "too far ahead").is_err());
+
+        queue.insert(4, "last in window").unwrap();
+        queue.insert(1, "one").unwrap();
+        assert_eq!(queue.pop_next(), Some("one"));
     }
 }

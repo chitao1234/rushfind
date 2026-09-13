@@ -68,6 +68,12 @@ impl<'a, W: Write> StdoutSink<'a, W> {
             .write_all(bytes)
             .map_err(|error| failed_to_write("stdout", error))
     }
+
+    pub(crate) fn flush(&mut self) -> Result<(), Diagnostic> {
+        self.writer
+            .flush()
+            .map_err(|error| failed_to_write("stdout", error))
+    }
 }
 
 impl<W: Write> ActionSink for StdoutSink<'_, W> {

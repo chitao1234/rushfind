@@ -31,6 +31,10 @@ pub(crate) fn internal_unavailable(resource: &str) -> Diagnostic {
     Diagnostic::new(format!("internal error: {resource} is unavailable"), 1)
 }
 
+pub(crate) fn internal_error(message: &str) -> Diagnostic {
+    Diagnostic::new(format!("internal error: {message}"), 1)
+}
+
 pub(crate) fn internal_poisoned(resource: &str) -> Diagnostic {
     Diagnostic::new(format!("internal error: {resource} was poisoned"), 1)
 }

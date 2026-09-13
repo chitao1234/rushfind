@@ -120,6 +120,12 @@ impl<'a, W: std::io::Write, E: std::io::Write> OrderedActionSink<'a, W, E> {
             .map_err(|error| failed_to_write("stderr", error))
     }
 
+    /// Flushes pending stdout so that a following diagnostic lands in the same
+    /// position GNU find would put it when both streams share a destination.
+    pub fn flush_stdout(&mut self) -> Result<(), Diagnostic> {
+        self.output.flush()
+    }
+
     pub fn flush(&mut self) -> Result<RuntimeStatus, Diagnostic> {
         let mut status = if self.had_action_failures {
             RuntimeStatus::action_failure()

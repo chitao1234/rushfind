@@ -29,8 +29,12 @@ impl RuntimePolicy {
         host_parallelism: usize,
     ) -> Self {
         let requested_workers = workers.max(1);
+        // An ordered plan evaluates through a bounded pipeline whose collector
+        // commits results in traversal order; the requested worker count is
+        // what bounds that pipeline, so it must be honoured rather than
+        // replaced by the host's parallelism.
         let evaluation_workers = if ordered_mode {
-            host_parallelism.max(1)
+            requested_workers.min(host_parallelism.max(1))
         } else {
             requested_workers
         };
@@ -104,10 +108,20 @@ mod tests {
     use crate::planner::TraversalOrder;
 
     #[test]
-    fn ordered_mode_uses_host_parallelism_for_internal_evaluation() {
+    fn ordered_mode_honours_the_requested_worker_count() {
         let policy = RuntimePolicy::derive_for_tests(1, TraversalOrder::PreOrder, true, 6);
         assert_eq!(policy.requested_workers, 1);
-        assert_eq!(policy.evaluation_workers, 6);
+        assert_eq!(policy.evaluation_workers, 1);
         assert_eq!(policy.commit, CommitPolicy::OrderedSequence);
+
+        let policy = RuntimePolicy::derive_for_tests(3, TraversalOrder::PreOrder, true, 6);
+        assert_eq!(policy.evaluation_workers, 3);
+    }
+
+    #[test]
+    fn ordered_mode_caps_evaluation_at_host_parallelism() {
+        let policy = RuntimePolicy::derive_for_tests(32, TraversalOrder::PreOrder, true, 6);
+        assert_eq!(policy.requested_workers, 32);
+        assert_eq!(policy.evaluation_workers, 6);
     }
 }
