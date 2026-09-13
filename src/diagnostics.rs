@@ -35,7 +35,24 @@ impl Diagnostic {
     /// A directory entry race: the entry was read but is gone (or stale) by the
     /// time it is examined. Permission and I/O failures are not races.
     pub(crate) fn is_readdir_race(&self) -> bool {
-        matches!(self.raw_os_error, Some(libc::ENOENT | libc::ESTALE))
+        let Some(code) = self.raw_os_error else {
+            return false;
+        };
+
+        if code == libc::ENOENT {
+            return true;
+        }
+
+        // Windows has no stale-handle errno, and its libc bindings do not
+        // define ESTALE.
+        #[cfg(unix)]
+        {
+            code == libc::ESTALE
+        }
+        #[cfg(not(unix))]
+        {
+            false
+        }
     }
 }
 

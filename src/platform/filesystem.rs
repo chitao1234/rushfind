@@ -76,6 +76,7 @@ pub(crate) struct PlatformMetadataView {
 /// `stat` carries all three, so the BSD backend fills them from the `Metadata`
 /// the caller already holds and only the remaining Unix backends spend an extra
 /// syscall per field.
+#[cfg(unix)]
 #[derive(Debug)]
 pub(crate) struct MetadataExtras {
     pub(crate) flag_bits: Option<u64>,
