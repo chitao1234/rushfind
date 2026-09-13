@@ -1,7 +1,7 @@
 use crate::diagnostics::Diagnostic;
 use crate::file_flags::FlagSpec;
 use crate::platform::capabilities::OutputContract;
-use crate::platform::filesystem::{FilesystemKey, FilesystemSnapshot};
+use crate::platform::filesystem::{FilesystemKey, FilesystemSnapshot, MetadataExtras};
 use crate::platform::{PlatformCapabilities, SupportLevel};
 use crate::time::Timestamp;
 #[cfg(target_os = "openbsd")]
@@ -166,13 +166,38 @@ pub(crate) fn filesystem_snapshot() -> Result<FilesystemSnapshot, Diagnostic> {
     Ok(snapshot)
 }
 
-pub(crate) fn filesystem_key(path: &Path, follow: bool) -> io::Result<FilesystemKey> {
-    let metadata = if follow {
-        fs::metadata(path)
-    } else {
-        fs::symlink_metadata(path)
-    }?;
-    Ok(FilesystemKey::Numeric(metadata.dev()))
+/// Flags, birth time and device, all read from the `lstat` the caller already
+/// performed: BSD `stat` carries them, so this costs no further syscall.
+pub(crate) fn metadata_extras(
+    _path: &Path,
+    metadata: &fs::Metadata,
+    _follow: bool,
+) -> MetadataExtras {
+    MetadataExtras {
+        flag_bits: Some(metadata.st_flags() as u64),
+        birth_time: birth_time(metadata),
+        filesystem_key: Some(FilesystemKey::Numeric(metadata.dev())),
+    }
+}
+
+#[cfg(target_os = "openbsd")]
+fn birth_time(metadata: &fs::Metadata) -> Option<Timestamp> {
+    let seconds = metadata.st_birthtime();
+    let nanos = metadata.st_birthtime_nsec();
+    // OpenBSD reports "no birth time" as zero instead of omitting the field.
+    if seconds == 0 && nanos == 0 {
+        return None;
+    }
+
+    Some(Timestamp::new(seconds, nanos as i32))
+}
+
+#[cfg(not(target_os = "openbsd"))]
+fn birth_time(metadata: &fs::Metadata) -> Option<Timestamp> {
+    metadata
+        .created()
+        .ok()
+        .and_then(|time| Timestamp::from_system_time(time).ok())
 }
 
 #[cfg(target_os = "openbsd")]
@@ -203,15 +228,6 @@ pub(crate) fn read_birth_time(path: &Path, follow: bool) -> Result<Option<Timest
         stat.st_birthtime,
         stat.st_birthtime_nsec as i32,
     )))
-}
-
-pub(crate) fn read_file_flags(path: &Path, follow: bool) -> io::Result<Option<u64>> {
-    let metadata = if follow {
-        fs::metadata(path)
-    } else {
-        fs::symlink_metadata(path)
-    }?;
-    Ok(Some(metadata.st_flags() as u64))
 }
 
 #[cfg(not(target_os = "openbsd"))]

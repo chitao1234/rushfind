@@ -72,6 +72,17 @@ pub(crate) struct PlatformMetadataView {
     pub device_number: Option<u64>,
 }
 
+/// The [`PlatformMetadataView`] fields a plain `lstat` may not supply. BSD
+/// `stat` carries all three, so the BSD backend fills them from the `Metadata`
+/// the caller already holds and only the remaining Unix backends spend an extra
+/// syscall per field.
+#[derive(Debug)]
+pub(crate) struct MetadataExtras {
+    pub(crate) flag_bits: Option<u64>,
+    pub(crate) birth_time: Option<Timestamp>,
+    pub(crate) filesystem_key: Option<FilesystemKey>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReparseTypeClass {
     Symbolic,
@@ -207,6 +218,7 @@ pub(crate) fn metadata_view_from_metadata(
     use std::os::unix::fs::MetadataExt;
 
     let kind = file_type_to_kind(metadata.file_type());
+    let extras = crate::platform::unix::metadata_extras(path, metadata, follow);
 
     PlatformMetadataView {
         kind,
@@ -216,7 +228,7 @@ pub(crate) fn metadata_view_from_metadata(
         owner: Some(PlatformPrincipalId::Numeric(metadata.uid())),
         group: Some(PlatformPrincipalId::Numeric(metadata.gid())),
         mode_bits: Some(metadata.mode() & 0o7777),
-        flag_bits: read_file_flags(path, follow).ok().flatten(),
+        flag_bits: extras.flag_bits,
         native_attributes: None,
         reparse_tag: None,
         link_count: Some(metadata.nlink()),
@@ -224,8 +236,8 @@ pub(crate) fn metadata_view_from_metadata(
         atime: Timestamp::new(metadata.atime(), metadata.atime_nsec() as i32),
         ctime: Timestamp::new(metadata.ctime(), metadata.ctime_nsec() as i32),
         mtime: Timestamp::new(metadata.mtime(), metadata.mtime_nsec() as i32),
-        birth_time: read_birth_time(path, follow).ok().flatten(),
-        filesystem_key: filesystem_key(path, follow).ok(),
+        birth_time: extras.birth_time,
+        filesystem_key: extras.filesystem_key,
         device_number: match kind {
             EntryKind::Block | EntryKind::Character => Some(metadata.rdev()),
             _ => None,
@@ -269,16 +281,6 @@ pub(crate) fn missing_field(label: &str, path: &Path) -> Diagnostic {
         ),
         1,
     )
-}
-
-#[cfg(unix)]
-pub(crate) fn filesystem_key(path: &Path, follow: bool) -> io::Result<FilesystemKey> {
-    crate::platform::unix::filesystem_key(path, follow)
-}
-
-#[cfg(unix)]
-pub(crate) fn read_file_flags(path: &Path, follow: bool) -> io::Result<Option<u64>> {
-    crate::platform::unix::read_file_flags(path, follow)
 }
 
 #[cfg(windows)]

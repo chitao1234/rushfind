@@ -1,9 +1,9 @@
 use super::PlatformCapabilities;
 use crate::diagnostics::Diagnostic;
 use crate::file_flags::FlagSpec;
-use crate::platform::filesystem::{FilesystemKey, FilesystemSnapshot};
+use crate::platform::filesystem::{FilesystemSnapshot, MetadataExtras};
 use crate::time::Timestamp;
-use std::io;
+use std::fs::Metadata;
 use std::path::Path;
 
 #[cfg(any(
@@ -80,12 +80,34 @@ pub(crate) fn filesystem_snapshot() -> Result<FilesystemSnapshot, Diagnostic> {
     backend::filesystem_snapshot()
 }
 
-pub(crate) fn filesystem_key(path: &Path, follow: bool) -> io::Result<FilesystemKey> {
-    backend::filesystem_key(path, follow)
+/// Fields a `PlatformMetadataView` cannot take from the `stat` its caller
+/// already performed, answered from the metadata where the platform allows it.
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "dragonfly"
+))]
+pub(crate) fn metadata_extras(path: &Path, metadata: &Metadata, follow: bool) -> MetadataExtras {
+    backend::metadata_extras(path, metadata, follow)
 }
 
-pub(crate) fn read_file_flags(path: &Path, follow: bool) -> io::Result<Option<u64>> {
-    backend::read_file_flags(path, follow)
+#[cfg(not(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "dragonfly"
+)))]
+pub(crate) fn metadata_extras(path: &Path, _metadata: &Metadata, follow: bool) -> MetadataExtras {
+    // The Linux flags live behind `FS_IOC_GETFLAGS`, and its birth time and
+    // mount ID behind `statx`, so none of them come with `Metadata` for free.
+    MetadataExtras {
+        flag_bits: backend::read_file_flags(path, follow).ok().flatten(),
+        birth_time: backend::read_birth_time(path, follow).ok().flatten(),
+        filesystem_key: backend::filesystem_key(path, follow).ok(),
+    }
 }
 
 pub(crate) fn read_birth_time(path: &Path, follow: bool) -> Result<Option<Timestamp>, Diagnostic> {
