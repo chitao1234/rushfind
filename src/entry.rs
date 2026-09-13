@@ -435,11 +435,17 @@ impl EntryContext {
         &self,
         follow_mode: FollowMode,
     ) -> Result<Option<FileIdentity>, Diagnostic> {
-        if self.physical_is_traversal_link()? && !self.uses_logical_view(follow_mode) {
+        // Traversal asks every visited entry whether it is a directory that
+        // should be descended into. Checking the active kind first keeps that
+        // question free for non-directories: the physical kind comes from the
+        // directory-entry type hint, while `physical_is_traversal_link` would
+        // force a full metadata read (one extra lstat per entry) just to learn
+        // that a regular file does not need to be descended into.
+        if self.active_kind(follow_mode)? != EntryKind::Directory {
             return Ok(None);
         }
 
-        if self.active_kind(follow_mode)? != EntryKind::Directory {
+        if self.physical_is_traversal_link()? && !self.uses_logical_view(follow_mode) {
             return Ok(None);
         }
 
