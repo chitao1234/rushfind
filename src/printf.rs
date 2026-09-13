@@ -39,6 +39,7 @@ pub struct PrintfFieldFormat {
     pub left_align: bool,
     pub zero_pad: bool,
     pub always_sign: bool,
+    pub space_sign: bool,
     pub alternate: bool,
     pub width: Option<usize>,
     pub precision: Option<usize>,
@@ -123,6 +124,7 @@ pub fn compile_printf_program(
                     atoms.push(PrintfAtom::Literal(std::mem::take(&mut literal)));
                 }
 
+                let start = index;
                 index += 1;
                 let directive = *bytes.get(index).ok_or_else(|| {
                     Diagnostic::new(format!("malformed {flag} format: trailing %"), 1)
@@ -131,9 +133,25 @@ pub fn compile_printf_program(
                 if directive == b'%' {
                     atoms.push(PrintfAtom::Literal(vec![b'%']));
                 } else {
-                    atoms.push(PrintfAtom::Directive(parse_directive(
-                        flag, bytes, &mut index,
-                    )?));
+                    match parse_directive(flag, bytes, &mut index)? {
+                        ParsedDirective::Known(parsed) => {
+                            atoms.push(PrintfAtom::Directive(parsed));
+                        }
+                        ParsedDirective::TruncatedTimeFamily(letter) => {
+                            warnings.push(format!(
+                                "rfd: warning: format directive `%{}' should be followed by another character",
+                                char::from(letter)
+                            ));
+                            atoms.push(PrintfAtom::Literal(bytes[start..=index].to_vec()));
+                        }
+                        ParsedDirective::Unrecognized(letter) => {
+                            warnings.push(format!(
+                                "rfd: warning: unrecognized format directive `%{}'",
+                                char::from(letter)
+                            ));
+                            atoms.push(PrintfAtom::Literal(bytes[start..=index].to_vec()));
+                        }
+                    }
                 }
             }
             b'\\' => {
@@ -218,25 +236,40 @@ fn parse_octal_escape(bytes: &[u8], index: &mut usize, first: u8) -> u8 {
     value as u8
 }
 
+/// A single `%`-introduced specifier. GNU find emits unrecognized directives
+/// verbatim, so the parser hands the letter back instead of failing.
+enum ParsedDirective {
+    Known(PrintfDirective),
+    Unrecognized(u8),
+    /// A time family letter that the format ends on. GNU warns that it should
+    /// be followed by another character and emits it as it stands.
+    TruncatedTimeFamily(u8),
+}
+
 fn parse_directive(
     flag: &str,
     bytes: &[u8],
     index: &mut usize,
-) -> Result<PrintfDirective, Diagnostic> {
+) -> Result<ParsedDirective, Diagnostic> {
     let mut format = PrintfFieldFormat::default();
 
+    // GNU find only scans `-`, `+`, ` ` and `#` as flags; a leading zero belongs
+    // to the width, so `%0-8s` is unrecognized while `%-08s` is not.
     loop {
         match bytes.get(*index).copied() {
             Some(b'-') => format.left_align = true,
-            Some(b'0') => format.zero_pad = true,
             Some(b'+') => format.always_sign = true,
+            Some(b' ') => format.space_sign = true,
             Some(b'#') => format.alternate = true,
             _ => break,
         }
         *index += 1;
     }
 
-    format.width = parse_optional_usize(flag, bytes, index)?;
+    if bytes.get(*index).is_some_and(|byte| byte.is_ascii_digit()) {
+        format.zero_pad = bytes[*index] == b'0';
+        format.width = parse_optional_usize(flag, bytes, index)?;
+    }
     if bytes.get(*index) == Some(&b'.') {
         *index += 1;
         format.precision = Some(parse_required_usize(flag, bytes, index)?);
@@ -250,8 +283,19 @@ fn parse_directive(
         b'a' => PrintfDirectiveKind::FullTimestamp(PrintfTimeFamily::Access),
         b'c' => PrintfDirectiveKind::FullTimestamp(PrintfTimeFamily::Change),
         b't' => PrintfDirectiveKind::FullTimestamp(PrintfTimeFamily::Modification),
-        b'B' => parse_birth_directive(flag, bytes, index)?,
-        b'A' | b'C' | b'T' => parse_time_family_directive(flag, directive, bytes, index)?,
+        b'B' => parse_birth_directive(bytes, index)?,
+        b'A' | b'C' | b'T' => {
+            // A format that ends on the family letter warns and emits it, as
+            // GNU find does, instead of failing the whole run.
+            let Some(selector_byte) = bytes.get(*index + 1).copied() else {
+                return Ok(ParsedDirective::TruncatedTimeFamily(directive));
+            };
+            *index += 1;
+            PrintfDirectiveKind::TimestampPart {
+                family: time_family(directive),
+                selector: parse_time_selector_byte(selector_byte),
+            }
+        }
         b'p' => PrintfDirectiveKind::Path,
         b'P' => PrintfDirectiveKind::RelativePath,
         b'H' => PrintfDirectiveKind::StartPath,
@@ -283,91 +327,48 @@ fn parse_directive(
         }
         b'G' => PrintfDirectiveKind::GroupId,
         b'F' => PrintfDirectiveKind::FileSystemType,
-        other => {
-            return Err(Diagnostic::new(
-                format!("unsupported {flag} directive %{}", char::from(other)),
-                1,
-            ));
-        }
+        other => return Ok(ParsedDirective::Unrecognized(other)),
     };
 
-    Ok(PrintfDirective { kind, format })
+    Ok(ParsedDirective::Known(PrintfDirective { kind, format }))
 }
 
 fn parse_birth_directive(
-    flag: &str,
     bytes: &[u8],
     index: &mut usize,
 ) -> Result<PrintfDirectiveKind, Diagnostic> {
     match bytes.get(*index + 1).copied() {
         Some(next) if is_time_selector_lead_byte(next) => {
-            let selector = parse_time_selector_byte(next).ok_or_else(|| {
-                Diagnostic::new(
-                    format!("unsupported {flag} time selector %B{}", char::from(next)),
-                    1,
-                )
-            })?;
             *index += 1;
             Ok(PrintfDirectiveKind::TimestampPart {
                 family: PrintfTimeFamily::Birth,
-                selector,
+                selector: parse_time_selector_byte(next),
             })
         }
         _ => Ok(PrintfDirectiveKind::FullTimestamp(PrintfTimeFamily::Birth)),
     }
 }
 
-fn parse_time_family_directive(
-    flag: &str,
-    directive: u8,
-    bytes: &[u8],
-    index: &mut usize,
-) -> Result<PrintfDirectiveKind, Diagnostic> {
-    let family = match directive {
+fn time_family(directive: u8) -> PrintfTimeFamily {
+    match directive {
         b'A' => PrintfTimeFamily::Access,
         b'C' => PrintfTimeFamily::Change,
         b'T' => PrintfTimeFamily::Modification,
         _ => unreachable!("caller restricts directive"),
-    };
-
-    let selector_byte = bytes.get(*index + 1).copied().ok_or_else(|| {
-        Diagnostic::new(
-            format!(
-                "malformed {flag} format: missing selector for %{}",
-                char::from(directive)
-            ),
-            1,
-        )
-    })?;
-    let selector = parse_time_selector_byte(selector_byte).ok_or_else(|| {
-        Diagnostic::new(
-            format!(
-                "unsupported {flag} time selector %{}{}",
-                char::from(directive),
-                char::from(selector_byte)
-            ),
-            1,
-        )
-    })?;
-    *index += 1;
-
-    Ok(PrintfDirectiveKind::TimestampPart { family, selector })
+    }
 }
 
 fn is_time_selector_lead_byte(byte: u8) -> bool {
     byte.is_ascii_alphabetic() || matches!(byte, b'@' | b'+')
 }
 
-fn parse_time_selector_byte(byte: u8) -> Option<PrintfTimeSelector> {
+/// GNU find accepts every byte as a time selector and hands it to `strftime`,
+/// which is what decides the rendering of the ones neither we nor find knows.
+fn parse_time_selector_byte(byte: u8) -> PrintfTimeSelector {
     match byte {
-        b'@' => Some(PrintfTimeSelector::EpochSeconds),
-        b'+' => Some(PrintfTimeSelector::GnuPlus),
-        b'a' | b'A' | b'b' | b'B' | b'c' | b'd' | b'D' | b'F' | b'g' | b'G' | b'h' | b'H'
-        | b'I' | b'j' | b'm' | b'M' | b'p' | b'r' | b'R' | b'S' | b't' | b'T' | b'u' | b'U'
-        | b'V' | b'w' | b'W' | b'x' | b'X' | b'y' | b'Y' | b'z' | b'Z' => {
-            Some(PrintfTimeSelector::Byte(byte))
-        }
-        _ => None,
+        b'@' => PrintfTimeSelector::EpochSeconds,
+        b'+' => PrintfTimeSelector::GnuPlus,
+        other => PrintfTimeSelector::Byte(other),
     }
 }
 
@@ -498,9 +499,9 @@ fn format_string_like(value: &[u8], format: PrintfFieldFormat) -> Vec<u8> {
         Some(limit) => &value[..value.len().min(limit)],
         None => value,
     };
-    let pad = if format.zero_pad
-        && format.precision.is_none()
-        && platform::printf_zero_pads_string_fields()
+    // `-` wins over `0`; otherwise the host C library decides whether `0`
+    // reaches a string field, and on the BSDs it does even with a precision.
+    let pad = if !format.left_align && format.zero_pad && platform::printf_zero_pads_string_fields()
     {
         b'0'
     } else {
@@ -510,12 +511,29 @@ fn format_string_like(value: &[u8], format: PrintfFieldFormat) -> Vec<u8> {
 }
 
 fn format_depth(depth: usize, format: PrintfFieldFormat) -> Vec<u8> {
-    let sign = if format.always_sign { Some(b'+') } else { None };
-    format_numeric_value(depth.to_string().into_bytes(), sign, format)
+    let sign = if format.always_sign {
+        Some(b'+')
+    } else if format.space_sign {
+        Some(b' ')
+    } else {
+        None
+    };
+    let mut digits = depth.to_string().into_bytes();
+    suppress_zero_digits(&mut digits, format);
+    format_numeric_value(digits, sign, format)
+}
+
+/// C prints no digits at all for a zero value under a precision of zero; the
+/// sign and the `#` prefix an octal field asks for are still emitted.
+fn suppress_zero_digits(digits: &mut Vec<u8>, format: PrintfFieldFormat) {
+    if format.precision == Some(0) && digits.iter().all(|byte| *byte == b'0') {
+        digits.clear();
+    }
 }
 
 fn format_mode_octal(mode: u32, format: PrintfFieldFormat) -> Vec<u8> {
     let mut digits = format!("{mode:o}").into_bytes();
+    suppress_zero_digits(&mut digits, format);
     if format.alternate && !digits.starts_with(b"0") {
         digits.insert(0, b'0');
     }
@@ -694,6 +712,7 @@ mod tests {
                     left_align: false,
                     zero_pad: false,
                     always_sign: false,
+                    space_sign: false,
                     alternate: false,
                 },
             })
@@ -753,7 +772,6 @@ mod tests {
                 "malformed -printf format: expected digits after `.`",
             ),
             ("%10", "malformed -printf format: trailing %"),
-            ("%q", "unsupported -printf directive %q"),
         ] {
             let error = compile_printf_program("-printf", OsStr::new(format)).unwrap_err();
             assert!(
@@ -762,6 +780,58 @@ mod tests {
                 error.message
             );
         }
+    }
+
+    #[test]
+    fn compiler_warns_about_unrecognized_directives_and_keeps_them_literal() {
+        let compiled = compile_printf_program("-printf", OsStr::new("A%QB%5Q%08.3J\n")).unwrap();
+
+        assert_eq!(
+            compiled.warnings,
+            vec![
+                "rfd: warning: unrecognized format directive `%Q'".to_string(),
+                "rfd: warning: unrecognized format directive `%Q'".to_string(),
+                "rfd: warning: unrecognized format directive `%J'".to_string(),
+            ]
+        );
+
+        let mut rendered = Vec::new();
+        for atom in &compiled.program.atoms {
+            match atom {
+                PrintfAtom::Literal(bytes) => rendered.extend_from_slice(bytes),
+                other => panic!("expected a literal atom, found {other:?}"),
+            }
+        }
+        assert_eq!(rendered, b"A%QB%5Q%08.3J\n".to_vec());
+    }
+
+    #[test]
+    fn compiler_treats_a_leading_zero_as_part_of_the_width() {
+        let program = compile_printf_program("-printf", OsStr::new("[%08s][%0s][%8s][%-08s]"))
+            .unwrap()
+            .program;
+
+        for (atom, width, zero_pad) in [
+            (&program.atoms[1], 8, true),
+            (&program.atoms[3], 0, true),
+            (&program.atoms[5], 8, false),
+            (&program.atoms[7], 8, true),
+        ] {
+            let PrintfAtom::Directive(PrintfDirective { format, .. }) = atom else {
+                panic!("expected a directive, found {atom:?}");
+            };
+            assert_eq!(format.width, Some(width));
+            assert_eq!(format.zero_pad, zero_pad);
+        }
+
+        assert!(
+            compile_printf_program("-printf", OsStr::new("%0-8s")).is_ok_and(|compiled| {
+                compiled
+                    .warnings
+                    .iter()
+                    .any(|warning| warning.ends_with("unrecognized format directive `%-'"))
+            })
+        );
     }
 
     #[test]
@@ -879,19 +949,50 @@ mod tests {
     }
 
     #[test]
-    fn compiler_rejects_missing_or_unknown_time_selectors() {
-        for (format, needle) in [
-            ("%A", "missing selector for %A"),
-            ("%C", "missing selector for %C"),
-            ("%T", "missing selector for %T"),
-            ("%Aq", "unsupported -printf time selector %Aq"),
-            ("%T~", "unsupported -printf time selector %T~"),
+    fn compiler_warns_for_time_family_directives_that_end_the_format() {
+        for (format, letter) in [("%A", "%A"), ("%C", "%C"), ("%T", "%T")] {
+            let compiled = compile_printf_program("-printf", OsStr::new(format)).unwrap();
+
+            assert_eq!(
+                compiled.warnings,
+                vec![format!(
+                    "rfd: warning: format directive `{letter}' should be followed by another character"
+                )],
+                "{format}"
+            );
+            assert_eq!(
+                compiled.program.atoms,
+                vec![PrintfAtom::Literal(format.as_bytes().to_vec())],
+                "{format}"
+            );
+        }
+    }
+
+    #[test]
+    fn compiler_accepts_any_byte_as_a_time_selector() {
+        let program = compile_printf_program("-printf", OsStr::new("[%TQ][%A~][%C7][%Ts][%Te]"))
+            .unwrap()
+            .program;
+
+        for (atom, expected) in [
+            (&program.atoms[1], b'Q'),
+            (&program.atoms[3], b'~'),
+            (&program.atoms[5], b'7'),
+            (&program.atoms[7], b's'),
+            (&program.atoms[9], b'e'),
         ] {
-            let error = compile_printf_program("-printf", OsStr::new(format)).unwrap_err();
             assert!(
-                error.message.contains(needle),
-                "{format} -> {}",
-                error.message
+                matches!(
+                    atom,
+                    PrintfAtom::Directive(PrintfDirective {
+                        kind: PrintfDirectiveKind::TimestampPart {
+                            selector: PrintfTimeSelector::Byte(byte),
+                            ..
+                        },
+                        ..
+                    }) if *byte == expected
+                ),
+                "{expected} -> {atom:?}"
             );
         }
     }
@@ -971,6 +1072,93 @@ mod tests {
                 }
             ),
             b"0664"
+        );
+    }
+
+    #[test]
+    fn string_fields_zero_pad_through_a_precision_unless_left_aligned() {
+        let prefixed = if crate::platform::printf_zero_pads_string_fields() {
+            b"00000f1.".to_vec()
+        } else {
+            b"     f1.".to_vec()
+        };
+        assert_eq!(
+            format_string_like(
+                b"f1.txt",
+                PrintfFieldFormat {
+                    width: Some(8),
+                    precision: Some(3),
+                    zero_pad: true,
+                    ..PrintfFieldFormat::default()
+                }
+            ),
+            prefixed
+        );
+        assert_eq!(
+            format_string_like(
+                b"f1.txt",
+                PrintfFieldFormat {
+                    width: Some(8),
+                    precision: Some(3),
+                    zero_pad: true,
+                    left_align: true,
+                    ..PrintfFieldFormat::default()
+                }
+            ),
+            b"f1.     "
+        );
+    }
+
+    #[test]
+    fn depth_honours_the_space_flag_and_drops_zero_digits_under_a_zero_precision() {
+        let space = PrintfFieldFormat {
+            space_sign: true,
+            ..PrintfFieldFormat::default()
+        };
+        assert_eq!(format_depth(0, space), b" 0");
+        assert_eq!(
+            format_depth(
+                0,
+                PrintfFieldFormat {
+                    width: Some(5),
+                    zero_pad: true,
+                    space_sign: true,
+                    ..PrintfFieldFormat::default()
+                }
+            ),
+            b" 0000"
+        );
+        // A `+` takes precedence over the space flag.
+        assert_eq!(
+            format_depth(
+                0,
+                PrintfFieldFormat {
+                    always_sign: true,
+                    space_sign: true,
+                    ..PrintfFieldFormat::default()
+                }
+            ),
+            b"+0"
+        );
+        assert_eq!(
+            format_depth(
+                0,
+                PrintfFieldFormat {
+                    precision: Some(0),
+                    ..PrintfFieldFormat::default()
+                }
+            ),
+            b""
+        );
+        assert_eq!(
+            format_depth(
+                1,
+                PrintfFieldFormat {
+                    precision: Some(0),
+                    ..PrintfFieldFormat::default()
+                }
+            ),
+            b"1"
         );
     }
 

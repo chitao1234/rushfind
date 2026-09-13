@@ -170,7 +170,7 @@ not expose the required data, planning fails with an explicit diagnostic.
 - -fls
 
 The current -printf and -fprintf subset supports GNU-style field formatting
-with %[flags][width][.precision]directive.
+with %[flags][width][.precision]directive, including the space flag.
 
 Supported directives currently include:
 
@@ -180,8 +180,15 @@ Supported directives currently include:
 ```
 
 GNU special time selectors %A@, %C@, %T@, %B@, %A+, %C+, %T+, and %B+ are
-supported. Unsupported directives fail during planning with explicit
-diagnostics.
+supported. %A\*, %C\*, %T\*, and %B\* accept every GNU time selector, including
+%e, %k, %l, %n, %s, %C, and %v; a selector with no dedicated rendering is
+handed to the host strftime, which is what GNU find itself does, so
+unrecognized selectors render exactly as GNU find renders them on the same
+host.
+
+An unrecognized directive warns on stderr once per occurrence in the format,
+not once per visited entry, and is emitted literally instead of failing; the
+exit status stays 0.
 
 Escape handling also supports literal percent, backslash, newline, tab, and
 NUL output forms.

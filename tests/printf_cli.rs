@@ -122,6 +122,68 @@ fn ordered_printf_backslash_c_stops_only_the_current_printf_action() {
 }
 
 #[test]
+fn ordered_printf_unknown_directives_warn_once_per_occurrence_and_render_literally() {
+    let root = tempdir().unwrap();
+    fs::write(root.path().join("file.txt"), "x").unwrap();
+    fs::write(root.path().join("other.txt"), "y").unwrap();
+
+    let output = cargo_bin_output_with_env_timeout(
+        &[
+            path_arg(root.path()),
+            "-maxdepth".into(),
+            "1".into(),
+            "-printf".into(),
+            "A%QB%5Q\\n".into(),
+        ],
+        1,
+        &[("RUSHFIND_WARNINGS", "on")],
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    // One line per visited entry (the root plus two files).
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "A%QB%5Q\nA%QB%5Q\nA%QB%5Q\n"
+    );
+    // GNU find warns once per occurrence in the format, not once per visited entry.
+    assert_eq!(
+        String::from_utf8(output.stderr).unwrap(),
+        "rfd: warning: unrecognized format directive `%Q'\n\
+         rfd: warning: unrecognized format directive `%Q'\n"
+    );
+}
+
+#[test]
+fn ordered_printf_renders_the_gnu_space_and_epoch_time_selectors() {
+    let root = tempdir().unwrap();
+    let path = root.path().join("file.txt");
+    fs::write(&path, "x").unwrap();
+    let stamp = fs::FileTimes::new()
+        .set_modified(std::time::UNIX_EPOCH + Duration::from_secs(1_577_880_000));
+    fs::File::open(&path).unwrap().set_times(stamp).unwrap();
+
+    let output = cargo_bin_output_with_env_timeout(
+        &[
+            path_arg(path.as_path()),
+            "-maxdepth".into(),
+            "0".into(),
+            "-printf".into(),
+            "[%Te][%Tk][%Tl][%TC][%Tv][%Ts][%Tn][% 5s][%+5d]\\n".into(),
+        ],
+        1,
+        &[("TZ", "UTC"), ("LC_ALL", "C")],
+        Duration::from_secs(5),
+    );
+
+    assert!(output.status.success(), "{:?}", output);
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "[ 1][12][12][20][ 1-Jan-2020][1577880000][\n][    1][   +0]\n"
+    );
+}
+
+#[test]
 fn ordered_printf_unknown_escapes_warn_per_occurrence_and_render_literally() {
     let root = tempdir().unwrap();
     fs::write(root.path().join("file.txt"), "x").unwrap();

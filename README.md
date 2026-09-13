@@ -51,12 +51,17 @@ normal `cargo build` does not depend on it.
   `%l`, `%i`, `%n`, `%D`, `%b`, `%k`, `%u`, `%U`, `%US`, `%g`, `%G`, `%GS`, `%F`, `%a`, `%c`,
   `%t`, `%B`, `%A*`, `%C*`, `%T*`, `%B*`, `%%`, `\\`, `\n`, `\t`, and `\0`
 - Supported `-printf` directives accept GNU-style field formatting with
-  `%[flags][width][.precision]directive`
+  `%[flags][width][.precision]directive`, including the space flag
 - Time-oriented `-printf` directives render in the process local timezone while freezing textual
   names to C-locale spellings in the current implementation
 - GNU special time selectors `%A@`, `%C@`, `%T@`, `%B@`, `%A+`, `%C+`, `%T+`, and `%B+` are
   supported
-- Unsupported `-printf` directives fail during planning with explicit diagnostics
+- `%A*`, `%C*`, `%T*`, and `%B*` accept every GNU time selector, including `%e`, `%k`, `%l`, `%n`,
+  `%s`, `%C`, and `%v`; a selector that `rfd` has no dedicated rendering for is handed to the host
+  `strftime`, which is what GNU `find` itself does, so unrecognized selectors render exactly as
+  GNU `find` renders them on the same host
+- Unrecognized `-printf` directives warn on stderr once per occurrence in the format — not once per
+  visited entry — and are emitted literally instead of failing; the exit status stays 0
 - Birth-time `-printf` directives and `B`-time predicates use exact Unix-family backend reads when
   the host exposes birth time, even on hosts where local GNU `find` does not expose equivalent
   `%B*` output

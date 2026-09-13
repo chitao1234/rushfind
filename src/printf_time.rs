@@ -187,15 +187,20 @@ pub(crate) fn render_selector_bytes(
             b'b' | b'h' => Ok(MONTHS_ABBR[parts.local.tm_mon as usize].to_vec()),
             b'B' => Ok(MONTHS_FULL[parts.local.tm_mon as usize].to_vec()),
             b'c' => Ok(render_c_locale_datetime(parts)),
+            b'C' => Ok(format!("{:02}", (parts.local.tm_year + 1900).div_euclid(100)).into_bytes()),
             b'd' => Ok(format!("{:02}", parts.local.tm_mday).into_bytes()),
             b'D' | b'x' => Ok(render_month_day_year(parts)),
+            b'e' => Ok(format!("{:2}", parts.local.tm_mday).into_bytes()),
             b'F' => Ok(render_iso_date(parts)),
             b'g' | b'G' | b'V' => render_iso_week_fields(parts, byte),
             b'H' => Ok(format!("{:02}", parts.local.tm_hour).into_bytes()),
             b'I' => Ok(format!("{:02}", hour_12(parts.local.tm_hour)).into_bytes()),
             b'j' => Ok(format!("{:03}", parts.local.tm_yday + 1).into_bytes()),
+            b'k' => Ok(format!("{:2}", parts.local.tm_hour).into_bytes()),
+            b'l' => Ok(format!("{:2}", hour_12(parts.local.tm_hour)).into_bytes()),
             b'M' => Ok(format!("{:02}", parts.local.tm_min).into_bytes()),
             b'm' => Ok(format!("{:02}", parts.local.tm_mon + 1).into_bytes()),
+            b'n' => Ok(vec![b'\n']),
             b'p' => Ok(if parts.local.tm_hour < 12 {
                 b"AM".to_vec()
             } else {
@@ -210,6 +215,7 @@ pub(crate) fn render_selector_bytes(
             )
             .into_bytes()),
             b'R' => Ok(format!("{:02}:{:02}", parts.local.tm_hour, parts.local.tm_min).into()),
+            b's' => Ok(parts.timestamp.seconds.to_string().into_bytes()),
             b'S' => Ok(seconds_with_fraction(parts.local.tm_sec, parts.timestamp.nanos).into()),
             b't' => Ok(vec![b'\t']),
             b'T' | b'X' => Ok(format!(
@@ -223,20 +229,32 @@ pub(crate) fn render_selector_bytes(
                 .to_string()
                 .into_bytes()),
             b'U' | b'W' => Ok(render_week_number(parts, byte).into_bytes()),
+            b'v' => Ok(format!(
+                "{:2}-{}-{:04}",
+                parts.local.tm_mday,
+                std::str::from_utf8(MONTHS_ABBR[parts.local.tm_mon as usize]).unwrap(),
+                parts.local.tm_year + 1900
+            )
+            .into_bytes()),
             b'w' => Ok(parts.local.tm_wday.to_string().into_bytes()),
             b'Y' => Ok(format!("{:04}", parts.local.tm_year + 1900).into_bytes()),
             b'y' => Ok(format!("{:02}", (parts.local.tm_year + 1900) % 100).into_bytes()),
             b'Z' => Ok(parts.timezone_name.clone()),
             b'z' => Ok(render_numeric_offset(parts.utc_offset_seconds)),
-            other => Err(Diagnostic::new(
-                format!(
-                    "internal error: time selector {} not implemented yet",
-                    char::from(other)
-                ),
-                1,
-            )),
+            other => Ok(render_unknown_selector(parts, other)),
         },
     }
+}
+
+#[cfg(unix)]
+fn render_unknown_selector(parts: &ResolvedTimeParts, selector: u8) -> Vec<u8> {
+    let format = [b'%', selector, 0];
+    strftime_bytes(&parts.local, &format).unwrap_or_else(|| vec![selector])
+}
+
+#[cfg(windows)]
+fn render_unknown_selector(_parts: &ResolvedTimeParts, selector: u8) -> Vec<u8> {
+    vec![selector]
 }
 
 fn render_epoch_seconds(timestamp: Timestamp) -> Vec<u8> {
@@ -511,6 +529,43 @@ mod tests {
         assert_eq!(
             render_full_time_bytes(&parts).unwrap(),
             b"Mon Mar  4 13:06:07.1234567890 2024"
+        );
+    }
+
+    #[test]
+    fn renders_the_gnu_space_padded_and_epoch_selectors() {
+        let parts = sample_parts();
+        for (selector, expected) in [
+            (b'e', &b" 4"[..]),
+            (b'k', &b"13"[..]),
+            (b'l', &b" 1"[..]),
+            (b'n', &b"\n"[..]),
+            (b'C', &b"20"[..]),
+            (b'v', &b" 4-Mar-2024"[..]),
+        ] {
+            assert_eq!(
+                render_selector_bytes(&parts, PrintfTimeSelector::Byte(selector)).unwrap(),
+                expected,
+                "selector {}",
+                char::from(selector)
+            );
+        }
+        // `%s` is strftime's epoch counter, not the `%S` field: whole seconds only.
+        assert_eq!(
+            render_selector_bytes(&parts, PrintfTimeSelector::Byte(b's')).unwrap(),
+            b"1709528767"
+        );
+    }
+
+    #[test]
+    fn renders_unknown_selectors_through_the_host_strftime() {
+        let parts = sample_parts();
+        // Both the macOS and the glibc C libraries pass an unrecognized
+        // conversion through verbatim, so the leading percent survives.
+        let rendered = render_selector_bytes(&parts, PrintfTimeSelector::Byte(b'Q')).unwrap();
+        assert!(
+            rendered == b"Q" || rendered == b"%Q",
+            "unexpected rendering: {rendered:?}"
         );
     }
 
