@@ -671,7 +671,7 @@ fn lower_predicate(
         | Predicate::MMin(_)
         | Predicate::BTime(_)
         | Predicate::BMin(_)
-        | Predicate::DayStart) => lower_temporal_predicate(predicate, state),
+        | Predicate::DayStart) => lower_temporal_predicate(predicate, state, capabilities),
         predicate @ (Predicate::Newer(_)
         | Predicate::ANewer(_)
         | Predicate::CNewer(_)
@@ -989,6 +989,7 @@ fn lower_metadata_predicate(
 fn lower_temporal_predicate(
     predicate: Predicate,
     state: &mut PlanningState,
+    capabilities: &PlatformCapabilities,
 ) -> Result<RuntimeExpr, Diagnostic> {
     match predicate {
         Predicate::Used(raw) => Ok(RuntimeExpr::Predicate(RuntimePredicate::Used(
@@ -1006,8 +1007,14 @@ fn lower_temporal_predicate(
         Predicate::MMin(raw) => {
             lower_relative_minutes("-mmin", raw, TimestampKind::Modification, state)
         }
-        Predicate::BTime(raw) => lower_relative_time("-Btime", raw, TimestampKind::Birth, state),
-        Predicate::BMin(raw) => lower_relative_minutes("-Bmin", raw, TimestampKind::Birth, state),
+        Predicate::BTime(raw) => {
+            require_platform_feature(capabilities, PlatformFeature::BirthTime, state)?;
+            lower_relative_time("-Btime", raw, TimestampKind::Birth, state)
+        }
+        Predicate::BMin(raw) => {
+            require_platform_feature(capabilities, PlatformFeature::BirthTime, state)?;
+            lower_relative_minutes("-Bmin", raw, TimestampKind::Birth, state)
+        }
         Predicate::DayStart => {
             state.temporal.daystart_active = true;
             Ok(RuntimeExpr::Barrier)
