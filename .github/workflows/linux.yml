@@ -38,7 +38,7 @@ jobs:
         if: steps.gnu-find-cache.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
-          sudo apt-get install -y autoconf automake bison gettext texinfo
+          sudo apt-get install -y autoconf automake autopoint bison gettext texinfo
 
       - name: Build GNU findutils from source
         if: steps.gnu-find-cache.outputs.cache-hit != 'true'
