@@ -5,7 +5,7 @@ use crate::eval::EvalContext;
 use crate::follow::FollowMode;
 use crate::metadata_format::{name_or_id_bytes, principal_id_bytes, symbolic_mode_string};
 use crate::platform::path::{
-    display_bytes, display_os_bytes, encoded_bytes, relative_dir_for_printf,
+    display_base_name, display_bytes, display_os_bytes, encoded_bytes, relative_dir_for_printf,
 };
 use crate::printf_time::{render_full_time_bytes, render_selector_bytes};
 use std::ffi::OsStr;
@@ -75,10 +75,9 @@ fn render_path_directive(
         PrintfDirectiveKind::StartPath => {
             format_string_like(&display_bytes(entry.start_path()), directive.format)
         }
-        PrintfDirectiveKind::Basename => format_string_like(
-            &display_os_bytes(entry.path.file_name().unwrap_or_else(|| OsStr::new(""))),
-            directive.format,
-        ),
+        PrintfDirectiveKind::Basename => {
+            format_string_like(&display_base_name(&entry.path), directive.format)
+        }
         PrintfDirectiveKind::Dirname => format_string_like(
             &display_bytes(relative_dir_for_printf(&entry.path).as_path()),
             directive.format,

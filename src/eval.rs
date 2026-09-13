@@ -6,10 +6,9 @@ use crate::entry::{AccessMode, EntryContext, EntryKind};
 use crate::follow::FollowMode;
 use crate::planner::{RuntimeAction, RuntimeExpr, RuntimePredicate};
 use crate::platform::filesystem::{FilesystemKey, FilesystemSnapshot};
-use crate::platform::path::normalize_match_text;
+use crate::platform::path::{match_base_name, normalize_match_text};
 use crate::runtime_pipeline::{EvalStep, begin_entry_eval, resume_entry_eval};
 use crate::time::{NewerMatcher, Timestamp, TimestampKind};
-use std::ffi::OsStr;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -361,8 +360,8 @@ pub(crate) fn evaluate_predicate(
         RuntimePredicate::Writable => entry.access(AccessMode::Write),
         RuntimePredicate::Executable => entry.access(AccessMode::Execute),
         RuntimePredicate::Name(glob) => {
-            let basename = entry.path.file_name().unwrap_or_else(|| OsStr::new(""));
-            glob.is_match_with_ctype(basename, context.ctype_profile())
+            let basename = match_base_name(entry.path.as_os_str());
+            glob.is_match_with_ctype(basename.as_ref(), context.ctype_profile())
         }
         RuntimePredicate::Path(glob) => {
             let normalized = normalize_match_text(entry.path.as_os_str());
