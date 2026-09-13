@@ -273,6 +273,18 @@ fn predicate_label(predicate: &RuntimePredicate) -> &'static str {
                 rushfind::time::TimestampKind::Modification,
                 rushfind::time::RelativeTimeUnit::Days,
             ) => "mtime",
+            (
+                rushfind::time::TimestampKind::Access,
+                rushfind::time::RelativeTimeUnit::Seconds,
+            ) => "atime-seconds",
+            (
+                rushfind::time::TimestampKind::Change,
+                rushfind::time::RelativeTimeUnit::Seconds,
+            ) => "ctime-seconds",
+            (
+                rushfind::time::TimestampKind::Modification,
+                rushfind::time::RelativeTimeUnit::Seconds,
+            ) => "mtime-seconds",
             (rushfind::time::TimestampKind::Access, rushfind::time::RelativeTimeUnit::Minutes) => {
                 "amin"
             }

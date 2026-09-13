@@ -41,6 +41,9 @@ pub enum TimestampKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RelativeTimeUnit {
+    /// The BSD unit spellings (`-mtime 1h30m`) compare raw seconds instead of
+    /// rolling day or minute windows.
+    Seconds,
     Minutes,
     Days,
 }
@@ -48,6 +51,7 @@ pub enum RelativeTimeUnit {
 impl RelativeTimeUnit {
     const fn seconds(self) -> i64 {
         match self {
+            Self::Seconds => 1,
             Self::Minutes => 60,
             Self::Days => 86_400,
         }
@@ -163,13 +167,22 @@ impl RelativeTimeMatcher {
     }
 
     pub fn matches_timestamp_checked(&self, actual: Timestamp) -> Result<bool, Diagnostic> {
+        // BSD's unit spellings compare the whole-second difference directly,
+        // with no day rounding and no `-daystart`.
+        if matches!(self.unit, RelativeTimeUnit::Seconds) {
+            return Ok(matches_elapsed_units(
+                &self.comparison,
+                self.baseline.seconds - actual.seconds,
+            ));
+        }
+
         if self.daystart
             && matches!(self.unit, RelativeTimeUnit::Days)
             && self.comparison.integral_value().is_some()
         {
             let baseline_day = local_calendar_day(self.baseline)?;
             let actual_day = local_calendar_day(actual)?;
-            Ok(matches_calendar_day_window(
+            Ok(matches_elapsed_units(
                 &self.comparison,
                 baseline_day - actual_day,
             ))
@@ -250,6 +263,11 @@ struct TimeComparisonShifts {
 impl RelativeTimeUnit {
     const fn rolling_window_shifts(self) -> TimeComparisonShifts {
         match self {
+            Self::Seconds => TimeComparisonShifts {
+                exact_shift_units: 0,
+                less_adjustment_units: 0,
+                greater_shift_units: 0,
+            },
             Self::Minutes => TimeComparisonShifts {
                 exact_shift_units: 1,
                 less_adjustment_units: 0,
@@ -283,15 +301,17 @@ enum QuantizedOffset {
     Overflow,
 }
 
-fn matches_calendar_day_window(comparison: &TimeComparison, elapsed_days: i64) -> bool {
+/// Compares a whole-unit elapsed count against an exact/less/greater request.
+/// Calendar-day buckets and BSD's second comparisons share this shape.
+fn matches_elapsed_units(comparison: &TimeComparison, elapsed_units: i64) -> bool {
     let Some(expected) = comparison.integral_value() else {
         return false;
     };
 
     match comparison {
-        TimeComparison::Exactly(_) => elapsed_days == expected,
-        TimeComparison::LessThan(_) => elapsed_days < expected,
-        TimeComparison::GreaterThan(_) => elapsed_days > expected,
+        TimeComparison::Exactly(_) => elapsed_units == expected,
+        TimeComparison::LessThan(_) => elapsed_units < expected,
+        TimeComparison::GreaterThan(_) => elapsed_units > expected,
     }
 }
 
@@ -568,6 +588,10 @@ pub fn parse_relative_time_argument(
 }
 
 pub fn validate_time_argument(flag: &str, value: &OsStr) -> Result<(), Diagnostic> {
+    if flag_accepts_bsd_duration(flag) && parse_bsd_duration(flag, value)?.is_some() {
+        return Ok(());
+    }
+
     parse_time_comparison(flag, value).map(|_| ())
 }
 
@@ -798,4 +822,222 @@ enum ComparisonKind {
     Exactly,
     LessThan,
     GreaterThan,
+}
+
+/// Whether this flag takes BSD unit suffixes. FreeBSD spells units on the
+/// day-based primaries only; the minute-based ones stay numeric.
+pub fn flag_accepts_bsd_duration(flag: &str) -> bool {
+    matches!(flag, "-atime" | "-ctime" | "-mtime" | "-Btime")
+}
+
+/// Parses BSD's `[+-]?([0-9]+[smhdw])+` spelling into whole seconds.
+///
+/// Returns `None` when the value carries no unit letter, which leaves the GNU
+/// numeric and fractional forms to [`parse_time_comparison`].
+pub fn parse_bsd_duration(
+    flag: &str,
+    value: &OsStr,
+) -> Result<Option<(TimeComparison, i64)>, Diagnostic> {
+    let rendered = std::str::from_utf8(value.as_encoded_bytes())
+        .map_err(|_| invalid_numeric_argument(flag, value))?;
+
+    let (kind, body) = match rendered.as_bytes() {
+        [b'+', rest @ ..] => (ComparisonKind::GreaterThan, rest),
+        [b'-', rest @ ..] => (ComparisonKind::LessThan, rest),
+        _ => (ComparisonKind::Exactly, rendered.as_bytes()),
+    };
+
+    if !body.iter().any(u8::is_ascii_alphabetic) {
+        return Ok(None);
+    }
+
+    let mut total: i64 = 0;
+    let mut index = 0;
+    while index < body.len() {
+        let start = index;
+        while index < body.len() && body[index].is_ascii_digit() {
+            index += 1;
+        }
+        if start == index {
+            return Err(invalid_numeric_argument(flag, value));
+        }
+
+        let unit = body
+            .get(index)
+            .ok_or_else(|| invalid_numeric_argument(flag, value))?;
+        let multiplier: i64 = match unit {
+            b's' => 1,
+            b'm' => 60,
+            b'h' => 3_600,
+            b'd' => 86_400,
+            b'w' => 604_800,
+            _ => return Err(invalid_numeric_argument(flag, value)),
+        };
+        index += 1;
+
+        let amount = std::str::from_utf8(&body[start..index - 1])
+            .ok()
+            .and_then(|digits| digits.parse::<i64>().ok())
+            .ok_or_else(|| invalid_numeric_argument(flag, value))?;
+        total = amount
+            .checked_mul(multiplier)
+            .and_then(|component| total.checked_add(component))
+            .ok_or_else(|| invalid_numeric_argument(flag, value))?;
+    }
+
+    let amount = total
+        .to_string()
+        .parse::<TimeAmount>()
+        .map_err(|_| invalid_numeric_argument(flag, value))?;
+    let comparison = match kind {
+        ComparisonKind::Exactly => TimeComparison::Exactly(amount),
+        ComparisonKind::LessThan => TimeComparison::LessThan(amount),
+        ComparisonKind::GreaterThan => TimeComparison::GreaterThan(amount),
+    };
+
+    Ok(Some((comparison, total)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        RelativeTimeMatcher, RelativeTimeUnit, TimeComparison, Timestamp, TimestampKind,
+        flag_accepts_bsd_duration, parse_bsd_duration,
+    };
+    use std::ffi::OsStr;
+
+    fn duration(flag: &str, value: &str) -> Option<i64> {
+        let parsed = parse_bsd_duration(flag, OsStr::new(value)).unwrap();
+        let (comparison, seconds) = parsed?;
+        assert_eq!(
+            comparison.integral_value(),
+            Some(seconds),
+            "the amount has to carry the same seconds it was built from"
+        );
+        Some(seconds)
+    }
+
+    fn comparison(flag: &str, value: &str) -> TimeComparison {
+        parse_bsd_duration(flag, OsStr::new(value))
+            .unwrap()
+            .unwrap()
+            .0
+    }
+
+    #[test]
+    fn durations_add_components_and_scale_by_unit() {
+        for (value, seconds) in [
+            ("1s", 1),
+            ("30m", 1800),
+            ("1h", 3600),
+            ("1d", 86400),
+            ("1w", 604800),
+            ("1h30m", 5400),
+            ("2d12h", 216000),
+            ("0w1h30m45s", 5445),
+            ("1h1800s", 5400),
+        ] {
+            assert_eq!(duration("-mtime", value), Some(seconds), "{value}");
+        }
+    }
+
+    #[test]
+    fn durations_carry_the_comparison_sign() {
+        assert_eq!(
+            comparison("-mtime", "+1h"),
+            TimeComparison::GreaterThan("3600".parse().unwrap())
+        );
+        assert_eq!(
+            comparison("-mtime", "-1h30m"),
+            TimeComparison::LessThan("5400".parse().unwrap())
+        );
+        assert_eq!(
+            comparison("-mtime", "2h"),
+            TimeComparison::Exactly("7200".parse().unwrap())
+        );
+    }
+
+    #[test]
+    fn values_without_a_unit_belong_to_the_gnu_forms() {
+        for value in ["1", "0", "+2", "-3", "0.5", "1.25"] {
+            assert_eq!(duration("-mtime", value), None, "{value}");
+        }
+    }
+
+    #[test]
+    fn malformed_durations_are_rejected() {
+        for value in ["h", "1x", "1h3", "1.5h", "1hh", "1h-2m", "1h 30m"] {
+            let parsed = parse_bsd_duration("-mtime", OsStr::new(value));
+            assert!(parsed.is_err(), "{value:?} should be rejected");
+        }
+
+        // Signs and empty values carry no unit, so the GNU numeric forms own
+        // their diagnostics.
+        for value in ["", "-", "+"] {
+            assert_eq!(duration("-mtime", value), None, "{value:?}");
+        }
+    }
+
+    #[test]
+    fn overflowing_durations_are_rejected() {
+        for value in [
+            "99999999999999999999s",
+            "99999999999999999999d",
+            "9999999999999999999h",
+            "9999999999999999999w",
+            "9223372036854775807s1s",
+        ] {
+            let parsed = parse_bsd_duration("-mtime", OsStr::new(value));
+            assert!(parsed.is_err(), "{value:?} should overflow");
+        }
+    }
+
+    #[test]
+    fn only_the_day_primaries_take_units() {
+        for flag in ["-atime", "-ctime", "-mtime", "-Btime"] {
+            assert!(flag_accepts_bsd_duration(flag), "{flag}");
+        }
+        for flag in ["-amin", "-cmin", "-mmin", "-Bmin"] {
+            assert!(!flag_accepts_bsd_duration(flag), "{flag}");
+        }
+    }
+
+    /// BSD compares the whole-second difference directly, with no window
+    /// rounding and no `-daystart`.
+    #[test]
+    fn second_units_compare_the_raw_difference() {
+        let baseline = Timestamp::new(1_000_000, 0);
+        let at = |seconds: i64| Timestamp::new(1_000_000 - seconds, 0);
+        let matcher = |comparison: TimeComparison, daystart: bool| {
+            RelativeTimeMatcher::new(
+                TimestampKind::Modification,
+                RelativeTimeUnit::Seconds,
+                comparison,
+                baseline,
+                daystart,
+            )
+        };
+
+        let exact = matcher(
+            TimeComparison::Exactly("3600".parse().unwrap()),
+            false,
+        );
+        assert!(exact.matches_timestamp(at(3600)));
+        assert!(!exact.matches_timestamp(at(3599)));
+        assert!(!exact.matches_timestamp(at(3601)));
+
+        let greater = matcher(
+            TimeComparison::GreaterThan("3600".parse().unwrap()),
+            false,
+        );
+        assert!(greater.matches_timestamp(at(3601)));
+        assert!(!greater.matches_timestamp(at(3600)));
+
+        let less = matcher(TimeComparison::LessThan("3600".parse().unwrap()), false);
+        assert!(less.matches_timestamp(at(3599)));
+        assert!(!less.matches_timestamp(at(3600)));
+
+        // `-daystart` moves calendar-day buckets, not raw seconds.
+        assert!(less.matches_timestamp(at(3599)));
+    }
 }

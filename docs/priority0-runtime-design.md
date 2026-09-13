@@ -1,6 +1,23 @@
 # Priority 0 runtime design
 
-This document defines the remaining Priority 0 work before implementation:
+All four steps below are implemented: `-X` and `-exit` landed first, then the
+BSD unit durations and the NetBSD `-since` aliases. The semantics the document
+left open are settled in the code as follows.
+
+- **Unit durations compare raw seconds.** FreeBSD's `f_Xtime` takes the
+  `F_EXACTTIME` branch for a suffixed value and compares `now - xtime` against
+  the duration in seconds, with no day rounding and no `-daystart`; only the
+  unsuffixed form rounds up to whole 24-hour periods. rfd matches that, so
+  `-mtime 1h30m` matches a file whose whole-second age is exactly 5400 and
+  `-mtime +1h` is a strict comparison. The minute primaries keep GNU's rounding
+  rather than FreeBSD's ceiling, since `-mmin` is a GNU spelling.
+- **The aliases are the `-newerXY` spellings.** `-since` is `-newermt`,
+  `-asince` is `-newerat`, `-csince` is `-newerct`.
+- **Birth-time predicates read the same timestamp `%B` renders**, and a
+  panicking worker now reports an error instead of leaving the run waiting for
+  work that will never arrive.
+
+This document defined the remaining Priority 0 work before implementation:
 
 - BSD `-X` safe-for-`xargs` output filtering.
 - NetBSD `-exit [status]` with explicit process status propagation.

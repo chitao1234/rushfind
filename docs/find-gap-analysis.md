@@ -76,6 +76,17 @@ command-line symlinks), `-X`, `-printx`, `-rm`, `-exit [STATUS]`.
   reported.
 - **`-O0` means what GNU means**: the written test order is kept instead of
   reordering the cheap predicates.
+- **BSD unit durations work**: `-mtime 1h30m`, `-atime 2d12h`, `-Btime -90m` and
+  the rest of the `[+-]?([0-9]+[smhdw])+` grammar, compared as raw seconds the
+  way FreeBSD's `f_Xtime` does, and only on the day-based primaries. The
+  expectations are pinned against the platform's BSD `find` where it exists.
+- **NetBSD's `-since`, `-asince` and `-csince` are the `-newermt`, `-newerat`
+  and `-newerct` spellings**, sharing their date parsing.
+- **Birth-time predicates read birth time.** `-Bmin` and `-Btime` panicked on a
+  path that assumed only `-newerXY` reaches birth time; a fresh file now matches
+  `-Btime 0` and `-Bmin -1`, as it does under BSD `find`.
+- **A panicking worker reports an error** rather than hanging the run: the
+  panic sets the fatal flag, which now also releases every other worker.
 - **Dead design surface removed**: `ExecutionPlan::parallel_policy`,
   `optimizer::Requirement`, `OutputPresentation`, `EntryTicket`.
 
@@ -134,10 +145,6 @@ lock contention) rather than precede it.
 - `-acl` (FreeBSD). Needs an ACL reader behind a capability gate; planning must
   fail explicitly on platforms without one rather than infer ACL presence from
   mode bits.
-- BSD time arguments: compound durations (`-mtime 1h30m`) and the NetBSD
-  reference-time aliases (`-asince`, `-csince`, `-since`, `-newerat`,
-  `-newerct`, `-newermt`). The literal-time parser is the intended backend; see
-  `priority0-runtime-design.md` for the accepted subset.
 - `-flags` on macOS knows `arch`, `nodump` and `uchg`; the host also defines
   `hidden`, `opaque` and others that `-flags +hidden` should accept.
 

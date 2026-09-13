@@ -510,6 +510,21 @@ fn classify_time_atom(token: Arg<'_>) -> Option<AtomKind> {
         Some(AtomKind::Newer(NewerAtom::ANewer))
     } else if token.matches("-cnewer") {
         Some(AtomKind::Newer(NewerAtom::CNewer))
+    } else if token.matches("-since") {
+        Some(AtomKind::Newer(NewerAtom::NewerXY {
+            current: 'm',
+            reference: 't',
+        }))
+    } else if token.matches("-asince") {
+        Some(AtomKind::Newer(NewerAtom::NewerXY {
+            current: 'a',
+            reference: 't',
+        }))
+    } else if token.matches("-csince") {
+        Some(AtomKind::Newer(NewerAtom::NewerXY {
+            current: 'c',
+            reference: 't',
+        }))
     } else {
         parse_newerxy_flag(token)
             .map(|(current, reference)| AtomKind::Newer(NewerAtom::NewerXY { current, reference }))

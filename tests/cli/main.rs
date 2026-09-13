@@ -7,6 +7,7 @@
 #[path = "../support/mod.rs"]
 mod support;
 
+mod bsd_time_cli;
 mod delete_cli;
 mod exec_cli;
 mod exit_cli;

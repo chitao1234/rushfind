@@ -28,7 +28,8 @@ use crate::runtime_policy::{RuntimePolicy, build_traversal_control_plan};
 use crate::size::{SizeMatcher, parse_size_argument};
 use crate::time::{
     NewerMatcher, RelativeTimeMatcher, RelativeTimeUnit, Timestamp, TimestampKind, UsedMatcher,
-    local_day_start, parse_relative_time_argument, parse_time_comparison,
+    flag_accepts_bsd_duration, local_day_start, parse_bsd_duration,
+    parse_relative_time_argument, parse_time_comparison,
     resolve_reference_matcher,
 };
 use std::collections::BTreeMap;
@@ -1003,6 +1004,23 @@ fn lower_relative_time_with_unit(
     unit: RelativeTimeUnit,
     state: &PlanningState,
 ) -> Result<RuntimeExpr, Diagnostic> {
+    // BSD spells `-mtime 1h30m` as raw seconds, where the unitless form stays a
+    // rolling day window.
+    if flag_accepts_bsd_duration(flag) {
+        let duration = parse_bsd_duration(flag, raw.as_os_str())?;
+        if let Some((comparison, _)) = duration {
+            return Ok(RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(
+                RelativeTimeMatcher::new(
+                    timestamp_kind,
+                    RelativeTimeUnit::Seconds,
+                    comparison,
+                    state.temporal.relative_baseline()?,
+                    state.temporal.daystart_active,
+                ),
+            )));
+        }
+    }
+
     Ok(RuntimeExpr::Predicate(RuntimePredicate::RelativeTime(
         parse_relative_time_argument(
             flag,
