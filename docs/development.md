@@ -24,6 +24,33 @@ man -l docs/rfd.1
 The `scdoc` tool is only needed when regenerating `docs/rfd.1`; normal
 `cargo build` does not depend on it.
 
+## Test layout
+
+`tests/` holds seven grouped test targets instead of one target per file:
+
+| Target    | Contents                                    |
+| --------- | ------------------------------------------- |
+| `cli`     | end-to-end runs of the `rfd` binary         |
+| `parser`  | command-line parser                         |
+| `planner` | planner and optimizer                       |
+| `eval`    | evaluator                                   |
+| `gnu`     | differential comparisons against GNU `find` |
+| `unit`    | library unit tests that spawn no subprocess |
+| `windows` | Windows-only CLI tests; empty elsewhere     |
+
+Each target is a directory whose `main.rs` declares its modules, so a test
+keeps its `file_name::test_name` path: `cargo test --test parser parser_flags`
+still selects one file's tests. The four modules under `tests/support/` are
+shared by all seven targets through `#[path]`.
+
+The grouping exists to keep the edit-test cycle short. Any change under `src/`
+relinks every test target, and macOS revalidates each newly linked binary on
+its first exec at a few seconds apiece. One hundred separate targets cost
+around 210s per edit; seven cost around 24s.
+
+Add a new test file to the matching directory and declare it in that
+directory's `main.rs`.
+
 ## Detailed implementation notes
 
 These notes are intentionally more implementation-specific than the README.
