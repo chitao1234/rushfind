@@ -7,6 +7,13 @@ use crate::diagnostics::Diagnostic;
 use std::ffi::OsStr;
 use std::sync::Arc;
 
+/// Compiles a pattern and matches one candidate against it.
+///
+/// `pathname` selects pathname-mode matching, where the wildcards never match a
+/// `/`. No `find` predicate uses that mode: `-name` and `-path` are both
+/// compiled with literal slash handling, because GNU `find` lets `*` cross `/`
+/// in `-path` too. The flag is a matcher-level switch for callers that want
+/// matching confined to one path component.
 pub fn matches_pattern(
     pattern: &OsStr,
     candidate: &OsStr,
