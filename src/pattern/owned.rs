@@ -8,74 +8,61 @@ pub(super) fn matches(
     slash_mode: GlobSlashMode,
     candidate: &[u8],
 ) -> Result<bool, Diagnostic> {
-    Ok(matches_from(
-        program, case_mode, slash_mode, candidate, 0, 0,
-    ))
-}
+    let mut pattern_idx = 0usize;
+    let mut candidate_idx = 0usize;
+    let mut star_pattern_idx = None;
+    let mut star_candidate_idx = 0usize;
 
-fn matches_from(
-    program: &GlobProgram,
-    case_mode: GlobCaseMode,
-    slash_mode: GlobSlashMode,
-    candidate: &[u8],
-    atom_idx: usize,
-    cand_idx: usize,
-) -> bool {
-    if atom_idx == program.len() {
-        return cand_idx == candidate.len();
+    while candidate_idx < candidate.len() {
+        if let Some(atom) = program.get(pattern_idx) {
+            if !matches!(atom, GlobAtom::AnySequence)
+                && atom_matches(atom, candidate[candidate_idx], case_mode, slash_mode)
+            {
+                pattern_idx += 1;
+                candidate_idx += 1;
+                continue;
+            }
+            if matches!(atom, GlobAtom::AnySequence) {
+                star_pattern_idx = Some(pattern_idx);
+                star_candidate_idx = candidate_idx;
+                pattern_idx += 1;
+                continue;
+            }
+        }
+
+        let Some(star_idx) = star_pattern_idx else {
+            return Ok(false);
+        };
+        if star_candidate_idx >= candidate.len()
+            || (slash_mode == GlobSlashMode::Pathname && candidate[star_candidate_idx] == b'/')
+        {
+            return Ok(false);
+        }
+        star_candidate_idx += 1;
+        candidate_idx = star_candidate_idx;
+        pattern_idx = star_idx + 1;
     }
 
-    match &program[atom_idx] {
-        GlobAtom::Literal(expected) => candidate.get(cand_idx).is_some_and(|actual| {
-            eq_byte(*expected, *actual, case_mode)
-                && matches_from(
-                    program,
-                    case_mode,
-                    slash_mode,
-                    candidate,
-                    atom_idx + 1,
-                    cand_idx + 1,
-                )
-        }),
-        GlobAtom::AnyByte => candidate.get(cand_idx).is_some_and(|actual| {
-            (*actual != b'/' || slash_mode == GlobSlashMode::Literal)
-                && matches_from(
-                    program,
-                    case_mode,
-                    slash_mode,
-                    candidate,
-                    atom_idx + 1,
-                    cand_idx + 1,
-                )
-        }),
-        GlobAtom::AnySequence => {
-            let mut idx = cand_idx;
-            if matches_from(program, case_mode, slash_mode, candidate, atom_idx + 1, idx) {
-                return true;
-            }
-            while let Some(&actual) = candidate.get(idx) {
-                if slash_mode == GlobSlashMode::Pathname && actual == b'/' {
-                    break;
-                }
-                idx += 1;
-                if matches_from(program, case_mode, slash_mode, candidate, atom_idx + 1, idx) {
-                    return true;
-                }
-            }
-            false
+    while matches!(program.get(pattern_idx), Some(GlobAtom::AnySequence)) {
+        pattern_idx += 1;
+    }
+    Ok(pattern_idx == program.len())
+}
+
+fn atom_matches(
+    atom: &GlobAtom,
+    actual: u8,
+    case_mode: GlobCaseMode,
+    slash_mode: GlobSlashMode,
+) -> bool {
+    match atom {
+        GlobAtom::Literal(expected) => eq_byte(*expected, actual, case_mode),
+        GlobAtom::AnyByte => slash_mode == GlobSlashMode::Literal || actual != b'/',
+        GlobAtom::Class(class) => {
+            (slash_mode == GlobSlashMode::Literal || actual != b'/')
+                && class_matches(class, actual, case_mode)
         }
-        GlobAtom::Class(class) => candidate.get(cand_idx).is_some_and(|actual| {
-            (*actual != b'/' || slash_mode == GlobSlashMode::Literal)
-                && class_matches(class, *actual, case_mode)
-                && matches_from(
-                    program,
-                    case_mode,
-                    slash_mode,
-                    candidate,
-                    atom_idx + 1,
-                    cand_idx + 1,
-                )
-        }),
+        GlobAtom::AnySequence => false,
     }
 }
 

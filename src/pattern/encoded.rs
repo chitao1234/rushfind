@@ -221,7 +221,7 @@ pub(super) fn matches(
     candidate: &[u8],
 ) -> bool {
     let units = decode_units(ctype, candidate).collect::<Vec<_>>();
-    matches_from(program, case_mode, slash_mode, &units, 0, 0)
+    matches_from(program, case_mode, slash_mode, &units)
 }
 
 fn matches_from(
@@ -229,72 +229,65 @@ fn matches_from(
     case_mode: GlobCaseMode,
     slash_mode: GlobSlashMode,
     candidate: &[TextUnit<'_>],
-    atom_idx: usize,
-    cand_idx: usize,
 ) -> bool {
-    if atom_idx == program.atoms.len() {
-        return cand_idx == candidate.len();
+    let mut pattern_idx = 0usize;
+    let mut candidate_idx = 0usize;
+    let mut star_pattern_idx = None;
+    let mut star_candidate_idx = 0usize;
+
+    while candidate_idx < candidate.len() {
+        if let Some(atom) = program.atoms.get(pattern_idx) {
+            if !matches!(atom, EncodedAtom::AnySequence)
+                && atom_matches(atom, candidate[candidate_idx], case_mode, slash_mode)
+            {
+                pattern_idx += 1;
+                candidate_idx += 1;
+                continue;
+            }
+            if matches!(atom, EncodedAtom::AnySequence) {
+                star_pattern_idx = Some(pattern_idx);
+                star_candidate_idx = candidate_idx;
+                pattern_idx += 1;
+                continue;
+            }
+        }
+
+        let Some(star_idx) = star_pattern_idx else {
+            return false;
+        };
+        if star_candidate_idx >= candidate.len()
+            || (slash_mode == GlobSlashMode::Pathname && candidate[star_candidate_idx].is_slash())
+        {
+            return false;
+        }
+        star_candidate_idx += 1;
+        candidate_idx = star_candidate_idx;
+        pattern_idx = star_idx + 1;
     }
 
-    match &program.atoms[atom_idx] {
-        EncodedAtom::Literal(expected) => candidate.get(cand_idx).is_some_and(|actual| {
-            unit_matches_literal(*expected, *actual, case_mode)
-                && matches_from(
-                    program,
-                    case_mode,
-                    slash_mode,
-                    candidate,
-                    atom_idx + 1,
-                    cand_idx + 1,
-                )
-        }),
-        EncodedAtom::AnyChar => candidate.get(cand_idx).is_some_and(|actual| {
-            (!actual.is_slash() || slash_mode == GlobSlashMode::Literal)
-                && matches_from(
-                    program,
-                    case_mode,
-                    slash_mode,
-                    candidate,
-                    atom_idx + 1,
-                    cand_idx + 1,
-                )
-        }),
-        EncodedAtom::AnySequence => {
-            if matches_from(
-                program,
-                case_mode,
-                slash_mode,
-                candidate,
-                atom_idx + 1,
-                cand_idx,
-            ) {
-                return true;
-            }
+    while matches!(
+        program.atoms.get(pattern_idx),
+        Some(EncodedAtom::AnySequence)
+    ) {
+        pattern_idx += 1;
+    }
+    pattern_idx == program.atoms.len()
+}
 
-            let mut idx = cand_idx;
-            while let Some(unit) = candidate.get(idx).copied() {
-                if slash_mode == GlobSlashMode::Pathname && unit.is_slash() {
-                    break;
-                }
-                idx += 1;
-                if matches_from(program, case_mode, slash_mode, candidate, atom_idx + 1, idx) {
-                    return true;
-                }
-            }
-            false
+fn atom_matches(
+    atom: &EncodedAtom,
+    actual: TextUnit<'_>,
+    case_mode: GlobCaseMode,
+    slash_mode: GlobSlashMode,
+) -> bool {
+    match atom {
+        EncodedAtom::Literal(expected) => unit_matches_literal(*expected, actual, case_mode),
+        EncodedAtom::AnyChar => slash_mode == GlobSlashMode::Literal || !actual.is_slash(),
+        EncodedAtom::Class(class) => {
+            (slash_mode == GlobSlashMode::Literal || !actual.is_slash())
+                && class_matches(class, actual, case_mode)
         }
-        EncodedAtom::Class(class) => candidate.get(cand_idx).is_some_and(|actual| {
-            (!actual.is_slash() || slash_mode == GlobSlashMode::Literal)
-                && class_matches(class, *actual, case_mode)
-                && matches_from(
-                    program,
-                    case_mode,
-                    slash_mode,
-                    candidate,
-                    atom_idx + 1,
-                    cand_idx + 1,
-                )
-        }),
+        EncodedAtom::AnySequence => false,
     }
 }
 

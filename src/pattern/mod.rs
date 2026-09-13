@@ -182,6 +182,20 @@ mod tests {
     }
 
     #[test]
+    fn long_star_suffix_is_iterative() {
+        let glob = CompiledGlob::compile(
+            "-name",
+            OsStr::new("*z"),
+            GlobCaseMode::Sensitive,
+            GlobSlashMode::Literal,
+        )
+        .unwrap();
+        let candidate = OsString::from_vec(vec![b'a'; 100_000]);
+
+        assert!(!glob.is_match(candidate.as_os_str()).unwrap());
+    }
+
+    #[test]
     fn c_locale_case_insensitive_matching_is_ascii_only() {
         let glob = CompiledGlob::compile(
             "-iname",
