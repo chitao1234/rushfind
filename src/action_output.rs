@@ -28,12 +28,32 @@ impl<'a> OutputPresentation<'a> {
 }
 
 pub(crate) fn render_output_bytes(action: OutputAction, entry: &EntryContext) -> Vec<u8> {
-    let mut bytes = crate::platform::path::display_bytes(&entry.path);
+    let path = crate::platform::path::display_bytes(&entry.path);
+    let mut bytes = if action == OutputAction::PrintX {
+        render_xargs_quoted(&path)
+    } else {
+        path
+    };
     match action {
         OutputAction::Print => bytes.push(b'\n'),
         OutputAction::Print0 => bytes.push(0),
+        OutputAction::PrintX => bytes.push(b'\n'),
     }
     bytes
+}
+
+fn render_xargs_quoted(path: &[u8]) -> Vec<u8> {
+    let mut rendered = Vec::with_capacity(path.len());
+    for &byte in path {
+        if matches!(
+            byte,
+            b' ' | b'\t' | b'\n' | b'\\' | b'$' | b'\'' | b'"' | b'`'
+        ) {
+            rendered.push(b'\\');
+        }
+        rendered.push(byte);
+    }
+    rendered
 }
 
 pub(crate) fn render_file_print_bytes(

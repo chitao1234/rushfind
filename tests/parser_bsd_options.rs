@@ -1,6 +1,6 @@
 mod support;
 
-use rushfind::ast::{GlobalOption, Predicate};
+use rushfind::ast::{Action, Expr, GlobalOption, Predicate};
 use rushfind::follow::FollowMode;
 use rushfind::parser::parse_command;
 use support::argv;
@@ -33,5 +33,15 @@ fn parses_bsd_f_paths_before_expression_paths() {
     assert!(matches!(
         ast.expr,
         rushfind::ast::Expr::Predicate(Predicate::True)
+    ));
+}
+
+#[test]
+fn parses_bsd_printx_and_rm_aliases() {
+    let ast = parse_command(&argv(&[".", "-printx", "-rm"])).unwrap();
+
+    assert!(matches!(
+        ast.expr,
+        Expr::And(items) if matches!(items.as_slice(), [Expr::Action(Action::PrintX), Expr::Action(Action::Delete)])
     ));
 }

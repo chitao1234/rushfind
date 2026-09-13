@@ -189,6 +189,7 @@ pub enum Predicate {
 pub enum Action {
     Print,
     Print0,
+    PrintX,
     Printf { format: OsString },
     FPrint { path: PathBuf },
     FPrint0 { path: PathBuf },

@@ -293,6 +293,7 @@ enum NewerAtom {
 enum OutputAtom {
     Print,
     Print0,
+    PrintX,
     Printf,
     Ls,
 }
@@ -503,6 +504,8 @@ fn classify_action_atom(token: Arg<'_>) -> Option<AtomKind> {
         Some(AtomKind::Output(OutputAtom::Print))
     } else if token.matches("-print0") {
         Some(AtomKind::Output(OutputAtom::Print0))
+    } else if token.matches("-printx") {
+        Some(AtomKind::Output(OutputAtom::PrintX))
     } else if token.matches("-printf") {
         Some(AtomKind::Output(OutputAtom::Printf))
     } else if token.matches("-ls") {
@@ -525,7 +528,7 @@ fn classify_action_atom(token: Arg<'_>) -> Option<AtomKind> {
         Some(AtomKind::Exec(ExecAtom::Ok))
     } else if token.matches("-okdir") {
         Some(AtomKind::Exec(ExecAtom::OkDir))
-    } else if token.matches("-delete") {
+    } else if token.matches("-delete") || token.matches("-rm") {
         Some(AtomKind::Delete)
     } else {
         None
@@ -884,6 +887,7 @@ impl<'a> Parser<'a> {
         Ok(Expr::Action(match atom {
             OutputAtom::Print => Action::Print,
             OutputAtom::Print0 => Action::Print0,
+            OutputAtom::PrintX => Action::PrintX,
             OutputAtom::Printf => Action::Printf {
                 format: self.take_os_string("-printf")?,
             },

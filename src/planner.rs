@@ -168,6 +168,7 @@ pub enum RuntimePredicate {
 pub enum OutputAction {
     Print,
     Print0,
+    PrintX,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1171,9 +1172,11 @@ fn lower_action(
     state.saw_action = true;
 
     match action {
-        action @ (Action::Print | Action::Print0 | Action::Quit | Action::Delete) => {
-            lower_simple_action(action, state)
-        }
+        action @ (Action::Print
+        | Action::Print0
+        | Action::PrintX
+        | Action::Quit
+        | Action::Delete) => lower_simple_action(action, state),
         action @ (Action::Printf { .. } | Action::FPrintf { .. }) => {
             lower_printf_action(action, runtime, state, capabilities)
         }
@@ -1197,6 +1200,7 @@ fn lower_simple_action(
     Ok(RuntimeExpr::Action(match action {
         Action::Print => RuntimeAction::Output(OutputAction::Print),
         Action::Print0 => RuntimeAction::Output(OutputAction::Print0),
+        Action::PrintX => RuntimeAction::Output(OutputAction::PrintX),
         Action::Quit => RuntimeAction::Quit,
         Action::Delete => {
             state.saw_delete = true;
