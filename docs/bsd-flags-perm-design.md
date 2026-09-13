@@ -128,14 +128,16 @@ native manual omits a spelling.
 
 Use target-specific tables with canonical bits and aliases:
 
-- macOS: `arch`/`archived`, `nodump` plus `dump`, `opaque`, `sappnd`/`sappend`,
+- macOS: `arch`/`archived`, `nodump` plus `dump` (not `nonodump`), `opaque`, `sappnd`/`sappend`,
   `schg`/`schange`/`simmutable`, `uappnd`/`uappend`, `uchg`/`uchange`/
   `uimmutable`, and `hidden`.
 - FreeBSD: the full `chflags(1)` table, including system/user undeletable,
   archive, hidden, offline, readonly, sparse, system, and reparse aliases.
 - NetBSD: `arch`, `opaque`, `nodump`, `sappnd`, `schg`, `uappnd`, and `uchg`,
-  plus the documented `no` clear forms and `none` operand.
-- OpenBSD: `arch`, `nodump`, `sappnd`, `schg`, `uappnd`, and `uchg`; `arch` is
+  plus the documented `no` clear forms (including `nonodump`) and `none`
+  operand.
+- OpenBSD: `arch`, `nodump`, `sappnd`, `schg`, `uappnd`, and `uchg`, plus the
+  documented `no` clear forms (including `nonodump`); `arch` is
   compatibility-only on that platform but remains a valid name.
 - DragonFly BSD: use its native `chflags` vocabulary after checking the target
   headers rather than inheriting the FreeBSD table blindly.
@@ -208,8 +210,9 @@ continues to inspect the current mode accumulated within the symbolic operand.
 ### Shared unit tests
 
 - Flag aliases map to one bit.
-- `dump` maps to clear `nodump`; `nonodump` is rejected where the backend does
-  not advertise it.
+- `dump` maps to clear `nodump` on macOS/FreeBSD; `nonodump` is accepted on
+  backends whose native `no` prefix applies to `nodump` (such as OpenBSD and
+  NetBSD).
 - Repeated and opposite conditions evaluate correctly without a parser-level
   contradiction error.
 - Exact matching includes additional active-platform bits.
