@@ -31,6 +31,16 @@ fn perm_exact_matches_exact_mode_only() {
 }
 
 #[test]
+fn perm_numeric_plus_uses_strict_any_bit_semantics() {
+    let matcher = parse_perm_argument(OsStr::new("+644")).unwrap();
+    assert!(matcher.matches(0o640));
+    assert!(!matcher.matches(0o000));
+
+    let zero = parse_perm_argument(OsStr::new("+000")).unwrap();
+    assert!(!zero.matches(0o777));
+}
+
+#[test]
 fn perm_all_bits_and_any_bits_match_symbolic_forms() {
     let root = tempdir().unwrap();
     fs::write(root.path().join("file.txt"), "hello\n").unwrap();

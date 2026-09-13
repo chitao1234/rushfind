@@ -6,6 +6,7 @@ pub enum PermMatcher {
     Exact(u32),
     All(u32),
     Any(u32),
+    AnyNonZero(u32),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,6 +44,7 @@ enum PermMatchKind {
     Exact,
     All,
     Any,
+    AnyNonZero,
 }
 
 pub fn parse_perm_argument(raw: &OsStr) -> Result<PermMatcher, Diagnostic> {
@@ -52,7 +54,7 @@ pub fn parse_perm_argument(raw: &OsStr) -> Result<PermMatcher, Diagnostic> {
         [b'-', rest @ ..] => (PermMatchKind::All, rest),
         [b'/', rest @ ..] => (PermMatchKind::Any, rest),
         [b'+', rest @ ..] if rest.iter().all(|byte| byte.is_ascii_digit()) => {
-            return Err(invalid_mode(raw));
+            (PermMatchKind::AnyNonZero, rest)
         }
         _ => (PermMatchKind::Exact, bytes),
     };
@@ -72,6 +74,7 @@ pub fn parse_perm_argument(raw: &OsStr) -> Result<PermMatcher, Diagnostic> {
         PermMatchKind::Exact => PermMatcher::Exact(mask),
         PermMatchKind::All => PermMatcher::All(mask),
         PermMatchKind::Any => PermMatcher::Any(mask),
+        PermMatchKind::AnyNonZero => PermMatcher::AnyNonZero(mask),
     })
 }
 
@@ -82,15 +85,18 @@ impl PermMatcher {
             Self::Exact(expected) => *expected == actual,
             Self::All(required) => (actual & required) == *required,
             Self::Any(required) => *required == 0 || (actual & required) != 0,
+            Self::AnyNonZero(required) => (actual & required) != 0,
         }
     }
 }
 
 fn parse_octal_mask(bytes: &[u8], raw: &OsStr) -> Result<u32, Diagnostic> {
     let rendered = std::str::from_utf8(bytes).map_err(|_| invalid_mode(raw))?;
-    u32::from_str_radix(rendered, 8)
-        .map(|value| value & 0o7777)
-        .map_err(|_| invalid_mode(raw))
+    let value = u32::from_str_radix(rendered, 8).map_err(|_| invalid_mode(raw))?;
+    if value > 0o7777 {
+        return Err(invalid_mode(raw));
+    }
+    Ok(value)
 }
 
 fn resolve_symbolic_mode(

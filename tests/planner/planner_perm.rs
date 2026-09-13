@@ -19,11 +19,20 @@ fn lowers_octal_and_symbolic_perm_matchers() {
 
 #[test]
 fn rejects_invalid_perm_forms() {
-    for raw in ["+111", "-X", "/X", "definitelybad"] {
+    for raw in ["10000", "-X", "/X", "definitelybad"] {
         let error =
             plan_command(parse_command(&argv(&[".", "-perm", raw])).unwrap(), 1).unwrap_err();
         assert!(error.message.contains("invalid mode"));
     }
+}
+
+#[test]
+fn numeric_plus_mode_is_any_bit_matching() {
+    let plan = plan_command(parse_command(&argv(&[".", "-perm", "+644"])).unwrap(), 1).unwrap();
+    assert!(matches!(
+        single_perm(&plan.expr),
+        PermMatcher::AnyNonZero(0o644)
+    ));
 }
 
 fn single_perm(expr: &RuntimeExpr) -> &PermMatcher {
