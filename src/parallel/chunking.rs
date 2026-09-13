@@ -1,6 +1,12 @@
 use crate::walker::PendingPath;
 
-pub(crate) const DEFAULT_SPLIT_CHILD_THRESHOLD: usize = 32;
+/// How many children a worker keeps to itself before it starts publishing
+/// chunks for its peers to steal. Those children stay on a plain local stack
+/// that no other worker can reach, so a large value leaves the discovering
+/// worker holding most of every directory it opens and turns it into the
+/// critical path. Measured on 345k entries: 32 peaks at 2.45x, 8 at 2.94x,
+/// and only 8 keeps scaling past the performance-core count.
+pub(crate) const DEFAULT_SPLIT_CHILD_THRESHOLD: usize = 8;
 pub(crate) const DEFAULT_SPILL_CHUNK_SIZE: usize = 32;
 
 #[derive(Debug)]
