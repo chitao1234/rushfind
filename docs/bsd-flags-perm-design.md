@@ -83,16 +83,21 @@ The current parser implements the GNU shape:
 
 BSD differs:
 
-- macOS and FreeBSD accept numeric `+mode` as any matching mode bit.
+- macOS and FreeBSD accept numeric `+mode` as any matching mode bit. This is a
+  compatible extension that should also be accepted on Linux; GNU `/mode`
+  remains available alongside it.
 - macOS/OpenBSD/NetBSD document `-mode` as the all-bits form and do not
-  document GNU `/mode`; macOS rejects `/644`.
+  document GNU `/mode`; macOS rejects `/644`, but the project superset may keep
+  `/mode` where it has no conflicting meaning.
 - A symbolic operand beginning with `+`, such as `+t` or `+X`, is interpreted
   through the symbolic-mode grammar rather than as the numeric any prefix.
   Numeric `+644` is the disambiguated BSD any form.
 
-The parser must therefore distinguish numeric `+` from symbolic `+` and use a
-platform permission dialect. GNU Linux behavior must remain unchanged, so this
-cannot be implemented as an unconditional replacement of `/` with `+`.
+The parser must distinguish numeric `+` from symbolic `+`. The shared superset
+should accept both `/mode` and numeric `+mode` as any-bit forms on Unix targets
+with mode bits. This does not replace `/mode`, and it does not change symbolic
+`+t` or `+X` parsing. A platform switch is needed only if a target gives one of
+these spellings a conflicting meaning.
 
 ### Invalid octal modes are silently truncated
 
@@ -101,36 +106,23 @@ cannot be implemented as an unconditional replacement of `/` with `+`.
 find and the BSD `find` implementations reject modes containing bits outside
 `07777`. Validation must happen before masking.
 
-## Proposed platform contracts
+## Superset-first implementation policy
 
-Add a platform-owned metadata contract returned alongside the existing flag
-specifications:
+Do not introduce a target-specific parser dialect as the first abstraction.
+Extend the shared parser and matcher to accept the union of compatible GNU and
+BSD forms:
 
-```text
-FlagDialect {
-    names: &[FlagName],
-    comparison_mask: u64,
-    prefixes: FlagPrefixes,
-    accepts_none: bool,
-}
+- numeric `+mode` is any-bit matching wherever mode bits are supported;
+- GNU `/mode` remains any-bit matching wherever it already works;
+- `-flags +NAME` is accepted wherever file flags are supported;
+- `none` is accepted when the backend can provide a complete comparison mask;
+- aliases that map to one native bit share one matcher condition.
 
-FlagName {
-    spelling: &'static str,
-    bit: u64,
-    operation: Set | Clear,
-}
-
-PermDialect {
-    accepts_slash_any: bool,
-    accepts_numeric_plus_any: bool,
-}
-```
-
-The exact Rust representation can differ, but the contract must keep aliases,
-clear aliases, comparison coverage, and syntax policy separate. Linux,
-Windows, generic Unix, and BSD targets should each provide their own dialect
-through the platform backend rather than branching on target names in the
-shared parser.
+Only split behavior by platform after proving that one spelling cannot have one
+coherent meaning. The platform backend remains responsible for native flag
+values, complete comparison coverage, and unsupported-metadata capability
+checks; the parser should not branch on operating-system names merely because a
+native manual omits a spelling.
 
 ### BSD flag tables
 
@@ -150,7 +142,8 @@ Use target-specific tables with canonical bits and aliases:
 
 Where libc exposes aliases inconsistently, define the numeric constants in the
 target backend from the OS headers and keep the public spelling table beside
-those constants. Do not use a Linux flag value as a BSD fallback.
+those constants. Do not use a Linux flag value as a BSD fallback. The table is
+platform data; acceptance of compatible syntax remains shared.
 
 ### Matcher algebra
 
@@ -175,16 +168,15 @@ behavior observed on macOS.
 `none` lowers to an exact zero-flags matcher and is only accepted when the
 active flag dialect advertises it.
 
-### Permission dialect
+### Permission parsing
 
-Change `parse_perm_argument` to accept a `PermDialect`:
+Change `parse_perm_argument` so its shared grammar accepts the superset:
 
 1. Validate the operand as ASCII mode syntax.
 2. If it begins with `-`, select all-bits mode.
-3. If it begins with `/`, allow it only when `accepts_slash_any` is true.
+3. If it begins with `/`, select any-bits mode.
 4. If it begins with `+` and the remainder is all octal digits, select any-bits
-   mode only when `accepts_numeric_plus_any` is true; otherwise report the
-   platform's invalid-mode diagnostic.
+   mode.
 5. If it begins with `+` and is symbolic, parse it as the existing symbolic
    operation grammar, preserving the BSD ambiguity behavior.
 6. Reject an octal value greater than `07777` before constructing the matcher.
@@ -197,15 +189,17 @@ continues to inspect the current mode accumulated within the symbolic operand.
 
 - Keep `Predicate::Flags(OsString)` and `Predicate::Perm(OsString)` unchanged
   in the AST so parsing does not depend on the host platform.
-- Extend the platform backend API with `active_flag_dialect()` and
-  `active_perm_dialect()` (or an equivalent combined contract).
-- Pass those dialects into `parse_flags_argument` and `parse_perm_argument`
-  from `planner::lower_metadata_predicate`.
+- Keep native flag tables and comparison masks in the platform backend. Do not
+  add a parser-facing dialect object until a real semantic conflict requires
+  one.
+- Keep `parse_flags_argument` and `parse_perm_argument` shared for all
+  compatible syntax; `planner::lower_metadata_predicate` supplies the active
+  platform's native flag data and capability checks.
 - Keep `PlatformFeature::FileFlags` and `PlatformFeature::ModeBits` as the
   capability gates. Unsupported platforms still fail during planning with the
   existing explicit diagnostics.
-- Preserve Linux GNU behavior: `/mode` remains available, numeric `+mode`
-  remains invalid, and exact GNU differential tests must continue to pass.
+- Preserve Linux GNU behavior while adding the compatible superset: `/mode`
+  remains available and numeric `+mode` becomes an any-bit alias.
 - Preserve Windows behavior for its native attribute flag names and mode-bit
   rejection.
 
@@ -219,10 +213,10 @@ continues to inspect the current mode accumulated within the symbolic operand.
 - Repeated and opposite conditions evaluate correctly without a parser-level
   contradiction error.
 - Exact matching includes additional active-platform bits.
-- `none` works only on NetBSD.
+- `none` is accepted wherever the backend can provide complete flag coverage;
+  acceptance is not restricted by target name.
 - Octal modes above `07777` are rejected.
-- Numeric `+644` and GNU `/644` are selected by dialect, not by target-name
-  branches in the parser.
+- Numeric `+644` and GNU `/644` both select any-bit matching on Linux and BSD.
 - Symbolic `+t`, `+X`, `-u=X`, `g=u`, and `u=` preserve existing behavior.
 
 ### macOS integration tests
@@ -244,19 +238,17 @@ rejects it.
 
 The existing Linux GNU differential tests remain authoritative for `/mode`,
 exact/all matching, symbolic mode resolution, and invalid numeric forms. Add
-explicit coverage for rejecting `10000`, `+644`, and platform-inappropriate
-flag aliases on Linux.
+explicit coverage for rejecting `10000` while accepting `+644` as the shared
+any-bit superset, plus coverage for genuinely incompatible flag aliases.
 
 ## Implementation order
 
-1. Introduce dialect structs and move the current Linux/Windows behavior into
-   explicit dialects without changing results.
-2. Fix `-perm` octal validation and add platform-sensitive slash/plus parsing.
-3. Expand BSD flag tables and alias/clear-form parsing.
-4. Correct exact flag matching and remove parser-level contradictory-condition
+1. Fix `-perm` octal validation and accept numeric `+mode` as the shared any-bit
+   superset alongside `/mode`.
+2. Expand BSD flag tables with native aliases and clear-form parsing.
+3. Correct exact flag matching and remove parser-level contradictory-condition
    rejection.
-5. Add macOS differential coverage, then FreeBSD/OpenBSD/NetBSD/DragonFly
+4. Add macOS differential coverage, then FreeBSD/OpenBSD/NetBSD/DragonFly
    target validation.
 
 Priority 1 features such as `-s` and `-acl` remain deferred.
-
