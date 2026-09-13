@@ -169,6 +169,7 @@ impl ParallelActionSink {
 
         match action {
             RuntimeAction::Quit => Ok(ActionOutcome::quit()),
+            RuntimeAction::Exit { status } => Ok(ActionOutcome::exit(*status)),
             RuntimeAction::ExecImmediate(spec) => run_immediate_parallel(
                 spec,
                 entry.path.as_path(),

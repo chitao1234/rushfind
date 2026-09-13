@@ -147,7 +147,7 @@ Use the `RUSHFIND_WORKERS` environment variable to control execution mode:
 ## Unsupported currently
 
 The current implementation supports `-exec ... ;`, `-exec ... +`, `-execdir ... ;`,
-`-execdir ... +`, `-ok ... ;`, `-okdir ... ;`, and `-delete`.
+`-execdir ... +`, `-ok ... ;`, `-okdir ... ;`, `-delete`, `-quit`, and NetBSD-style `-exit [STATUS]`.
 
 `-ok ... +` and `-okdir ... +` remain unsupported.
 

@@ -193,6 +193,9 @@ pub enum RuntimeAction {
     ExecBatched(BatchedExecAction),
     ExecPrompt(ImmediateExecAction),
     Delete,
+    Exit {
+        status: u8,
+    },
 }
 
 fn compile_glob(
@@ -314,7 +317,7 @@ pub(crate) fn plan_command_with_now_and_capabilities(
     }
     let action_profile = compute_action_profile(&expr);
 
-    let mode = if workers <= 1 {
+    let mode = if workers <= 1 || action_profile.has_ordered_only {
         ExecutionMode::OrderedSingle
     } else {
         ExecutionMode::ParallelRelaxed
@@ -394,6 +397,7 @@ fn populate_action_profile(expr: &RuntimeExpr, profile: &mut ActionProfile) {
             | RuntimeAction::Ls
             | RuntimeAction::FileLs { .. } => {}
             RuntimeAction::Quit => profile.has_global_control = true,
+            RuntimeAction::Exit { .. } => profile.has_ordered_only = true,
             RuntimeAction::ExecImmediate(_) | RuntimeAction::ExecPrompt(_) => {
                 profile.has_local_immediate = true;
             }
@@ -1190,6 +1194,7 @@ fn lower_action(
         | Action::PrintX
         | Action::Quit
         | Action::Delete) => lower_simple_action(action, state),
+        Action::Exit { status } => Ok(RuntimeExpr::Action(RuntimeAction::Exit { status })),
         action @ (Action::Printf { .. } | Action::FPrintf { .. }) => {
             lower_printf_action(action, runtime, state, capabilities)
         }

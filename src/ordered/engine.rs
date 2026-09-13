@@ -43,6 +43,7 @@ where
     let mut sink =
         crate::exec::OrderedActionSink::with_prompt(stdout, stderr, &plan.file_outputs, prompt)?;
     let mut had_runtime_errors = false;
+    let mut requested_exit = None;
 
     walk_ordered(
         &plan.start_paths,
@@ -71,6 +72,7 @@ where
                         )?;
 
                         if outcome.status.is_stop_requested() {
+                            requested_exit = outcome.status.requested_exit();
                             return Ok(OrderedWalkDirective::Stop);
                         }
                     }
@@ -89,6 +91,7 @@ where
     Ok(RunSummary {
         had_runtime_errors,
         had_action_failures,
+        requested_exit,
     })
 }
 
@@ -107,6 +110,7 @@ where
         crate::exec::OrderedActionSink::with_prompt(stdout, stderr, &plan.file_outputs, prompt)?;
     let mut had_runtime_errors = false;
     let mut had_action_failures = false;
+    let mut requested_exit = None;
 
     std::thread::scope(|scope| -> Result<(), Diagnostic> {
         let workers = ordered_evaluator_workers(plan);
@@ -170,6 +174,7 @@ where
                     match ready {
                         EvalStep::Complete(outcome) => {
                             status = status.merge(outcome.status);
+                            requested_exit = requested_exit.or(outcome.status.requested_exit());
                             break;
                         }
                         EvalStep::PendingAction {
@@ -203,6 +208,7 @@ where
     Ok(RunSummary {
         had_runtime_errors,
         had_action_failures,
+        requested_exit,
     })
 }
 

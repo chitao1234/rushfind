@@ -79,11 +79,13 @@ where
         let mut first_error = None;
         let mut had_runtime_errors = false;
         let mut had_action_failures = false;
+        let mut requested_exit = None;
         for _ in 0..worker_count {
             match result_rx.recv() {
                 Ok(Ok(report)) => {
                     had_runtime_errors |= report.had_runtime_errors;
                     had_action_failures |= report.status.had_action_failures();
+                    requested_exit = requested_exit.or(report.status.requested_exit());
                 }
                 Ok(Err(error)) => {
                     if first_error.is_none() {
@@ -117,6 +119,7 @@ where
         Ok(RunSummary {
             had_runtime_errors,
             had_action_failures,
+            requested_exit,
         })
     })
 }

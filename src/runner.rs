@@ -11,6 +11,7 @@ use std::io::Write;
 pub struct RunSummary {
     pub had_runtime_errors: bool,
     pub had_action_failures: bool,
+    pub requested_exit: Option<u8>,
 }
 
 fn startup_warnings_enabled_from(value: Option<&OsStr>) -> bool {

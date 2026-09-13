@@ -155,6 +155,10 @@ impl ActionSink for WorkerActionSink {
                 self.control.request_quit();
                 Ok(ActionOutcome::quit())
             }
+            RuntimeAction::Exit { status } => {
+                self.control.request_quit();
+                Ok(ActionOutcome::exit(*status))
+            }
             RuntimeAction::ExecImmediate(spec) => self.run_immediate(spec, entry.path.as_path()),
             RuntimeAction::ExecPrompt(spec) => self.run_prompted(spec, entry.path.as_path()),
             RuntimeAction::ExecBatched(spec) => Ok(ActionOutcome {

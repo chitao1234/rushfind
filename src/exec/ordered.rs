@@ -166,6 +166,7 @@ impl<W: std::io::Write, E: std::io::Write> ActionSink for OrderedActionSink<'_, 
 
         match action {
             RuntimeAction::Quit => Ok(ActionOutcome::quit()),
+            RuntimeAction::Exit { status } => Ok(ActionOutcome::exit(*status)),
             RuntimeAction::ExecImmediate(spec) => {
                 super::child::run_immediate_ordered(spec, entry.path.as_path(), self.stderr)
                     .map(action_success)

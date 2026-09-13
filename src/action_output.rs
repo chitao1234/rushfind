@@ -105,6 +105,7 @@ pub(crate) fn render_action_output(
             bytes: crate::ls::render_ls_record(entry, follow_mode, context)?,
         })),
         RuntimeAction::Quit
+        | RuntimeAction::Exit { .. }
         | RuntimeAction::ExecImmediate(_)
         | RuntimeAction::ExecBatched(_)
         | RuntimeAction::ExecPrompt(_)

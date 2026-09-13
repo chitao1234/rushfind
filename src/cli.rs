@@ -53,13 +53,13 @@ where
         let ast = prepare_command(ast)?;
         let plan = plan_command(ast, workers)?;
         let summary = run_plan(&plan, &mut stdout, &mut stderr)?;
-        Ok(
-            if summary.had_runtime_errors || summary.had_action_failures {
-                1
-            } else {
-                0
-            },
-        )
+        Ok(if let Some(status) = summary.requested_exit {
+            status as i32
+        } else if summary.had_runtime_errors || summary.had_action_failures {
+            1
+        } else {
+            0
+        })
     }) {
         Ok(code) => code,
         Err(error) => {

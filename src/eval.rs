@@ -23,6 +23,7 @@ pub(crate) enum RuntimeControl {
 pub struct RuntimeStatus {
     had_action_failures: bool,
     control: RuntimeControl,
+    requested_exit: Option<u8>,
 }
 
 impl RuntimeStatus {
@@ -30,6 +31,7 @@ impl RuntimeStatus {
         Self {
             had_action_failures: true,
             control: RuntimeControl::Continue,
+            requested_exit: None,
         }
     }
 
@@ -37,6 +39,7 @@ impl RuntimeStatus {
         Self {
             had_action_failures: false,
             control: RuntimeControl::StopRequested,
+            requested_exit: None,
         }
     }
 
@@ -49,6 +52,7 @@ impl RuntimeStatus {
                 }
                 _ => RuntimeControl::Continue,
             },
+            requested_exit: self.requested_exit.or(other.requested_exit),
         }
     }
 
@@ -58,6 +62,18 @@ impl RuntimeStatus {
 
     pub(crate) fn is_stop_requested(self) -> bool {
         self.control == RuntimeControl::StopRequested
+    }
+
+    pub(crate) fn exit_requested(status: u8) -> Self {
+        Self {
+            had_action_failures: false,
+            control: RuntimeControl::StopRequested,
+            requested_exit: Some(status),
+        }
+    }
+
+    pub(crate) fn requested_exit(self) -> Option<u8> {
+        self.requested_exit
     }
 }
 
@@ -83,6 +99,13 @@ impl ActionOutcome {
         Self {
             matched: true,
             status: RuntimeStatus::stop_requested(),
+        }
+    }
+
+    pub(crate) fn exit(status: u8) -> Self {
+        Self {
+            matched: true,
+            status: RuntimeStatus::exit_requested(status),
         }
     }
 }

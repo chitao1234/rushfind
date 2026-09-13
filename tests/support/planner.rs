@@ -28,6 +28,7 @@ pub fn collect_action_labels(expr: &RuntimeExpr) -> Vec<&'static str> {
             RuntimeAction::ExecPrompt(_) => "exec-prompt",
             RuntimeAction::ExecBatched(_) => "exec-batched",
             RuntimeAction::Delete => "delete",
+            RuntimeAction::Exit { .. } => "exit",
         });
     });
     labels

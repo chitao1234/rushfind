@@ -215,6 +215,7 @@ fn expr_label(expr: &RuntimeExpr) -> &'static str {
         RuntimeExpr::Action(RuntimeAction::FileLs { .. }) => "fls",
         RuntimeExpr::Action(RuntimeAction::Quit) => "quit",
         RuntimeExpr::Action(RuntimeAction::Delete) => "delete",
+        RuntimeExpr::Action(RuntimeAction::Exit { .. }) => "exit",
         RuntimeExpr::Action(RuntimeAction::ExecImmediate(_)) => "exec:semicolon",
         RuntimeExpr::Action(RuntimeAction::ExecBatched(_)) => "exec:batch",
         RuntimeExpr::Action(RuntimeAction::ExecPrompt(spec)) => match spec.semantics {

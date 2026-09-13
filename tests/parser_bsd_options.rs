@@ -25,6 +25,19 @@ fn parses_bsd_xargs_safety_option() {
 }
 
 #[test]
+fn parses_exit_with_optional_status() {
+    let default = parse_command(&argv(&[".", "-exit", "-print"])).unwrap();
+    assert!(
+        matches!(default.expr, Expr::And(items) if matches!(items.as_slice(), [Expr::Action(Action::Exit { status: 0 }), Expr::Action(Action::Print)]))
+    );
+
+    let explicit = parse_command(&argv(&[".", "-exit", "17", "-print"])).unwrap();
+    assert!(
+        matches!(explicit.expr, Expr::And(items) if matches!(items.as_slice(), [Expr::Action(Action::Exit { status: 17 }), Expr::Action(Action::Print)]))
+    );
+}
+
+#[test]
 fn parses_bsd_f_paths_before_expression_paths() {
     let ast = parse_command(&argv(&["-f", "-odd", "-f", "root", "-true"])).unwrap();
 
@@ -48,7 +61,7 @@ fn parses_bsd_printx_and_rm_aliases() {
 
     assert!(matches!(
         ast.expr,
-        Expr::And(items) if matches!(items.as_slice(), [Expr::Action(Action::PrintX), Expr::Action(Action::Delete), Expr::Action(Action::Quit)])
+        Expr::And(items) if matches!(items.as_slice(), [Expr::Action(Action::PrintX), Expr::Action(Action::Delete), Expr::Action(Action::Exit { status: 0 })])
     ));
 }
 

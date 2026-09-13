@@ -205,6 +205,7 @@ pub enum Action {
     Ok { argv: Vec<OsString>, batch: bool },
     OkDir { argv: Vec<OsString>, batch: bool },
     Delete,
+    Exit { status: u8 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

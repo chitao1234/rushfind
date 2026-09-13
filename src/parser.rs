@@ -227,6 +227,7 @@ enum AtomKind {
     Quit,
     Exec(ExecAtom),
     Delete,
+    Exit,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -534,8 +535,10 @@ fn classify_action_atom(token: Arg<'_>) -> Option<AtomKind> {
         Some(AtomKind::FileOutput(FileOutputAtom::FPrintf))
     } else if token.matches("-fls") {
         Some(AtomKind::FileOutput(FileOutputAtom::Fls))
-    } else if token.matches("-quit") || token.matches("-exit") {
+    } else if token.matches("-quit") {
         Some(AtomKind::Quit)
+    } else if token.matches("-exit") {
+        Some(AtomKind::Exit)
     } else if token.matches("-exec") {
         Some(AtomKind::Exec(ExecAtom::Exec))
     } else if token.matches("-execdir") {
@@ -756,6 +759,7 @@ impl<'a> Parser<'a> {
             AtomKind::FileOutput(atom) => self.parse_file_output_atom(atom)?,
             AtomKind::Compatibility(atom) => self.parse_compatibility_atom(atom)?,
             AtomKind::Quit => Expr::Action(Action::Quit),
+            AtomKind::Exit => Expr::Action(self.parse_exit_action()?),
             AtomKind::Exec(atom) => Expr::Action(self.parse_exec_atom(atom)?),
             AtomKind::Delete => Expr::Action(Action::Delete),
         })
@@ -964,6 +968,40 @@ impl<'a> Parser<'a> {
         let raw = self.take_os_string(flag)?;
         validate_time_argument(flag, raw.as_os_str())?;
         Ok(build(raw))
+    }
+
+    fn parse_exit_action(&mut self) -> Result<Action, Diagnostic> {
+        let status = self
+            .peek()
+            .filter(|token| {
+                !token.as_os_str().is_empty()
+                    && token
+                        .as_os_str()
+                        .as_encoded_bytes()
+                        .iter()
+                        .all(u8::is_ascii_digit)
+            })
+            .map(|token| token.to_os_string());
+
+        let status = match status {
+            None => 0,
+            Some(raw) => {
+                self.bump();
+                let rendered = raw.to_string_lossy();
+                let value = rendered.parse::<u16>().map_err(|_| {
+                    Diagnostic::parse(format!(
+                        "invalid numeric argument for `-exit`: `{rendered}`"
+                    ))
+                })?;
+                u8::try_from(value).map_err(|_| {
+                    Diagnostic::parse(format!(
+                        "invalid numeric argument for `-exit`: `{rendered}`"
+                    ))
+                })?
+            }
+        };
+
+        Ok(Action::Exit { status })
     }
 
     fn take_os_string(&mut self, flag: &str) -> Result<OsString, Diagnostic> {
