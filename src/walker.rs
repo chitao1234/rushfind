@@ -47,7 +47,7 @@ pub(crate) struct PendingPath {
     pub(crate) depth: usize,
     pub(crate) is_command_line_root: bool,
     pub(crate) physical_file_type_hint: Option<FileType>,
-    pub(crate) ancestry: Vec<FileIdentity>,
+    pub(crate) ancestry: Arc<[FileIdentity]>,
     pub(crate) ancestor_barriers: Vec<SubtreeBarrierId>,
     pub(crate) root_device: Option<u64>,
     pub(crate) parent_completion: Option<usize>,
@@ -291,7 +291,7 @@ fn initial_ordered_stack(start_paths: &[PathBuf]) -> Vec<OrderedFrame> {
                 depth: 0,
                 is_command_line_root: true,
                 physical_file_type_hint: None,
-                ancestry: Vec::new(),
+                ancestry: Arc::from([]),
                 ancestor_barriers: Vec::new(),
                 root_device: None,
                 parent_completion: None,
@@ -391,7 +391,7 @@ fn push_ordered_child_visits(
     stack: &mut Vec<OrderedFrame>,
     children: Vec<DiscoveredChild>,
     pending: &PendingPath,
-    child_ancestry: Vec<FileIdentity>,
+    child_ancestry: Arc<[FileIdentity]>,
     root_device: Option<u64>,
 ) {
     for child in children.into_iter().rev() {
@@ -425,7 +425,7 @@ pub(crate) fn load_entry(pending: &PendingPath) -> Result<EntryContext, Diagnost
     Ok(entry)
 }
 
-type DescendDecision = Option<(Vec<FileIdentity>, Option<u64>)>;
+type DescendDecision = Option<(Arc<[FileIdentity]>, Option<u64>)>;
 
 pub(crate) fn should_descend_directory(
     pending: &PendingPath,
@@ -456,9 +456,9 @@ pub(crate) fn should_descend_directory(
         return Ok(None);
     }
 
-    let mut next = pending.ancestry.clone();
+    let mut next = pending.ancestry.to_vec();
     next.push(directory_identity);
-    Ok(Some((next, root_device)))
+    Ok(Some((Arc::from(next), root_device)))
 }
 
 pub(crate) fn visit_children(

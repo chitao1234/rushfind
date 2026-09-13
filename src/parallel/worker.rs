@@ -370,7 +370,7 @@ fn publish_preorder_sibling_chunks(
 fn discovered_child_to_pending(
     child: DiscoveredChild,
     pending: &PendingPath,
-    child_ancestry: &[crate::identity::FileIdentity],
+    child_ancestry: &Arc<[crate::identity::FileIdentity]>,
     root_device: Option<u64>,
 ) -> PendingPath {
     PendingPath {
@@ -379,7 +379,7 @@ fn discovered_child_to_pending(
         depth: pending.depth + 1,
         is_command_line_root: false,
         physical_file_type_hint: child.physical_file_type_hint,
-        ancestry: child_ancestry.to_vec(),
+        ancestry: child_ancestry.clone(),
         ancestor_barriers: pending.ancestor_barriers.clone(),
         root_device,
         parent_completion: None,
@@ -616,7 +616,7 @@ fn run_postorder_pending_root(
 
 fn collect_postorder_child_chunks(
     pending: &PendingPath,
-    child_ancestry: &[crate::identity::FileIdentity],
+    child_ancestry: &Arc<[crate::identity::FileIdentity]>,
     root_device: Option<u64>,
     context: &mut PostorderRunContext<'_, '_>,
 ) -> Result<Option<ChunkPlan>, Diagnostic> {

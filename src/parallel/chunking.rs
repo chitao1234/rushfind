@@ -81,7 +81,7 @@ mod tests {
             depth: 1,
             is_command_line_root: false,
             physical_file_type_hint: None,
-            ancestry: Vec::new(),
+            ancestry: Arc::from([]),
             ancestor_barriers: Vec::new(),
             root_device: None,
             parent_completion: None,

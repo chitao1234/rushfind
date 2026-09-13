@@ -19,7 +19,7 @@ impl PreOrderRootTask {
                 depth,
                 is_command_line_root: depth == 0,
                 physical_file_type_hint: None,
-                ancestry: Vec::new(),
+                ancestry: Arc::from([]),
                 ancestor_barriers: Vec::new(),
                 root_device: None,
                 parent_completion: None,
