@@ -374,7 +374,7 @@ fn publish_preorder_sibling_chunks(
 fn discovered_child_to_pending(
     child: DiscoveredChild,
     pending: &PendingPath,
-    child_ancestry: &Arc<[crate::identity::FileIdentity]>,
+    child_ancestry: &crate::walker::Ancestry,
     root_device: Option<u64>,
 ) -> PendingPath {
     PendingPath {
@@ -384,7 +384,6 @@ fn discovered_child_to_pending(
         is_command_line_root: false,
         physical_file_type_hint: child.physical_file_type_hint,
         ancestry: child_ancestry.clone(),
-        ancestor_barriers: pending.ancestor_barriers.clone(),
         root_device,
         parent_completion: None,
     }
@@ -646,7 +645,7 @@ fn run_postorder_pending_root(
 
 fn collect_postorder_child_chunks(
     pending: &PendingPath,
-    child_ancestry: &Arc<[crate::identity::FileIdentity]>,
+    child_ancestry: &crate::walker::Ancestry,
     root_device: Option<u64>,
     context: &mut PostorderRunContext<'_, '_>,
 ) -> Result<Option<ChunkPlan>, Diagnostic> {
@@ -702,16 +701,8 @@ fn run_postorder_child_plan(
     let mut status = RuntimeStatus::default();
 
     if has_local_batch {
-        let local_batch = chunk_plan
-            .local_stack
-            .into_iter()
-            .map(|child| PendingPath {
-                ancestor_barriers: vec![barrier],
-                ..child
-            })
-            .collect();
         status = status.merge(run_postorder_pending_batch(
-            local_batch,
+            chunk_plan.local_stack,
             Some(barrier),
             context,
         )?);
@@ -722,16 +713,9 @@ fn run_postorder_child_plan(
     }
 
     for chunk in chunk_plan.spilled_chunks {
-        let pending = chunk
-            .into_iter()
-            .map(|child| PendingPath {
-                ancestor_barriers: vec![barrier],
-                ..child
-            })
-            .collect::<Vec<_>>();
         context.worker.push_local(
             ParallelTask::SiblingChunk(SiblingChunkTask {
-                pending,
+                pending: chunk,
                 completion_barrier: Some(barrier),
             }),
             context.sink.control.as_ref(),

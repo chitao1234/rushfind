@@ -77,8 +77,7 @@ where
         },
         |event| {
             match event {
-                WalkEvent::Entry(item) | WalkEvent::DirectoryComplete(item) => {
-                    let entry = item.entry;
+                WalkEvent::Entry(entry) | WalkEvent::DirectoryComplete(entry) => {
                     if entry.depth >= plan.traversal.min_depth {
                         let outcome = crate::eval::evaluate_outcome_with_context(
                             &plan.expr,
@@ -230,11 +229,11 @@ fn publish_ordered_event(
     }
 
     let item = match event {
-        WalkEvent::Entry(item) | WalkEvent::DirectoryComplete(item) => {
-            if item.entry.depth < plan.traversal.min_depth {
+        WalkEvent::Entry(entry) | WalkEvent::DirectoryComplete(entry) => {
+            if entry.depth < plan.traversal.min_depth {
                 return Ok(OrderedWalkDirective::Continue);
             }
-            OrderedItem::Entry(item.entry)
+            OrderedItem::Entry(entry)
         }
         WalkEvent::Error(error) => OrderedItem::Diagnostic(error),
     };

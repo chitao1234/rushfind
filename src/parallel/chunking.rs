@@ -81,8 +81,7 @@ mod tests {
             depth: 1,
             is_command_line_root: false,
             physical_file_type_hint: None,
-            ancestry: Arc::from([]),
-            ancestor_barriers: Vec::new(),
+            ancestry: crate::walker::Ancestry::default(),
             root_device: None,
             parent_completion: None,
         }

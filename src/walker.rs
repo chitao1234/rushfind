@@ -3,7 +3,6 @@ use crate::entry::EntryContext;
 use crate::follow::FollowMode;
 use crate::identity::FileIdentity;
 use crate::planner::{TraversalOptions, TraversalOrder};
-use crate::runtime_pipeline::{EntryTicket, SubtreeBarrierId};
 use crate::traversal_control::TraversalControl;
 use std::fs::{self, FileType};
 use std::path::{Path, PathBuf};
@@ -13,24 +12,9 @@ mod ordered_emit;
 use ordered_emit::{emit_directory_complete, emit_ordered_entry};
 
 #[derive(Debug, Clone)]
-pub struct ScheduledEntry {
-    pub entry: EntryContext,
-    #[allow(dead_code)]
-    pub(crate) ticket: EntryTicket,
-}
-
-impl std::ops::Deref for ScheduledEntry {
-    type Target = EntryContext;
-
-    fn deref(&self) -> &Self::Target {
-        &self.entry
-    }
-}
-
-#[derive(Debug, Clone)]
 pub enum WalkEvent {
-    Entry(ScheduledEntry),
-    DirectoryComplete(ScheduledEntry),
+    Entry(EntryContext),
+    DirectoryComplete(EntryContext),
     Error(Diagnostic),
 }
 
@@ -40,6 +24,38 @@ pub(crate) enum OrderedWalkDirective {
     Stop,
 }
 
+/// Directory identities from the root down to an entry. Descending shares the
+/// chain with the parent instead of copying it, so the cost of tracking
+/// ancestry is one small node per directory rather than one vector per child.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Ancestry(Option<Arc<AncestryNode>>);
+
+#[derive(Debug)]
+struct AncestryNode {
+    identity: FileIdentity,
+    parent: Option<Arc<AncestryNode>>,
+}
+
+impl Ancestry {
+    pub(crate) fn contains(&self, identity: FileIdentity) -> bool {
+        let mut current = self.0.as_ref();
+        while let Some(node) = current {
+            if node.identity == identity {
+                return true;
+            }
+            current = node.parent.as_ref();
+        }
+        false
+    }
+
+    fn with_directory(&self, identity: FileIdentity) -> Self {
+        Self(Some(Arc::new(AncestryNode {
+            identity,
+            parent: self.0.clone(),
+        })))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct PendingPath {
     pub(crate) path: PathBuf,
@@ -47,8 +63,7 @@ pub(crate) struct PendingPath {
     pub(crate) depth: usize,
     pub(crate) is_command_line_root: bool,
     pub(crate) physical_file_type_hint: Option<FileType>,
-    pub(crate) ancestry: Arc<[FileIdentity]>,
-    pub(crate) ancestor_barriers: Vec<SubtreeBarrierId>,
+    pub(crate) ancestry: Ancestry,
     pub(crate) root_device: Option<u64>,
     pub(crate) parent_completion: Option<usize>,
 }
@@ -56,10 +71,7 @@ pub(crate) struct PendingPath {
 #[derive(Debug, Clone)]
 enum OrderedFrame {
     Visit(PendingPath),
-    Complete {
-        entry: EntryContext,
-        ancestor_barriers: Vec<SubtreeBarrierId>,
-    },
+    Complete(EntryContext),
 }
 
 enum OrderedFrameStep {
@@ -72,22 +84,6 @@ enum OrderedFrameStep {
 pub(crate) struct DiscoveredChild {
     pub(crate) path: PathBuf,
     pub(crate) physical_file_type_hint: Option<FileType>,
-}
-
-pub(crate) fn scheduled_entry(
-    entry: EntryContext,
-    sequence: u64,
-    ancestor_barriers: Vec<SubtreeBarrierId>,
-    block_on_subtree: Option<SubtreeBarrierId>,
-) -> ScheduledEntry {
-    ScheduledEntry {
-        entry,
-        ticket: EntryTicket {
-            sequence,
-            ancestor_barriers,
-            block_on_subtree,
-        },
-    }
 }
 
 pub(crate) trait WalkBackend: Send + Sync + 'static {
@@ -174,10 +170,9 @@ where
     C: Fn(&EntryContext) -> Result<TraversalControl, Diagnostic>,
 {
     let mut stack = initial_ordered_stack(start_paths);
-    let mut next_sequence = 0_u64;
 
     while let Some(frame) = stack.pop() {
-        let pending = match process_ordered_frame(frame, &mut emit, &mut next_sequence)? {
+        let pending = match process_ordered_frame(frame, &mut emit)? {
             OrderedFrameStep::Visit(pending) => pending,
             OrderedFrameStep::Continue => continue,
             OrderedFrameStep::Stop => return Ok(()),
@@ -237,14 +232,7 @@ where
         };
 
         if !xargs_illegal
-            && emit_ordered_visit_for_order(
-                &mut emit,
-                options.order,
-                is_directory,
-                entry.clone(),
-                &mut next_sequence,
-                pending.ancestor_barriers.clone(),
-            )?
+            && emit_ordered_visit_for_order(&mut emit, options.order, is_directory, entry.clone())?
         {
             return Ok(());
         }
@@ -255,8 +243,6 @@ where
                 options.order,
                 is_directory,
                 entry.clone(),
-                &mut next_sequence,
-                pending.ancestor_barriers.clone(),
             )? {
                 return Ok(());
             }
@@ -272,8 +258,6 @@ where
                     options.order,
                     is_directory,
                     entry.clone(),
-                    &mut next_sequence,
-                    pending.ancestor_barriers.clone(),
                 )? {
                     return Ok(());
                 }
@@ -282,13 +266,7 @@ where
         };
 
         emit_ordered_errors(&mut emit, diagnostics)?;
-        push_postorder_completion_frame(
-            &mut stack,
-            options.order,
-            is_directory,
-            entry,
-            pending.ancestor_barriers.clone(),
-        );
+        push_postorder_completion_frame(&mut stack, options.order, is_directory, entry);
         push_ordered_child_visits(&mut stack, children, &pending, child_ancestry, root_device);
     }
 
@@ -308,8 +286,7 @@ fn initial_ordered_stack(start_paths: &[PathBuf]) -> Vec<OrderedFrame> {
                 depth: 0,
                 is_command_line_root: true,
                 physical_file_type_hint: None,
-                ancestry: Arc::from([]),
-                ancestor_barriers: Vec::new(),
+                ancestry: Ancestry::default(),
                 root_device: None,
                 parent_completion: None,
             })
@@ -320,18 +297,14 @@ fn initial_ordered_stack(start_paths: &[PathBuf]) -> Vec<OrderedFrame> {
 fn process_ordered_frame<F>(
     frame: OrderedFrame,
     emit: &mut F,
-    sequence: &mut u64,
 ) -> Result<OrderedFrameStep, Diagnostic>
 where
     F: FnMut(WalkEvent) -> Result<OrderedWalkDirective, Diagnostic>,
 {
     match frame {
         OrderedFrame::Visit(pending) => Ok(OrderedFrameStep::Visit(pending)),
-        OrderedFrame::Complete {
-            entry,
-            ancestor_barriers,
-        } => {
-            let stop = emit_directory_complete(emit, entry, sequence, ancestor_barriers)?;
+        OrderedFrame::Complete(entry) => {
+            let stop = emit_directory_complete(emit, entry)?;
             Ok(if stop {
                 OrderedFrameStep::Stop
             } else {
@@ -346,17 +319,13 @@ fn emit_ordered_visit_for_order<F>(
     order: TraversalOrder,
     is_directory: bool,
     entry: EntryContext,
-    sequence: &mut u64,
-    ancestor_barriers: Vec<SubtreeBarrierId>,
 ) -> Result<bool, Diagnostic>
 where
     F: FnMut(WalkEvent) -> Result<OrderedWalkDirective, Diagnostic>,
 {
     match order {
-        TraversalOrder::PreOrder => emit_ordered_entry(emit, entry, sequence, ancestor_barriers),
-        TraversalOrder::DepthFirstPostOrder if !is_directory => {
-            emit_ordered_entry(emit, entry, sequence, ancestor_barriers)
-        }
+        TraversalOrder::PreOrder => emit_ordered_entry(emit, entry),
+        TraversalOrder::DepthFirstPostOrder if !is_directory => emit_ordered_entry(emit, entry),
         TraversalOrder::DepthFirstPostOrder => Ok(false),
     }
 }
@@ -366,14 +335,12 @@ fn emit_postorder_completion_if_needed<F>(
     order: TraversalOrder,
     is_directory: bool,
     entry: EntryContext,
-    sequence: &mut u64,
-    ancestor_barriers: Vec<SubtreeBarrierId>,
 ) -> Result<bool, Diagnostic>
 where
     F: FnMut(WalkEvent) -> Result<OrderedWalkDirective, Diagnostic>,
 {
     if order == TraversalOrder::DepthFirstPostOrder && is_directory {
-        emit_directory_complete(emit, entry, sequence, ancestor_barriers)
+        emit_directory_complete(emit, entry)
     } else {
         Ok(false)
     }
@@ -394,13 +361,9 @@ fn push_postorder_completion_frame(
     order: TraversalOrder,
     is_directory: bool,
     entry: EntryContext,
-    ancestor_barriers: Vec<SubtreeBarrierId>,
 ) {
     if order == TraversalOrder::DepthFirstPostOrder && is_directory {
-        stack.push(OrderedFrame::Complete {
-            entry,
-            ancestor_barriers,
-        });
+        stack.push(OrderedFrame::Complete(entry));
     }
 }
 
@@ -408,7 +371,7 @@ fn push_ordered_child_visits(
     stack: &mut Vec<OrderedFrame>,
     children: Vec<DiscoveredChild>,
     pending: &PendingPath,
-    child_ancestry: Arc<[FileIdentity]>,
+    child_ancestry: Ancestry,
     root_device: Option<u64>,
 ) {
     for child in children.into_iter().rev() {
@@ -419,7 +382,6 @@ fn push_ordered_child_visits(
             is_command_line_root: false,
             physical_file_type_hint: child.physical_file_type_hint,
             ancestry: child_ancestry.clone(),
-            ancestor_barriers: pending.ancestor_barriers.clone(),
             root_device,
             parent_completion: None,
         }));
@@ -442,7 +404,7 @@ pub(crate) fn load_entry(pending: &PendingPath) -> Result<EntryContext, Diagnost
     Ok(entry)
 }
 
-type DescendDecision = Option<(Arc<[FileIdentity]>, Option<u64>)>;
+type DescendDecision = Option<(Ancestry, Option<u64>)>;
 
 pub(crate) fn should_descend_directory(
     pending: &PendingPath,
@@ -460,7 +422,7 @@ pub(crate) fn should_descend_directory(
         return Ok(None);
     };
 
-    if pending.ancestry.contains(&directory_identity) {
+    if pending.ancestry.contains(directory_identity) {
         return Err(loop_error(&pending.path));
     }
 
@@ -473,9 +435,10 @@ pub(crate) fn should_descend_directory(
         return Ok(None);
     }
 
-    let mut next = pending.ancestry.to_vec();
-    next.push(directory_identity);
-    Ok(Some((Arc::from(next), root_device)))
+    Ok(Some((
+        pending.ancestry.with_directory(directory_identity),
+        root_device,
+    )))
 }
 
 pub(crate) fn visit_children(
@@ -625,7 +588,7 @@ mod tests {
             },
             |event| {
                 if let WalkEvent::Entry(item) = event {
-                    seen.push(item.entry.path);
+                    seen.push(item.path);
                 }
                 Ok(OrderedWalkDirective::Continue)
             },
@@ -664,11 +627,11 @@ mod tests {
             |event| {
                 match event {
                     WalkEvent::Entry(item) => {
-                        let rel = item.entry.path.strip_prefix(root.path()).unwrap();
+                        let rel = item.path.strip_prefix(root.path()).unwrap();
                         seen.push(format!("entry:{}", rel.display()));
                     }
                     WalkEvent::DirectoryComplete(item) => {
-                        let rel = item.entry.path.strip_prefix(root.path()).unwrap();
+                        let rel = item.path.strip_prefix(root.path()).unwrap();
                         seen.push(format!("done:{}", rel.display()));
                     }
                     WalkEvent::Error(error) => panic!("unexpected walk error: {error:?}"),

@@ -10,13 +10,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct SubtreeBarrierId(pub(crate) usize);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct EntryTicket {
-    pub(crate) sequence: u64,
-    pub(crate) ancestor_barriers: Vec<SubtreeBarrierId>,
-    pub(crate) block_on_subtree: Option<SubtreeBarrierId>,
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct ActionRequest {
     action: RuntimeAction,
