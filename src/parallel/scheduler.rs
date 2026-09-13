@@ -4,12 +4,25 @@ use crossbeam_deque::{Injector, Steal, Stealer, Worker};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
+/// Backstop for a missed wake-up. The generation counter makes waiting exact,
+/// so this only bounds the damage of a protocol bug: a sleeper wakes up late
+/// instead of never.
+const SLEEP_BACKSTOP: Duration = Duration::from_millis(100);
+
+/// Sleepers observe this counter to decide whether anything changed while they
+/// were running. Every state change that can make work available bumps it, so
+/// a worker that has already checked for work cannot miss the wake-up.
+#[derive(Debug, Default)]
+struct SleepState {
+    generation: u64,
+}
+
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) struct Scheduler {
     injector: Arc<Injector<ParallelTask>>,
     locals: Vec<Mutex<Option<Worker<ParallelTask>>>>,
     stealers: Vec<Stealer<ParallelTask>>,
-    sleep_state: Arc<Mutex<()>>,
+    sleep_state: Arc<Mutex<SleepState>>,
     wakeup: Arc<Condvar>,
 }
 
@@ -18,7 +31,7 @@ pub(crate) struct WorkerHandle {
     local: Worker<ParallelTask>,
     peers: Vec<Stealer<ParallelTask>>,
     injector: Arc<Injector<ParallelTask>>,
-    sleep_state: Arc<Mutex<()>>,
+    sleep_state: Arc<Mutex<SleepState>>,
     wakeup: Arc<Condvar>,
 }
 
@@ -37,7 +50,7 @@ impl Scheduler {
             injector: Arc::new(Injector::new()),
             locals,
             stealers,
-            sleep_state: Arc::new(Mutex::new(())),
+            sleep_state: Arc::new(Mutex::new(SleepState::default())),
             wakeup: Arc::new(Condvar::new()),
         }
     }
@@ -76,12 +89,25 @@ impl Scheduler {
 
         control.task_spawned();
         self.injector.push(task);
-        self.wakeup.notify_one();
+        wake_sleepers(&self.sleep_state, &self.wakeup);
     }
 
+    /// Wakes every sleeper so that it re-checks for work and for the exit
+    /// condition. Callers use it when outstanding work reaches zero.
     pub(crate) fn notify_sleepers(&self) {
-        self.wakeup.notify_all();
+        wake_sleepers(&self.sleep_state, &self.wakeup);
     }
+}
+
+/// Bumps the generation and wakes every sleeper. A single wake-up is not
+/// enough: the woken worker may consume one task and return to work while
+/// other queued tasks stay unclaimed, so every sleeper has to re-check.
+fn wake_sleepers(sleep_state: &Mutex<SleepState>, wakeup: &Condvar) {
+    sleep_state
+        .lock()
+        .expect("scheduler sleep mutex poisoned")
+        .generation += 1;
+    wakeup.notify_all();
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -93,6 +119,8 @@ impl WorkerHandle {
 
         control.task_spawned();
         self.local.push(task);
+        // A peer may steal this task, so sleeping workers have to look.
+        wake_sleepers(&self.sleep_state, &self.wakeup);
     }
 
     pub(crate) fn pop(&mut self) -> Option<ParallelTask> {
@@ -118,23 +146,36 @@ impl WorkerHandle {
     }
 
     pub(crate) fn pop_blocking(&mut self, control: &GlobalControl) -> Option<ParallelTask> {
+        let mut seen = self
+            .sleep_state
+            .lock()
+            .expect("scheduler sleep mutex poisoned")
+            .generation;
+
         loop {
             if let Some(task) = self.pop_nonblocking() {
                 return Some(task);
             }
-
             if control.workers_should_exit() {
                 return None;
             }
 
-            let guard = self
+            let state = self
                 .sleep_state
                 .lock()
                 .expect("scheduler sleep mutex poisoned");
-            let (_guard, _) = self
+            if state.generation != seen {
+                // Something changed while we were looking for work; re-check
+                // before sleeping again.
+                seen = state.generation;
+                continue;
+            }
+
+            let (state, _) = self
                 .wakeup
-                .wait_timeout(guard, Duration::from_millis(10))
+                .wait_timeout(state, SLEEP_BACKSTOP)
                 .expect("scheduler condvar wait failed");
+            seen = state.generation;
         }
     }
 }
@@ -147,6 +188,7 @@ mod tests {
     };
     use std::path::PathBuf;
     use std::thread;
+    use std::time::Instant;
 
     #[test]
     fn root_and_resume_tasks_both_count_as_outstanding_work() {
@@ -176,20 +218,29 @@ mod tests {
 
         let scheduler_for_publisher = scheduler.clone();
         let control_for_publisher = control.clone();
+        let delay = Duration::from_millis(25);
         let publisher = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(25));
+            thread::sleep(delay);
             scheduler_for_publisher.push_inject(
                 ParallelTask::PreOrderRoot(PreOrderRootTask::for_path(PathBuf::from("child"), 1)),
                 control_for_publisher.as_ref(),
             );
         });
 
+        let started = Instant::now();
         let task = worker.pop_blocking(control.as_ref());
+        let waited = started.elapsed();
         publisher.join().unwrap();
         control.task_finished();
         control.task_finished();
 
         assert!(matches!(task, Some(ParallelTask::PreOrderRoot(_))));
+        // The sleeper has to be woken by the enqueue, not by the backstop that
+        // guards against a missed wake-up.
+        assert!(
+            waited < Duration::from_millis(75),
+            "woke after {waited:?}, which suggests the enqueue did not wake the sleeper"
+        );
     }
 
     #[test]
