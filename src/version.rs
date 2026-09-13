@@ -50,6 +50,8 @@ Global options:\n\
   -Olevel                       GNU-compatible parser option; no optimizer effect yet\n\
   -D opts                       lightweight debug diagnostics; use -D help\n\n\
 Compatibility options:\n\
+  BSD: -E (extended regex), -d (depth), -x (same filesystem), -h (command-line symlinks)\n\
+  BSD: -f PATH (additional root)\n\
   -files0-from FILE|-           read NUL-delimited start paths from FILE or stdin\n\
   -follow                       GNU positional compatibility option; enables logical traversal\n\
   -warn, -nowarn                control warnings for unknown -D debug options\n\
@@ -75,7 +77,7 @@ Common tests:\n\
   -maxdepth N  -mindepth N  -depth  -prune  -xdev/-mount  -fstype TYPE\n\
   -true  -false\n\n\
 Actions:\n\
-  -print  -print0  -printf FORMAT  -ls\n\
+  -print  -print0  -printx  -printf FORMAT  -ls\n\
   -fprint FILE  -fprint0 FILE  -fprintf FILE FORMAT  -fls FILE\n\
   -exec ... ;  -exec ... +  -execdir ... ;  -execdir ... +\n\
   -ok ... ;  -okdir ... ;  -delete  -quit\n\n\
