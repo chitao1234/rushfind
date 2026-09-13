@@ -21,6 +21,9 @@ fn main() {
         cc::Build::new()
             .file("src/platform/locale_solarish_regex.c")
             .compile("rushfind_solarish_regex");
+        cc::Build::new()
+            .file("src/platform/door_solarish.c")
+            .compile("rushfind_solarish_door");
     }
 }
 
