@@ -1,0 +1,31 @@
+name: linux
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Cache Rust toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.rustup/settings.toml
+            ~/.rustup/toolchains/
+            ~/.rustup/update-hashes/
+          key: linux-rustup-1.85.0-x86_64-unknown-linux-gnu
+
+      - name: Install Rust 1.85.0
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.85.0
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Run Rust test suite
+        run: cargo test --target x86_64-unknown-linux-gnu
