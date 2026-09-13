@@ -5,8 +5,55 @@ use crate::eval::{ActionOutcome, ActionSink, EvalContext};
 use crate::follow::FollowMode;
 use crate::planner::{OutputAction, RuntimeAction};
 use crossbeam_channel::{Receiver, Sender, unbounded};
-use std::io::Write;
+use std::io::{BufWriter, IsTerminal, Stdout, Write};
 use std::thread::{Scope, ScopedJoinHandle};
+
+/// C stdio block-buffers a stream that is not a terminal and line-buffers one
+/// that is, and GNU find inherits that. Rust's `Stdout` is a `LineWriter`
+/// either way, so a piped or redirected `-print` pays one `write` per record:
+/// measured on 345k records, 59% of the run.
+enum StdoutBuffer {
+    Line(Stdout),
+    Block(BufWriter<Stdout>),
+}
+
+pub struct BufferedStdout {
+    inner: StdoutBuffer,
+}
+
+impl BufferedStdout {
+    pub fn new() -> Self {
+        let stdout = std::io::stdout();
+        let inner = if stdout.is_terminal() {
+            StdoutBuffer::Line(stdout)
+        } else {
+            StdoutBuffer::Block(BufWriter::with_capacity(64 * 1024, stdout))
+        };
+        Self { inner }
+    }
+}
+
+impl Default for BufferedStdout {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Write for BufferedStdout {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match &mut self.inner {
+            StdoutBuffer::Line(writer) => writer.write(buf),
+            StdoutBuffer::Block(writer) => writer.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match &mut self.inner {
+            StdoutBuffer::Line(writer) => writer.flush(),
+            StdoutBuffer::Block(writer) => writer.flush(),
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum BrokerMessage {
@@ -41,11 +88,22 @@ fn broker_loop<W: Write, E: Write>(
             BrokerMessage::Stdout(bytes) => stdout
                 .write_all(&bytes)
                 .map_err(|error| failed_to_write("stdout", error))?,
-            BrokerMessage::Stderr(bytes) => stderr
-                .write_all(&bytes)
-                .map_err(|error| failed_to_write("stderr", error))?,
+            // Block buffering must not let a diagnostic overtake the records
+            // that were written before it.
+            BrokerMessage::Stderr(bytes) => {
+                stdout
+                    .flush()
+                    .map_err(|error| failed_to_write("stdout", error))?;
+                stderr
+                    .write_all(&bytes)
+                    .map_err(|error| failed_to_write("stderr", error))?;
+            }
         }
     }
+
+    stdout
+        .flush()
+        .map_err(|error| failed_to_write("stdout", error))?;
 
     Ok(())
 }

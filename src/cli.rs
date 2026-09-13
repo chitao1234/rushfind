@@ -3,6 +3,7 @@ use crate::ast::{
     WarningMode,
 };
 use crate::diagnostics::{Diagnostic, failed_to_write};
+use crate::output::BufferedStdout;
 use crate::parser::parse_command;
 use crate::planner::plan_command;
 use crate::runner::run_plan;
@@ -17,10 +18,10 @@ where
 {
     let args = args.into_iter().collect::<Vec<_>>();
     let workers = resolve_worker_count().count;
-    let mut stdout = std::io::stdout();
+    let mut stdout = BufferedStdout::new();
     let mut stderr = std::io::stderr();
 
-    match parse_command(&args).and_then(|ast| {
+    let outcome = parse_command(&args).and_then(|ast| {
         if ast
             .global_options
             .iter()
@@ -60,7 +61,18 @@ where
         } else {
             0
         })
-    }) {
+    });
+
+    // A diagnostic must not overtake records that are still buffered, and the
+    // buffer has to reach the file before the process exits.
+    if let Err(error) = stdout.flush() {
+        if outcome.is_ok() {
+            eprintln!("rfd: failed to write stdout: {error}");
+            return 1;
+        }
+    }
+
+    match outcome {
         Ok(code) => code,
         Err(error) => {
             eprintln!("rfd: {}", error);
