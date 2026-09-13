@@ -637,6 +637,8 @@ fn file_type_letter(kind: EntryKind) -> u8 {
         EntryKind::Character => b'c',
         EntryKind::Fifo => b'p',
         EntryKind::Socket => b's',
+        #[cfg(any(target_os = "solaris", target_os = "illumos"))]
+        EntryKind::Door => b'D',
         EntryKind::Unknown => b'U',
     }
 }

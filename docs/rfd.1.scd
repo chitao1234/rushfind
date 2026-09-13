@@ -106,9 +106,8 @@ unsupported diagnostic in this build.
 - -type, -xtype
 - -fstype
 
-The -type and -xtype tests accept GNU-style comma lists such as -type f,d. The
-Solaris door type letter D is recognized for compatibility but reports an
-unsupported diagnostic in this build.
+The -type and -xtype tests accept GNU-style comma lists such as -type f,d. On
+Solaris and illumos, door type letter D matches native door files.
 
 ## Identity and ownership matching
 

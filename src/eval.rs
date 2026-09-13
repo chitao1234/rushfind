@@ -442,6 +442,8 @@ fn matches_type(expected: FileTypeMatcher, actual: EntryKind) -> bool {
         EntryKind::Character => FileTypeFilter::Character,
         EntryKind::Fifo => FileTypeFilter::Fifo,
         EntryKind::Socket => FileTypeFilter::Socket,
+        #[cfg(any(target_os = "solaris", target_os = "illumos"))]
+        EntryKind::Door => FileTypeFilter::Door,
         EntryKind::Unknown => return false,
     })
 }

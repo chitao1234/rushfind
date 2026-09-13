@@ -76,9 +76,8 @@ normal `cargo build` does not depend on it.
   GNU findutils' detailed tracing stream
 - `-ignore_readdir_race` and `-noignore_readdir_race` are accepted and recorded compatibility
   options; this implementation does not yet alter runtime race handling for disappearing entries
-- `-context`, `-type D`, and `-xtype D` are recognized for GNU compatibility but fail with
-  explicit unsupported diagnostics unless SELinux label matching or Solaris door matching is added
-  in a future platform-specific slice
+- `-context` is recognized for GNU compatibility but fails with an explicit unsupported
+  diagnostic; Solaris and illumos support `-type D` and `-xtype D` through native door metadata
 - Access predicates use kernel access checks and intentionally can differ from `-perm`
 - Access predicates use real-ID GNU `access(2)` semantics and are not mode-bit emulation
 - `-xdev` and `-mount` are normalized as traversal-wide structural limits in the current

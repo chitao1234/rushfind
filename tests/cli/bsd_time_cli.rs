@@ -7,8 +7,24 @@ use crate::support::{path_arg, rushfind_command_with_workers};
 use std::ffi::OsString;
 use std::fs;
 use std::os::unix::ffi::OsStrExt;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::path::Path;
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "dragonfly"
+))]
+use std::path::PathBuf;
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "dragonfly"
+))]
+use std::process::Command;
+use std::process::Output;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tempfile::tempdir;
 
@@ -238,6 +254,13 @@ fn birth_time_predicates_find_fresh_files() {
     assert!(names(&unmatched).is_empty());
 }
 
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "dragonfly"
+))]
 fn platform_bsd_find() -> Option<PathBuf> {
     for candidate in ["/usr/bin/find", "/bin/find"] {
         let path = PathBuf::from(candidate);
@@ -261,6 +284,13 @@ fn platform_bsd_find() -> Option<PathBuf> {
 /// Where the platform ships a BSD `find`, the unit forms have to agree with it
 /// edge for edge. Ages sit at least three seconds away from a boundary, since
 /// the two runs are separate processes.
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "dragonfly"
+))]
 #[test]
 fn unit_durations_agree_with_the_platforms_bsd_find() {
     let Some(bsd_find) = platform_bsd_find() else {

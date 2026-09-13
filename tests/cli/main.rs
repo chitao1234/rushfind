@@ -9,6 +9,8 @@ mod support;
 
 mod bsd_time_cli;
 mod delete_cli;
+#[cfg(any(target_os = "solaris", target_os = "illumos"))]
+mod door_cli;
 mod exec_cli;
 mod exit_cli;
 mod file_identity;

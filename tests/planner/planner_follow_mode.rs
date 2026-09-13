@@ -83,6 +83,7 @@ fn context_is_a_recognized_but_unsupported_predicate() {
     assert!(error.message.contains("-context"), "{}", error.message);
 }
 
+#[cfg(not(any(target_os = "solaris", target_os = "illumos")))]
 #[test]
 fn solaris_door_type_filters_are_recognized_but_unsupported() {
     for args in [
@@ -99,5 +100,18 @@ fn solaris_door_type_filters_are_recognized_but_unsupported() {
             args,
             error.message
         );
+    }
+}
+
+#[cfg(any(target_os = "solaris", target_os = "illumos"))]
+#[test]
+fn solaris_door_type_filters_are_supported() {
+    for args in [
+        vec![".", "-type", "D"],
+        vec![".", "-xtype", "D"],
+        vec![".", "-type", "f,D"],
+    ] {
+        let ast = parse_command(&argv(&args)).unwrap();
+        plan_command(ast, 1).unwrap();
     }
 }

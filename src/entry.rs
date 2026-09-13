@@ -26,6 +26,8 @@ pub enum EntryKind {
     Character,
     Fifo,
     Socket,
+    #[cfg(any(target_os = "solaris", target_os = "illumos"))]
+    Door,
     Unknown,
 }
 
@@ -210,7 +212,14 @@ impl EntryContext {
     pub fn physical_kind(&self) -> Result<EntryKind, Diagnostic> {
         #[cfg(unix)]
         if let Some(file_type) = self.data.physical_file_type_hint {
-            return Ok(file_type_to_kind(file_type));
+            let kind = file_type_to_kind(file_type);
+            // std::fs::FileType has no door predicate. Keep the hint fast path
+            // for known types and consult st_mode only for unclassified ones.
+            #[cfg(any(target_os = "solaris", target_os = "illumos"))]
+            if kind == EntryKind::Unknown {
+                return Ok(self.physical_view()?.kind);
+            }
+            return Ok(kind);
         }
 
         Ok(self.physical_view()?.kind)

@@ -1774,7 +1774,7 @@ fn parallel_positional_follow_matches_gnu_find_as_sets() {
 }
 
 #[test]
-fn unsupported_context_and_door_type_outcomes_match_gnu_find() {
+fn context_and_door_type_outcomes_match_gnu_find() {
     let root = build_tree();
 
     for args in [
@@ -1796,7 +1796,12 @@ fn unsupported_context_and_door_type_outcomes_match_gnu_find() {
             .unwrap();
 
         assert_eq!(actual.status.code(), expected.status.code(), "{:?}", args);
-        assert!(!actual.stderr.is_empty(), "{:?}", args);
+        assert_eq!(actual.stdout, expected.stdout, "{:?}", args);
+        if expected.status.success() {
+            assert_eq!(actual.stderr, expected.stderr, "{:?}", args);
+        } else {
+            assert!(!actual.stderr.is_empty(), "{:?}", args);
+        }
     }
 }
 

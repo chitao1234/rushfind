@@ -219,6 +219,12 @@ pub(crate) fn metadata_view_from_metadata(
     use std::os::unix::fs::MetadataExt;
 
     let kind = file_type_to_kind(metadata.file_type());
+    #[cfg(any(target_os = "solaris", target_os = "illumos"))]
+    let kind = if crate::platform::unix::solarish::mode_is_door(metadata.mode()) {
+        EntryKind::Door
+    } else {
+        kind
+    };
     let extras = crate::platform::unix::metadata_extras(path, metadata, follow);
 
     PlatformMetadataView {

@@ -27,6 +27,8 @@ pub(crate) fn symbolic_mode_string(kind: EntryKind, mode: u32) -> String {
         EntryKind::Character => 'c',
         EntryKind::Fifo => 'p',
         EntryKind::Socket => 's',
+        #[cfg(any(target_os = "solaris", target_os = "illumos"))]
+        EntryKind::Door => 'D',
         EntryKind::Unknown => 'U',
     });
     value.push(if mode & 0o400 != 0 { 'r' } else { '-' });

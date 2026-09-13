@@ -138,3 +138,9 @@ fn statvfs_for_path(path: &Path) -> io::Result<libc::statvfs> {
 
     Ok(unsafe { statvfs.assume_init() })
 }
+
+// <sys/stat.h>: S_IFMT = 0xF000, S_IFDOOR = 0xD000 on Solaris and illumos.
+// libc and std::fs::FileType do not expose a common door predicate.
+pub(crate) fn mode_is_door(mode: u32) -> bool {
+    mode & libc::S_IFMT == 0xD000
+}

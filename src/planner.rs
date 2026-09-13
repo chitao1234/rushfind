@@ -2,8 +2,7 @@ use crate::account::{
     PrincipalId, canonicalize_sid_principal, resolve_group_principal, resolve_user_principal,
 };
 use crate::ast::{
-    Action, CommandAst, CompatibilityOptions, Expr, FileTypeFilter, FileTypeMatcher, GlobalOption,
-    Predicate,
+    Action, CommandAst, CompatibilityOptions, Expr, FileTypeMatcher, GlobalOption, Predicate,
 };
 use crate::ctype::CtypeProfile;
 use crate::diagnostics::Diagnostic;
@@ -653,6 +652,7 @@ fn lower_type_predicate(
     matcher: FileTypeMatcher,
     follow_symlinks: bool,
 ) -> Result<RuntimeExpr, Diagnostic> {
+    #[cfg(not(any(target_os = "solaris", target_os = "illumos")))]
     reject_solaris_door_type(matcher)?;
     Ok(RuntimeExpr::Predicate(if follow_symlinks {
         RuntimePredicate::XType(matcher)
@@ -661,7 +661,9 @@ fn lower_type_predicate(
     }))
 }
 
+#[cfg(not(any(target_os = "solaris", target_os = "illumos")))]
 fn reject_solaris_door_type(matcher: FileTypeMatcher) -> Result<(), Diagnostic> {
+    use crate::ast::FileTypeFilter;
     if matcher.contains(FileTypeFilter::Door) {
         return Err(Diagnostic::unsupported(
             "Solaris door file type is not supported by this rushfind build",
