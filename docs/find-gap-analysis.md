@@ -1,169 +1,159 @@
 # Find compatibility and performance backlog
 
 This is a working backlog for extending `rfd` beyond its current GNU-focused
-surface. It includes the BSD `find(1)` family (FreeBSD, OpenBSD, NetBSD, and
-the closely related macOS behavior) and implementation issues visible in the
-current traversal and evaluation pipeline.
+surface. It covers the BSD `find(1)` family (FreeBSD, OpenBSD, NetBSD, and the
+closely related macOS behavior) and implementation issues that are visible in
+the traversal and evaluation pipeline.
 
 ## Current baseline
 
-`cargo test --all-targets` passes all tests in the current checkout. The parser,
-planner, evaluator, ordered walker, relaxed parallel walker, action pipeline,
-locale handling, and Unix-family backends are covered well for the features
-that are already implemented.
+`cargo test --all-targets` passes on the current checkout. The parser, planner,
+evaluator, ordered walker, relaxed parallel walker, action pipeline, locale
+handling, and Unix-family backends are covered by unit, CLI, and differential
+tests against GNU findutils 4.11.
 
-The following common BSD spellings are currently rejected as unsupported
-expression tokens: `-E`, `-s`, `-x`, `-d`, `-X`, `-printx`, `-acl`, `-Bmin`,
-`-asince`, `-rm`, `-exit`, and `-f path`.
+BSD spellings that are implemented: `-E`, `-x`, `-d`, `-f PATH`, `-h` (OpenBSD
+command-line symlinks), `-X`, `-printx`, `-rm`, `-exit [STATUS]`.
 
-## Priority 0: compatibility that users will hit immediately
+## Landed: performance
 
-### BSD option aliases and option placement
+- **Traversal decisions no longer read metadata.** `EntryContext`'s
+  active-kind check runs before the traversal-link check, so an entry whose
+  directory-entry type hint proves it is not a directory costs no `lstat`.
+  Measured on 120k files: `-print` 305ms -> 68ms, `-type d` 270ms -> 39ms.
+- **BSD metadata reads are one syscall.** `PlatformMetadataView` is built from
+  the `Metadata` the caller already holds; flags, birth time and device come
+  from that `stat` instead of three more. Measured with a DYLD interposer on
+  120k files: 480,484 -> 120,121 `lstat` calls for `-size +0c`, which now runs
+  in 0.12s against GNU find's 0.15s. Linux and the generic Unix tier are
+  unchanged (their flags need `FS_IOC_GETFLAGS` and their birth time and mount
+  id need `statx`).
+- **The ordered engine streams.** It previously walked the whole tree before
+  releasing a single result: 788ms to first output, 148MB RSS, and stderr
+  diagnostics ahead of all stdout. It is now a bounded, sequence-numbered
+  pipeline with a collector that owns the sink; see
+  [`ordered-pipeline-design.md`](ordered-pipeline-design.md). On 120k files the
+  single-worker path went 855ms/148MB -> 136ms/3.2MB and now matches GNU find's
+  traversal order exactly.
+- **Idle workers wake on enqueue.** The scheduler's 10ms timed wait (which
+  could also lose a wake-up) is replaced by a generation counter.
+- **Per-entry bookkeeping copies are gone.** `ancestor_barriers` was cloned
+  into every child and never read; `ancestry` was rebuilt per directory
+  descent; `EntryTicket`/`ScheduledEntry` carried both. Post-order chunk
+  publishing no longer rebuilds a `PendingPath` per child either.
+- **Printed records cost one allocation** instead of building an
+  exactly-sized path vector and then reallocating it for the terminator.
 
-Add a BSD compatibility layer during leading-option parsing and preserve the
-option state in `CommandAst`/`CompatibilityOptions`:
+## Landed: GNU compatibility
 
-| BSD spelling | Meaning | Existing implementation to reuse |
-| --- | --- | --- |
-| `-d` | depth-first traversal | `Predicate::Depth` / `TraversalOrder::DepthFirstPostOrder` |
-| `-x` | stay on the starting filesystem | `Predicate::XDev` / `same_file_system` |
-| `-E` | use extended regular expressions for `-regex` and `-iregex` | `RegexDialect::PosixExtended` |
-| `-f path` | add a root path, including paths beginning with `-`, `!`, or `(` | `CommandAst::start_paths` |
-| OpenBSD `-h` | follow command-line symlinks | `FollowMode::CommandLineOnly` |
+- **Looping entries are skipped, not evaluated.** A symlink loop made both
+  walkers evaluate the entry before the diagnostic; GNU reports it and
+  evaluates nothing for that path.
+- **Path components follow gnulib.** `%f`, `%h`, `-name`/`-iname` and
+  `-execdir`'s `{}` no longer inherit Rust's `Path::file_name()`/`parent()`
+  behaviour, which drops `.`, `..`, `/` and trailing separators. A 32-spelling
+  start-path matrix went from 152 divergences from GNU find to zero.
+- **`-ls`/`-fls` escape names** with GNU's byte-wise rule, in the name and in
+  the symlink target, independently of the locale and of a terminal.
+- **`-printf` time selectors are complete.** `%TC`, `%Te`, `%Tk`, `%Tl`,
+  `%Tn`, `%Ts` and `%v` are implemented; every other selector is handed to the
+  host `strftime`, which is what GNU find does, so unknown selectors render
+  identically on the same host.
+- **`-printf` field flags match**: the space flag is accepted, and the zero
+  flag pads string fields the way the host C library does.
+- **Unrecognized `-printf` directives warn and continue** (once per occurrence
+  in the format) instead of failing the run, matching GNU find's exit status.
+- **`-ignore_readdir_race` works.** Diagnostics carry the OS error behind them
+  and the walkers drop ENOENT/ESTALE ones for entries discovered through a
+  listing, while permission and I/O failures and command-line roots are always
+  reported.
+- **`-O0` means what GNU means**: the written test order is kept instead of
+  reordering the cheap predicates.
+- **Dead design surface removed**: `ExecutionPlan::parallel_policy`,
+  `optimizer::Requirement`, `OutputPresentation`, `EntryTicket`.
 
-`-d` and `-x` are especially cheap aliases. `-E` must be represented as a
-state change before regex primaries are lowered, just like positional
-`-regextype`; it should not compile a regex by itself. `-f` needs parser support
-because treating its operand as an ordinary path is not enough when the path
-would otherwise be classified as an expression token.
+## Deferred, with rationale
 
-### BSD time predicates
+### Glob matching backtracks exponentially
 
-Implement the creation/birth-time family where the active backend advertises
-`PlatformFeature::BirthTime`:
+`pattern/owned.rs` and `pattern/encoded.rs` implement `*` with naive recursion
+and no memoization, so `-name '*a*a*a*a*a*a*a*a*b'` takes longer than 20s where
+GNU find answers in 5.6ms (six repetitions: 1.2s; eight: over 20s). This affects
+`-name`, `-iname`, `-path` and `-ipath`, and is reachable from an untrusted
+filename only in the sense that the pattern is the attacker's, so the fix is a
+correctness-of-performance issue rather than a security one.
 
-- FreeBSD/macOS: `-Bmin`, `-Btime`, `-Bnewer`.
-- FreeBSD aliases: `-mnewer` (same comparison as `-newer`).
-- NetBSD aliases: `-asince`, `-csince`, `-since`, and the corresponding
-  `-newerat`, `-newerct`, `-newermt` forms.
+The fix needs an algorithm change rather than a patch: memoize
+`(atom_index, candidate_index)`, or replace the matcher with the linear greedy
+algorithm for the byte program and the equivalent for encoded units. Both
+programs share the shape, so the change belongs in one design pass covering
+both, plus a benchmark that pins the pathological patterns.
 
-The existing timestamp matcher and birth-time metadata accessor provide most
-of the runtime machinery. The missing pieces are parser atoms, planner
-lowering, and BSD-compatible duration parsing. BSD accepts compound units such
-as `-1h30m` and parsed date strings; the current parser only accepts the GNU
-numeric/fractional subset and a strict literal format for `-newerXY`.
+### `-mtime`-family second boundary
 
-### BSD output and mutation aliases
+GNU find 4.11 uses `timespec_cmp` for the window comparison but adjusts the
+origin by `DAYSECS - 1` in `parse_time`, so a file whose age is just under
+`N days + 1s` satisfies `-mtime -N` *and* `-mtime N` *and* `-mtime +(N-1)`.
+Measured: a file aged 86400.96s matches all three. `rfd`'s windows are
+disjoint.
 
-These are small, high-value additions:
+This is upstream's behaviour on master as well (the April 2026 change removed
+`difftime` usage, not the day adjustment), so the project has to decide whether
+to reproduce a window that overlaps by up to a second or to keep the disjoint
+windows and document the difference. `-mmin` and friends have no such offset
+and already agree with GNU exactly.
 
-- `-rm` as an alias for `-delete` (NetBSD).
-- `-exit [status]` as an immediate exit action (NetBSD). The action needs an
-  explicit exit status in the runtime control path; it is not equivalent to
-  GNU `-quit`, which exits successfully after the current pipeline work.
-- `-printx` (NetBSD), which emits xargs-quoted names.
-- `-X` (FreeBSD/OpenBSD/NetBSD), which skips names unsafe for plain `xargs` and
-  reports a diagnostic. This is a traversal/output policy, not a filename
-  predicate.
+### Per-directory child buffering
 
-The existing byte-preserving output and action broker are suitable for
-`-printx`; add a dedicated renderer rather than passing through lossy UTF-8.
+`read_children` materializes one directory before descending. GNU find's `fts`
+does the same, and measured RSS on a 200k-entry directory is 33MB for GNU find
+against 40MB for `rfd`, so this is not a divergence worth a rewrite. Streaming
+through an iterator frame remains possible for the ordered walker if a workload
+ever shows it matters.
 
-## Priority 1: BSD metadata and traversal behavior
+### Output batching
 
-### Sorted traversal (`-s`)
+Each rendered record is still its own broker message. Merging consecutive
+records into byte-bounded batches would cut channel traffic, but it changes
+flush and atomicity boundaries, so it should follow the measurement the
+original backlog asked for (queue wait time, bytes per message, file-output
+lock contention) rather than precede it.
 
-FreeBSD, NetBSD, and macOS provide `-s`, sorting entries within each directory
-before descent. Add `TraversalOrder::Lexicographic` (or a separate
-`sort_children` bit) and sort using the platform byte/locale policy already
-used by path rendering. The sort must be per-directory; globally sorting the
-final output is incorrect. In parallel mode, `-s` should force an ordered
-execution policy unless a deterministic per-directory scheduling guarantee is
-added.
+## Remaining compatibility work
 
-### ACL predicate (`-acl`)
+### BSD traversal and metadata
 
-FreeBSD exposes `-acl` to select files with extended ACLs. Add an optional
-`acl_present` field to `PlatformMetadataView` and a capability bit. The planner
-should fail during planning on platforms without an ACL reader, following the
-existing explicit-diagnostic pattern for unsupported metadata. Do not infer ACL
-presence from mode bits.
+- `-s` sorted traversal (FreeBSD/NetBSD/macOS). Needs a per-directory sort and
+  an ordered-only execution policy, since a global sort of the output is not
+  equivalent.
+- `-acl` (FreeBSD). Needs an ACL reader behind a capability gate; planning must
+  fail explicitly on platforms without one rather than infer ACL presence from
+  mode bits.
+- BSD time arguments: compound durations (`-mtime 1h30m`) and the NetBSD
+  reference-time aliases (`-asince`, `-csince`, `-since`, `-newerat`,
+  `-newerct`, `-newermt`). The literal-time parser is the intended backend; see
+  `priority0-runtime-design.md` for the accepted subset.
+- `-flags` on macOS knows `arch`, `nodump` and `uchg`; the host also defines
+  `hidden`, `opaque` and others that `-flags +hidden` should accept.
 
-### BSD `-flags` and `-perm` semantics
+### Literal time parsing
 
-The shared flag and permission parsers cover much of the syntax, but BSD
-`-flags` has different exact/all/any handling and native flag names. Add
-platform-specific flag specs and differential tests for FreeBSD/macOS instead
-of assuming the current Linux names and algebra are portable. BSD symbolic
-`-perm` also has edge cases around omitted `who` and special bits that should be
-checked against each target's `find(1)`.
+Accepted today: `@SECONDS[.FRACTION]`, `YYYY-MM-DD`, `YYYYMMDD`, and
+`[T| ]HH:MM[:SS][.FRACTION][Z|±HH[:MM]]`. Missing: natural-language input
+(`now`, `yesterday`, `1 day ago`, `Jun 15 2024`), a bare number, compact date
+times (`202406151330`), and an offset written as a separate word
+(`2024-06-15 13:30:00 +0800`, which GNU accepts).
 
-## Priority 2: GNU behavior that is accepted but still only nominal
+### Debug tracing
 
-- `-ignore_readdir_race` and `-noignore_readdir_race` are parsed and stored,
-  but disappearing directory entries still follow the normal error path. The
-  option should suppress the specific ENOENT/ESTALE race diagnostics while
-  preserving permission and I/O errors.
-- `-Olevel` is accepted but does not select an optimizer strategy. Either make
-  levels meaningful or document the accepted compatibility range as a no-op.
-- `-D` categories currently print a placeholder saying detailed tracing is not
-  implemented. Implement at least `tree`, `opt`, `stat`, and `exec` around the
-  existing planner and runtime events, or narrow the advertised help.
-- `-context` and Solaris door types are recognized but unsupported. These are
-  correctly diagnosed; they should remain explicit platform slices rather than
-  silently evaluating false.
+`-D` categories other than `help` print a placeholder line and `-D help`
+documents that honestly. Implementing `tree`, `opt`, `stat` and `exec` tracing
+means threading a debug channel through both engines and the action sinks.
 
-## Performance issues to measure and resolve
+### Windows
 
-### Ordered walker buffers every directory
-
-`walk_ordered_with_backend` calls `read_children`, which collects the entire
-directory into a `Vec<DiscoveredChild>` before pushing work. Peak memory is
-therefore proportional to the widest directory, and the first child cannot be
-processed until enumeration finishes. For unsorted pre-order traversal, stream
-children directly onto the stack. Keep buffering only for post-order and
-lexicographic modes where ordering requires it.
-
-### Ancestry is cloned for every child
-
-`PendingPath.ancestry` is a `Vec<FileIdentity>` and is cloned once per child in
-both ordered and parallel traversal. This is O(number of entries × depth) copy
-traffic and allocates heavily on deep or wide trees. Replace it with a shared
-persistent ancestry node (`Arc` parent chain) or a traversal-local identity set
-with scoped insert/remove operations.
-
-### Scheduler polling adds avoidable latency
-
-Workers that find no work wait on a condition variable with a 10 ms timeout and
-then poll again. This creates a floor on wake-up latency and unnecessary wake
-traffic on short jobs. Use a generation counter or an atomic outstanding-work
-state paired with the condition variable so workers sleep until a real enqueue,
-quit, or completion event.
-
-### Directory entry type hints are not always enough
-
-`visit_children` obtains `DirEntry::file_type()` and later metadata access may
-still call `stat`/`lstat`. On filesystems with unknown `d_type`, this becomes an
-extra syscall per entry. Measure syscall counts on ext4, NFS, and BSD UFS/ZFS;
-where safe, carry a complete metadata result or avoid repeating the type read.
-
-### Output and action serialization need profiling
-
-Parallel workers serialize output through the broker and file-output locks. This
-is correct for ordering and shared destinations, but high-volume `-print0` and
-`-printf` workloads may become single-consumer bound. Add counters for queue
-wait time, bytes per broker message, and file-output lock contention before
-changing the design.
-
-## Suggested implementation sequence
-
-1. Add `-d`, `-x`, BSD `-E`, OpenBSD `-h`, and `-f path` parsing with parser and
-   planner tests.
-2. Add `-rm`, `-printx`, `-X`, and NetBSD `-exit` with output/action tests.
-3. Add BSD birth-time aliases and duration/date parsing, gated by capabilities.
-4. Add per-directory sorted traversal and force ordered execution for `-s`.
-5. Implement race-option behavior and replace the 10 ms scheduler polling.
-6. Measure and then refactor ancestry sharing and ordered-directory buffering.
-7. Add ACL metadata only after selecting a portable backend contract for the
-   supported BSD targets.
-
+- `EntryContext::physical_kind` ignores the directory-entry type hint on
+  Windows, so every entry costs a metadata read that the hint could answer.
+  The reparse-point check still needs the view, so the win is smaller than on
+  Unix, but the hint could short-circuit non-reparse cases.
+- `-ls` keeps its own printable-subset escaping rather than GNU's byte rule.
