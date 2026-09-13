@@ -139,8 +139,12 @@ The `rfd` binary keeps the command-line syntax identical to GNU `find`.
 
 Use the `RUSHFIND_WORKERS` environment variable to control execution mode:
 
-- `RUSHFIND_WORKERS=1` keeps traversal/output close to GNU ordering
+- `RUSHFIND_WORKERS=1` runs the ordered engine on a single thread: the walk, evaluation, and
+  output share one thread, so results stream as they are found and sibling order matches GNU
+  `find` exactly
 - `RUSHFIND_WORKERS=4` enables the worker-owned relaxed-order parallel engine by default
+- A plan that has to commit in traversal order, such as NetBSD-style `-exit`, evaluates with the
+  requested worker count and still releases results in traversal order
 
 ## Follow modes
 
