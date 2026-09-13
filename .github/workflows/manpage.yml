@@ -1,0 +1,41 @@
+name: manpage
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  freshness:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          # `scripts/generate_manpage.sh` dates the page from the log.
+          fetch-depth: 0
+
+      - name: Build pinned scdoc
+        run: |
+          scripts/ci/build_scdoc.sh "$RUNNER_TEMP/scdoc" ci/scdoc-source.env
+          echo "$RUNNER_TEMP/scdoc/bin" >> "$GITHUB_PATH"
+
+      - name: Verify the pinned scdoc is the one that runs
+        run: |
+          # shellcheck source=/dev/null
+          . ci/scdoc-source.env
+          if [ "$(scdoc -v)" != "scdoc ${SCDOC_REF}" ]; then
+            printf 'error: expected scdoc %s, got %s from %s\n' \
+              "${SCDOC_REF}" "$(scdoc -v)" "$(command -v scdoc)" >&2
+            exit 1
+          fi
+
+      - name: Regenerate and compare
+        run: |
+          scripts/generate_manpage.sh
+          # The stamp tracks the commit log rather than the CI clock, so it is
+          # excluded here; every other byte must match the committed page.
+          if ! diff -u <(git show HEAD:docs/rfd.1 | grep -v '^\.TH ') \
+                       <(grep -v '^\.TH ' docs/rfd.1); then
+            printf 'error: docs/rfd.1 is out of date; run scripts/generate_manpage.sh and commit the result\n' >&2
+            exit 1
+          fi

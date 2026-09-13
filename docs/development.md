@@ -17,12 +17,24 @@ scripts/generate_manpage.sh
 Render and preview it locally with:
 
 ```bash
-scdoc < docs/rfd.1.scd > docs/rfd.1
-man -l docs/rfd.1
+scdoc < docs/rfd.1.scd > /tmp/rfd.1 && man -l /tmp/rfd.1
 ```
 
 The `scdoc` tool is only needed when regenerating `docs/rfd.1`; normal
 `cargo build` does not depend on it.
+
+The output depends on the scdoc version, so the revision is pinned in
+`ci/scdoc-source.env` and built by `scripts/ci/build_scdoc.sh`. Between 1.11.2
+and 1.11.5 the list markup, hyphen escaping, and empty-paragraph macro all
+changed, and a page rendered by the wrong one rewrites almost the whole file.
+Using the pinned revision keeps a regeneration down to the lines that actually
+changed.
+
+`scripts/generate_manpage.sh` also pins `SOURCE_DATE_EPOCH` to the author date
+of the last commit that touched `docs/rfd.1.scd`, so the `.TH` stamp does not
+move with the clock. The `manpage` workflow rebuilds the pinned scdoc, runs the
+script, and fails if anything other than that stamp differs from the committed
+page.
 
 ## Test layout
 
