@@ -43,6 +43,13 @@ command-line symlinks), `-X`, `-printx`, `-rm`, `-exit [STATUS]`.
   publishing no longer rebuilds a `PendingPath` per child either.
 - **Printed records cost one allocation** instead of building an
   exactly-sized path vector and then reallocating it for the terminator.
+- **Glob matching is linear.** Both matchers now scan greedily with a single
+  backtrack point instead of recursing over every split, so the patterns that
+  used to be unbounded now match GNU find's time: `*a*a*a*a*a*a*b` went from
+  11994ms to 5.8ms and eight or more repetitions from over 20s to 5.5ms. The
+  byte and encoded matchers were rewritten together, and on 120k files the
+  matcher no longer shows up at all (`-name 'f*0*0*0*9'` costs the same as
+  `-name 'f000*'`).
 
 ## Landed: GNU compatibility
 
@@ -74,20 +81,18 @@ command-line symlinks), `-X`, `-printx`, `-rm`, `-exit [STATUS]`.
 
 ## Deferred, with rationale
 
-### Glob matching backtracks exponentially
+### Encoded matching still decodes a candidate per evaluation
 
-`pattern/owned.rs` and `pattern/encoded.rs` implement `*` with naive recursion
-and no memoization, so `-name '*a*a*a*a*a*a*a*a*b'` takes longer than 20s where
-GNU find answers in 5.6ms (six repetitions: 1.2s; eight: over 20s). This affects
-`-name`, `-iname`, `-path` and `-ipath`, and is reachable from an untrusted
-filename only in the sense that the pattern is the attacker's, so the fix is a
-correctness-of-performance issue rather than a security one.
+`pattern/encoded.rs::matches` materializes the candidate's text units
+(`decode_units(..).collect::<Vec<_>>()`, plus the boxed iterator that
+`decode_units` returns) on every call. That is why `-iname` under a UTF-8
+locale costs about 15ms more than `-name` over 120k files (86.5ms against
+71.5ms); the byte path allocates nothing.
 
-The fix needs an algorithm change rather than a patch: memoize
-`(atom_index, candidate_index)`, or replace the matcher with the linear greedy
-algorithm for the byte program and the equivalent for encoded units. Both
-programs share the shape, so the change belongs in one design pass covering
-both, plus a benchmark that pins the pathological patterns.
+Removing it means indexing the matcher by byte offset and decoding units on
+demand, which rewrites the scan core that the current differential coverage was
+built against, so it wants its own change with the same fnmatch-based fuzzing
+this one got. The absolute cost is small and only shows up outside the C locale.
 
 ### `-mtime`-family second boundary
 

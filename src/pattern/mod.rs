@@ -195,6 +195,52 @@ mod tests {
         assert!(!glob.is_match(candidate.as_os_str()).unwrap());
     }
 
+    /// Many stars used to cost exponential time here: the recursive matcher
+    /// re-entered the pattern from every split point, so a 20k-character
+    /// candidate never finished. Terminating at all is half the assertion; the
+    /// other half is that the greedy backtrack still reaches the right answer.
+    #[test]
+    fn many_stars_terminate_and_match_correctly() {
+        let glob = CompiledGlob::compile(
+            "-name",
+            OsStr::new("*a*a*a*a*a*a*a*a*b"),
+            GlobCaseMode::Sensitive,
+            GlobSlashMode::Literal,
+        )
+        .unwrap();
+
+        assert!(!glob.is_match(OsString::from_vec(vec![b'a'; 20_000]).as_os_str()).unwrap());
+
+        let mut matching = vec![b'a'; 20_000];
+        matching.push(b'b');
+        assert!(
+            glob.is_match(OsString::from_vec(matching).as_os_str())
+                .unwrap()
+        );
+    }
+
+    /// Pathname mode is the branch the greedy backtrack cannot absorb: a `*`
+    /// never takes a separator, so a separator at the backtrack point ends the
+    /// search. The expectations are `fnmatch(3)` with `FNM_PATHNAME`.
+    #[test]
+    fn pathname_mode_backtrack_stops_at_a_separator() {
+        let deep = "a".repeat(20);
+        for (pattern, candidate, expected) in [
+            ("*b", "aa/b", false),
+            ("*b", "aab", true),
+            ("*.txt", "a/b.txt", false),
+            ("*a*a*a*a*b", "aaaa/aaaa", false),
+            ("*a*a*a*a*b", "aaaaab", true),
+            ("*a*a*a*a*a*a*a*a*b", deep.as_str(), false),
+        ] {
+            assert_eq!(
+                matches_pattern(OsStr::new(pattern), OsStr::new(candidate), false, true).unwrap(),
+                expected,
+                "{pattern:?} against {candidate:?}"
+            );
+        }
+    }
+
     #[test]
     fn c_locale_case_insensitive_matching_is_ascii_only() {
         let glob = CompiledGlob::compile(

@@ -213,6 +213,9 @@ fn consume_class_item(
     }
 }
 
+/// Greedy scan with a single backtrack point; see the byte-level matcher in
+/// `owned.rs` for why one backtrack point is sufficient and why
+/// `GlobSlashMode::Pathname` stops the backtrack at a separator.
 pub(super) fn matches(
     program: &EncodedGlobProgram,
     case_mode: GlobCaseMode,
