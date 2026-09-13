@@ -283,7 +283,13 @@ pub(crate) fn plan_command_with_now_and_capabilities(
         follow_mode,
         capabilities,
     )?;
-    let lowered = optimize_read_only_and_chains(lowered);
+    // `-O0` is GNU's "evaluate the tests in the order given"; every other level
+    // gets the default cost-based reordering.
+    let lowered = if compatibility_options.optimizer_level == Some(0) {
+        lowered
+    } else {
+        optimize_read_only_and_chains(lowered)
+    };
 
     if state.saw_delete {
         traversal.order = TraversalOrder::DepthFirstPostOrder;

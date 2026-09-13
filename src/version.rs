@@ -47,7 +47,7 @@ Global options:\n\
   -P -H -L                      symlink handling before start paths (default: -P)\n\
   --help                        show this help text\n\
   --version, -version           show build/version information\n\
-  -Olevel                       GNU-compatible parser option; no optimizer effect yet\n\
+  -Olevel                       query optimisation level; -O0 evaluates tests in the order given\n\
   -D opts                       lightweight debug diagnostics; use -D help\n\n\
 Compatibility options:\n\
   BSD: -E (extended regex), -d (depth), -x (same filesystem), -h (command-line symlinks)\n\
