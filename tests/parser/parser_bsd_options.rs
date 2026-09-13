@@ -23,6 +23,12 @@ fn parses_bsd_xargs_safety_option() {
 }
 
 #[test]
+fn parses_bsd_sorted_option() {
+    let ast = parse_command(&argv(&["-s", ".", "-print"])).unwrap();
+    assert!(ast.compatibility_options.sort_children);
+}
+
+#[test]
 fn parses_exit_with_optional_status() {
     let default = parse_command(&argv(&[".", "-exit", "-print"])).unwrap();
     assert!(

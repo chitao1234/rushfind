@@ -72,6 +72,7 @@ pub struct TraversalOptions {
     pub order: TraversalOrder,
     pub xargs_safe: bool,
     pub ignore_readdir_race: bool,
+    pub sort_children: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -270,6 +271,7 @@ pub(crate) fn plan_command_with_now_and_capabilities(
             TraversalOrder::PreOrder
         },
         xargs_safe: compatibility_options.xargs_safe,
+        sort_children: compatibility_options.sort_children,
         ignore_readdir_race: compatibility_options.ignore_readdir_race.unwrap_or(false),
     };
     let mut runtime = RuntimeRequirements {
@@ -313,7 +315,7 @@ pub(crate) fn plan_command_with_now_and_capabilities(
     if let Some(warning) = ctype_warning_for_plan(&state.ctype_profile, &expr) {
         state.startup_warnings.push(warning);
     }
-    let mode = if workers <= 1 || requires_ordered_execution(&expr) {
+    let mode = if workers <= 1 || traversal.sort_children || requires_ordered_execution(&expr) {
         ExecutionMode::OrderedSingle
     } else {
         ExecutionMode::ParallelRelaxed

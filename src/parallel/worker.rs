@@ -512,19 +512,24 @@ fn run_preorder_pending_batch(
 
         let mut chunks =
             ChunkAccumulator::new(DEFAULT_SPLIT_CHILD_THRESHOLD, DEFAULT_SPILL_CHUNK_SIZE);
+        let mut discovered = Vec::new();
         let mut emitted_error = None;
         backend.visit_children(&pending.path, &mut |item| match item {
             Ok(child) => {
-                chunks.push(
-                    discovered_child_to_pending(child, &pending, &child_ancestry, root_device),
-                    sink.control.accepts_new_work(),
-                );
-                if sink.control.accepts_new_work() {
-                    publish_preorder_sibling_chunks(
-                        chunks.take_spilled_chunks(),
-                        worker,
-                        sink.control.as_ref(),
+                if plan.traversal.sort_children {
+                    discovered.push(child);
+                } else {
+                    chunks.push(
+                        discovered_child_to_pending(child, &pending, &child_ancestry, root_device),
+                        sink.control.accepts_new_work(),
                     );
+                    if sink.control.accepts_new_work() {
+                        publish_preorder_sibling_chunks(
+                            chunks.take_spilled_chunks(),
+                            worker,
+                            sink.control.as_ref(),
+                        );
+                    }
                 }
             }
             Err(error) => {
@@ -542,6 +547,17 @@ fn run_preorder_pending_batch(
 
         if sink.control.quit_seen() {
             chunks.observe_quit();
+        }
+
+        if plan.traversal.sort_children {
+            discovered
+                .sort_by_cached_key(|child| crate::platform::path::display_bytes(&child.path));
+            for child in discovered {
+                chunks.push(
+                    discovered_child_to_pending(child, &pending, &child_ancestry, root_device),
+                    sink.control.accepts_new_work(),
+                );
+            }
         }
 
         let chunk_plan = chunks.finish();
@@ -706,14 +722,21 @@ fn collect_postorder_child_chunks(
     let mut chunks = ChunkAccumulator::new(DEFAULT_SPLIT_CHILD_THRESHOLD, DEFAULT_SPILL_CHUNK_SIZE);
     let mut emitted_error = None;
 
+    let mut discovered = Vec::new();
     match context
         .run
         .backend
         .visit_children(&pending.path, &mut |item| match item {
-            Ok(child) => chunks.push(
-                discovered_child_to_pending(child, pending, child_ancestry, root_device),
-                context.sink.control.accepts_new_work(),
-            ),
+            Ok(child) => {
+                if context.run.plan.traversal.sort_children {
+                    discovered.push(child);
+                } else {
+                    chunks.push(
+                        discovered_child_to_pending(child, pending, child_ancestry, root_device),
+                        context.sink.control.accepts_new_work(),
+                    )
+                }
+            }
             Err(error) => {
                 if let Err(emit_error) = report_traversal_error(
                     context.sink,
@@ -740,6 +763,16 @@ fn collect_postorder_child_chunks(
 
     if let Some(error) = emitted_error {
         return Err(error);
+    }
+
+    if context.run.plan.traversal.sort_children {
+        discovered.sort_by_cached_key(|child| crate::platform::path::display_bytes(&child.path));
+        for child in discovered {
+            chunks.push(
+                discovered_child_to_pending(child, pending, child_ancestry, root_device),
+                context.sink.control.accepts_new_work(),
+            );
+        }
     }
 
     Ok(Some(chunks.finish()))

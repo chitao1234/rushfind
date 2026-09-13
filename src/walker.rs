@@ -266,6 +266,13 @@ where
         };
 
         emit_ordered_errors(&mut emit, diagnostics, options)?;
+        let children = if options.sort_children {
+            let mut children = children;
+            children.sort_by_cached_key(|child| crate::platform::path::display_bytes(&child.path));
+            children
+        } else {
+            children
+        };
         push_postorder_completion_frame(&mut stack, options.order, is_directory, entry);
         push_ordered_child_visits(&mut stack, children, &pending, child_ancestry, root_device);
     }
@@ -603,6 +610,7 @@ mod tests {
                 order: TraversalOrder::PreOrder,
                 xargs_safe: false,
                 ignore_readdir_race: false,
+                sort_children: false,
             },
             |entry| {
                 let prune = entry.path.file_name().is_some_and(|name| name == "skip");
@@ -643,6 +651,7 @@ mod tests {
                 order: TraversalOrder::DepthFirstPostOrder,
                 xargs_safe: false,
                 ignore_readdir_race: false,
+                sort_children: false,
             },
             |_entry| {
                 Ok(TraversalControl {
@@ -817,6 +826,7 @@ mod tests {
                 order: TraversalOrder::PreOrder,
                 xargs_safe: false,
                 ignore_readdir_race: false,
+                sort_children: false,
             },
             |_entry| {
                 Ok(TraversalControl {
@@ -878,6 +888,7 @@ mod tests {
                 order: TraversalOrder::PreOrder,
                 xargs_safe: false,
                 ignore_readdir_race,
+                sort_children: false,
             },
             |_entry| {
                 Ok(TraversalControl {
@@ -935,6 +946,7 @@ mod tests {
                 order: TraversalOrder::PreOrder,
                 xargs_safe: false,
                 ignore_readdir_race: true,
+                sort_children: false,
             },
             |_entry| {
                 Ok(TraversalControl {

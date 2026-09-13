@@ -32,6 +32,12 @@ fn exit_plans_force_ordered_execution() {
 }
 
 #[test]
+fn sorted_plans_force_ordered_execution() {
+    let plan = plan_command(parse_command(&argv(&["-s", ".", "-print"])).unwrap(), 4).unwrap();
+    assert_eq!(plan.mode, ExecutionMode::OrderedSingle);
+}
+
+#[test]
 fn delete_plans_use_depth_first_post_order() {
     let plan = plan_command(parse_command(&argv(&[".", "-delete"])).unwrap(), 4).unwrap();
 

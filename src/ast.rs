@@ -32,6 +32,7 @@ pub struct CompatibilityOptions {
     pub depth: bool,
     pub same_file_system: bool,
     pub xargs_safe: bool,
+    pub sort_children: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

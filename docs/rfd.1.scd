@@ -77,7 +77,10 @@ would need standard input.
 
 - (, ), !, -not, -a, -and, -o, -or, ,
 - -true, -false
-- -maxdepth, -mindepth, -depth, -prune, -xdev, -mount
+- -maxdepth, -mindepth, -depth, -prune, -xdev, -mount, BSD -s
+
+BSD -s sorts entries lexicographically within each directory and keeps the
+result in ordered execution mode.
 
 The -xdev and -mount tests are treated as traversal-wide limits in the current
 implementation rather than GNU's positional controls.

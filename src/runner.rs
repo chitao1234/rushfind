@@ -205,6 +205,7 @@ mod tests {
                 order: TraversalOrder::PreOrder,
                 xargs_safe: false,
                 ignore_readdir_race: false,
+                sort_children: false,
             },
             runtime: RuntimeRequirements {
                 mount_snapshot,

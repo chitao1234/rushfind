@@ -43,7 +43,7 @@ normal `cargo build` does not depend on it.
 - Time predicates and `-used` accept GNU-style fractional magnitudes such as `0.5`, `+1.25`,
   and `-0.75`
 - Symlink-content predicates: `-lname`, `-ilname`
-- Traversal controls: `-mindepth`, `-maxdepth`, `-depth`, `-prune`, `-xdev`, `-mount`
+- Traversal controls: `-mindepth`, `-maxdepth`, `-depth`, `-prune`, `-xdev`, `-mount`, BSD `-s`
 - Output and mutation actions: `-print`, `-print0`, `-printf`, `-fprint`, `-fprint0`,
   `-fprintf`, `-ls`, `-fls`, `-exec ... ;`, `-exec ... +`, `-execdir ... ;`,
   `-execdir ... +`, `-ok ... ;`, `-okdir ... ;`, `-delete`, `-quit`

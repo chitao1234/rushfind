@@ -139,14 +139,9 @@ lock contention) rather than precede it.
 
 ### BSD traversal and metadata
 
-- `-s` sorted traversal (FreeBSD/NetBSD/macOS). Needs a per-directory sort and
-  an ordered-only execution policy, since a global sort of the output is not
-  equivalent.
 - `-acl` (FreeBSD). Needs an ACL reader behind a capability gate; planning must
   fail explicitly on platforms without one rather than infer ACL presence from
   mode bits.
-- `-flags` on macOS knows `arch`, `nodump` and `uchg`; the host also defines
-  `hidden`, `opaque` and others that `-flags +hidden` should accept.
 
 ### Literal time parsing
 

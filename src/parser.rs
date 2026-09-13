@@ -140,6 +140,10 @@ fn parse_leading_option(
         compatibility_options.xargs_safe = true;
         return Ok(1);
     }
+    if arg.matches("-s") {
+        compatibility_options.sort_children = true;
+        return Ok(1);
+    }
 
     Ok(0)
 }
