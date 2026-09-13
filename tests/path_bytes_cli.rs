@@ -148,6 +148,41 @@ fn xargs_safety_rejects_unsafe_entries_before_expression_evaluation() {
 }
 
 #[test]
+fn xargs_safety_rejects_unsafe_directory_and_descendants() {
+    let root = tempdir().unwrap();
+    let unsafe_dir = root.path().join("unsafe dir");
+    let child = unsafe_dir.join("child");
+    fs::create_dir(&unsafe_dir).unwrap();
+    fs::write(&child, "child\n").unwrap();
+
+    let output = cargo_bin_output_with_timeout(
+        &["-X".into(), path_arg(root.path()), "-print0".into()],
+        1,
+        Duration::from_secs(5),
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        !output
+            .stdout
+            .windows(b"unsafe dir".len())
+            .any(|window| window == b"unsafe dir")
+    );
+    assert!(
+        !output
+            .stdout
+            .windows(b"child".len())
+            .any(|window| window == b"child")
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .matches("illegal path")
+            .count()
+            >= 2
+    );
+}
+
+#[test]
 fn name_and_path_families_accept_non_utf8_operands() {
     if !supports_non_utf8_temp_paths() {
         return;

@@ -32,9 +32,9 @@ lossy UTF-8 conversion.
 before the expression is evaluated, regardless of whether the expression uses
 `-print`, `-print0`, `-exec`, `-false`, or another action. `-printx` is a
 separate NetBSD escaping primary; it does not change the `-X` rejection rule.
-Directories with unsafe names are still visited as entries and may be
-descended into; only the unsafe entry itself is skipped. This matches macOS
-`find`, which reports `illegal path` for the entry and continues the walk.
+Unsafe directory entries are skipped as entries but are still descended into;
+their descendants are checked independently. This matches macOS `find`, which
+reports `illegal path` for each unsafe entry and continues the walk.
 
 When a rejected path is encountered, `rfd` writes one `illegal path` diagnostic
 to stderr and skips that entry before evaluating the expression. The traversal
