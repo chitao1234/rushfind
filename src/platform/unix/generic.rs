@@ -43,6 +43,10 @@ pub(crate) fn active_flag_specs() -> &'static [FlagSpec] {
     FLAG_SPECS
 }
 
+pub(crate) fn active_flag_mask() -> u64 {
+    0
+}
+
 pub(crate) const fn printf_zero_pads_string_fields() -> bool {
     false
 }

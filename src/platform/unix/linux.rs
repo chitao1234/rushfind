@@ -65,6 +65,10 @@ pub(crate) fn active_flag_specs() -> &'static [FlagSpec] {
     FLAG_SPECS
 }
 
+pub(crate) fn active_flag_mask() -> u64 {
+    FLAG_SPECS.iter().fold(0u64, |mask, spec| mask | spec.bit)
+}
+
 pub(crate) fn filesystem_snapshot() -> Result<FilesystemSnapshot, Diagnostic> {
     let mountinfo = fs::read_to_string("/proc/self/mountinfo")
         .map_err(|error| Diagnostic::new(format!("/proc/self/mountinfo: {error}"), 1))?;

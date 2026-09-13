@@ -11,7 +11,7 @@ use crate::exec::{
     BatchedExecAction, ExecBatchId, ExecSemantics, ImmediateExecAction, compile_batched_exec,
     compile_immediate_exec,
 };
-use crate::file_flags::{FileFlagsMatcher, parse_flags_argument};
+use crate::file_flags::FileFlagsMatcher;
 use crate::file_output::{FileOutputId, FileOutputTerminator, PlannedFileOutput};
 use crate::follow::FollowMode;
 use crate::identity::FileIdentity;
@@ -926,7 +926,11 @@ fn lower_metadata_predicate(
         Predicate::Flags(raw) => {
             require_platform_feature(capabilities, PlatformFeature::FileFlags, state)?;
             Ok(RuntimeExpr::Predicate(RuntimePredicate::Flags(
-                parse_flags_argument(raw.as_os_str(), crate::platform::active_flag_specs())?,
+                crate::file_flags::parse_flags_argument_with_mask(
+                    raw.as_os_str(),
+                    crate::platform::active_flag_specs(),
+                    crate::platform::active_flag_mask(),
+                )?,
             )))
         }
         Predicate::ReparseType(raw) => {

@@ -25,6 +25,16 @@ pub(crate) fn active_flag_specs() -> &'static [crate::file_flags::FlagSpec] {
     unix::active_flag_specs()
 }
 
+#[cfg(unix)]
+pub(crate) fn active_flag_mask() -> u64 {
+    unix::active_flag_mask()
+}
+
+#[cfg(windows)]
+pub(crate) fn active_flag_mask() -> u64 {
+    windows::active_flag_mask()
+}
+
 #[cfg(windows)]
 pub(crate) fn active_flag_specs() -> &'static [crate::file_flags::FlagSpec] {
     windows::active_flag_specs()

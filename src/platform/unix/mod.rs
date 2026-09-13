@@ -68,6 +68,10 @@ pub(crate) fn active_flag_specs() -> &'static [FlagSpec] {
     backend::active_flag_specs()
 }
 
+pub(crate) fn active_flag_mask() -> u64 {
+    backend::active_flag_mask()
+}
+
 pub(crate) fn printf_zero_pads_string_fields() -> bool {
     backend::printf_zero_pads_string_fields()
 }

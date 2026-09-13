@@ -143,6 +143,31 @@ pub(crate) static FLAG_SPECS: &[FlagSpec] = &[
         name: "hidden",
         bit: libc::UF_HIDDEN as u64,
     },
+    #[cfg(target_os = "macos")]
+    FlagSpec {
+        name: "compressed",
+        bit: libc::UF_COMPRESSED as u64,
+    },
+    #[cfg(target_os = "macos")]
+    FlagSpec {
+        name: "datavault",
+        bit: 0x0000_0080,
+    },
+    #[cfg(target_os = "macos")]
+    FlagSpec {
+        name: "restricted",
+        bit: 0x0008_0000,
+    },
+    #[cfg(target_os = "macos")]
+    FlagSpec {
+        name: "sunlnk",
+        bit: 0x0010_0000,
+    },
+    #[cfg(target_os = "macos")]
+    FlagSpec {
+        name: "sunlink",
+        bit: 0x0010_0000,
+    },
     #[cfg(target_os = "freebsd")]
     FlagSpec {
         name: "offline",
@@ -232,6 +257,20 @@ pub(crate) static FLAG_SPECS: &[FlagSpec] = &[
 
 pub(crate) fn active_flag_specs() -> &'static [FlagSpec] {
     FLAG_SPECS
+}
+
+pub(crate) fn active_flag_mask() -> u64 {
+    let mut mask = FLAG_SPECS.iter().fold(0u64, |mask, spec| mask | spec.bit);
+    #[cfg(target_os = "macos")]
+    {
+        mask |= libc::UF_TRACKED as u64;
+        mask |= libc::UF_COMPRESSED as u64;
+        mask |= 0x0000_0080; // UF_DATAVAULT
+        mask |= 0x0008_0000; // SF_RESTRICTED
+        mask |= 0x0080_0000; // SF_FIRMLINK
+        mask |= 0x0010_0000; // SF_NOUNLINK
+    }
+    mask
 }
 
 #[cfg(any(target_os = "dragonfly", doc))]

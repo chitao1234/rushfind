@@ -92,7 +92,16 @@ fn accepts_bsd_flag_aliases_on_bsd_backends() {
         "uchange",
         "uimmutable",
         "dump",
+        "nonodump",
     ] {
+        plan_command(parse_command(&argv(&[".", "-flags", raw])).unwrap(), 1).unwrap();
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn accepts_additional_macos_flag_names() {
+    for raw in ["compressed", "datavault", "restricted", "sunlnk", "sunlink"] {
         plan_command(parse_command(&argv(&[".", "-flags", raw])).unwrap(), 1).unwrap();
     }
 }

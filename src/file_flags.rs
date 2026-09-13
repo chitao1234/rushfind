@@ -94,6 +94,15 @@ pub fn parse_flags_argument(
     raw: &OsStr,
     specs: &'static [FlagSpec],
 ) -> Result<FileFlagsMatcher, Diagnostic> {
+    let comparison_mask = specs.iter().fold(0u64, |mask, spec| mask | spec.bit);
+    parse_flags_argument_with_mask(raw, specs, comparison_mask)
+}
+
+pub fn parse_flags_argument_with_mask(
+    raw: &OsStr,
+    specs: &'static [FlagSpec],
+    comparison_mask: u64,
+) -> Result<FileFlagsMatcher, Diagnostic> {
     let text = raw.to_string_lossy();
     let (mode, body) = match text.chars().next() {
         Some('+') => (FlagMatchMode::Any, &text[1..]),
@@ -108,7 +117,7 @@ pub fn parse_flags_argument(
         ));
     }
 
-    let universe_mask = specs.iter().fold(0u64, |mask, spec| mask | spec.bit);
+    let universe_mask = comparison_mask;
     if body == "none" && mode == FlagMatchMode::Exact {
         return Ok(FileFlagsMatcher::new(mode, universe_mask, Vec::new()));
     }
@@ -128,11 +137,7 @@ pub fn parse_flags_argument(
         let (name, must_be_set) = if token == "dump" {
             ("nodump", false)
         } else if token.starts_with("no") {
-            let name = &token[2..];
-            if name == "dump" || name == "nodump" {
-                return Err(Diagnostic::new(format!("unknown -flags name `{token}`"), 1));
-            }
-            (name, false)
+            (&token[2..], false)
         } else {
             (token, true)
         };
